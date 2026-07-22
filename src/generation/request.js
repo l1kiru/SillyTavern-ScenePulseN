@@ -53,6 +53,14 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
     throwIfAborted();
     signal?.addEventListener?.('abort',stop,{once:true});
     try{
+        if(typeof stContext.generateQuietPrompt==='function'){
+            const value=await stContext.generateQuietPrompt({
+                quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
+                skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
+            });
+            throwIfAborted();
+            return{value,strategy:'quiet'};
+        }
         if(typeof stContext.generateRawData==='function'){
             const value=await stContext.generateRawData({
                 prompt:routed.prompt,systemPrompt:routed.systemPrompt,responseLength,
@@ -68,14 +76,6 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
             });
             throwIfAborted();
             return{value,strategy:'raw'};
-        }
-        if(typeof stContext.generateQuietPrompt==='function'){
-            const value=await stContext.generateQuietPrompt({
-                quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
-                skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
-            });
-            throwIfAborted();
-            return{value,strategy:'quiet-legacy'};
         }
         throw new Error('SillyTavern exposes no supported generation API');
     }finally{
