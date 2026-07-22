@@ -15,7 +15,7 @@
 const MAX_PAIRS = 10;
 const MAX_FIELD_CHARS = 200_000; // ~50K tokens — generous but bounded
 
-/** @typedef {{ ts: string, mesIdx: number|null, prompt: string, response: string, source: string, parseFailed: boolean, parseError: string|null }} RawPair */
+/** @typedef {{ ts: string, mesIdx: number|null, chatKey: string, prompt: string, response: string, source: string, parseFailed: boolean, parseError: string|null }} RawPair */
 
 /** @type {RawPair[]} */
 let _pairs = [];
@@ -42,6 +42,7 @@ export function pushPair(opts) {
         id: 'pair-' + Math.random().toString(36).slice(2, 10),
         ts: new Date().toISOString(),
         mesIdx: typeof opts.mesIdx === 'number' ? opts.mesIdx : null,
+        chatKey: typeof opts.chatKey === 'string' ? opts.chatKey : '',
         prompt: _truncate(opts.prompt, MAX_FIELD_CHARS),
         response: _truncate(opts.response, MAX_FIELD_CHARS),
         source: opts.source || 'unknown',
@@ -71,12 +72,6 @@ export function getPairs() { return _pairs.slice(); }
 
 /** Returns the most recent pair, or null. */
 export function lastPair() { return _pairs[_pairs.length - 1] || null; }
-
-/** Returns count of pairs currently in the buffer. */
-export function pairCount() { return _pairs.length; }
-
-/** Clear the buffer. */
-export function clearPairs() { _pairs = []; }
 
 /** Test reset hook. */
 export function _resetForTests() { _pairs = []; }

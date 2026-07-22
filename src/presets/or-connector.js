@@ -79,15 +79,6 @@ function _writeCacheToLs(cache) {
 }
 
 /**
- * Returns the cached runtime pricing/context map keyed by OR canonical_slug,
- * or null if no cache exists. Does NOT check expiry — callers that need
- * "fresh only" should use getRuntimeOverlay instead.
- */
-export function getRawCache() {
-    return _loadCacheFromLs();
-}
-
-/**
  * Returns the cached pricing/context overlay if it's still fresh (within
  * TTL), or null if no cache exists or it's expired. The registry merges
  * this onto the static stats when present so live pricing changes flow

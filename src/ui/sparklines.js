@@ -8,7 +8,7 @@ import { esc } from '../utils.js';
 /**
  * Highlight a message element with glow, pulse, and graceful fade — driven by JS to bypass CSS overrides.
  */
-function _highlightMessage(el) {
+export function _highlightMessage(el) {
     el.classList.add('sp-highlight-msg');
     const start = performance.now();
     const PULSE_DURATION = 2000;  // 2 pulses over 2s

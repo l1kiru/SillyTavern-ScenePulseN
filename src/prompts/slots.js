@@ -110,9 +110,9 @@ export const SLOT_META = {
 const _ROLE = `You are a precise scene analysis engine. Read the story context and output a single JSON object conforming exactly to the provided schema. Output raw JSON only — no prose, no markdown fences, no commentary.`;
 
 const _CRITICAL_RULES = `## CRITICAL RULES
-1. EVERY field in the schema MUST contain meaningful data. NEVER return empty string "", empty array [], or null for ANY field, EXCEPT for charactersPresent, which MUST be an empty array [] during genuinely solo scenes ({{user}} alone, internal monologue, solitary travel, sleeping, hiding). If not explicitly stated in the story, INFER from context, character descriptions, genre conventions, or the previous state. A best-guess answer is ALWAYS better than an empty field.
+1. Populate scalar and object fields with concise, evidence-based values. Use [] for genuinely empty array fields; never invent filler entries just to make an array non-empty.
 2. Output must be valid parseable JSON. No trailing commas, no comments.
-3. If the previous state provided a value and you have no new information, carry that value forward UNCHANGED. Emptying a previously-populated field is a critical error.`;
+3. Carry durable facts forward when unchanged. NEVER carry charactersPresent, witnesses, innerThought, or immediateNeed forward by default: recompute them from THIS turn. If nobody qualifies for a volatile array, output [].`;
 
 // Template var: ${language}
 const _LANGUAGE = `## LANGUAGE
@@ -186,12 +186,13 @@ const _QUEST_VALIDATION = `1. PLAYER ACTION TEST: Can {{user}} take a concrete a
 const _DELTA_MODE = `You are in DELTA mode. The previous state is provided for reference.
 1. ONLY return fields whose values CHANGED since the previous state.
 2. OMIT any field whose value is identical to the previous state.
-3. ALWAYS include: time, date, elapsed (these change every turn).
-4. For characters/relationships: include ONLY entities with changes. Include the FULL entity object (all fields) if ANY field changed.
-5. For quests: include the FULL array if ANY quest was added/removed/modified. Omit entirely if unchanged.
-6. plotBranches: ALWAYS include (fresh suggestions every time).
-7. charactersPresent: ALWAYS include, re-verified from THIS turn's narration. Use an empty array [] when {{user}} is alone. Omitting this field is a BUG — the client interprets it as an implicit empty array and will mark everyone as absent. This field overrides rule 1 above: it must be present every turn regardless of whether it changed.
-8. Do NOT echo unchanged data. Omitting a field means "unchanged" (except for the ALWAYS-include fields above).`;
+3. ALWAYS include: time, date, elapsed, charactersPresent, witnesses (these describe this turn).
+4. characters: ALWAYS include a FULL entity for EVERY NPC in charactersPresent. Recompute innerThought and immediateNeed from THIS turn; never copy them from the previous state. Include an off-scene character only if another durable field changed.
+5. relationships: include ONLY entities with changes. Include the FULL entity object if ANY field changed.
+6. For quests: include the FULL array if ANY quest was added/removed/modified. Omit entirely if unchanged.
+7. plotBranches: ALWAYS include (fresh suggestions every time).
+8. Re-verify charactersPresent and witnesses from THIS turn. Use [] when nobody qualifies; never carry either array forward out of habit.
+9. Do NOT echo unchanged data. Omitting a field means "unchanged" (except for the ALWAYS-include fields above).`;
 
 /**
  * Default text per slot. The `fields` slot is omitted because it is

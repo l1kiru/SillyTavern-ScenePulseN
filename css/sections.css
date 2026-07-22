@@ -46,8 +46,8 @@
 .sp-section.sp-open .sp-section-chevron { transform: rotate(90deg); }
 .sp-section-icon { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; color: var(--sp-text-dim); }
 .sp-section-icon svg { display: block; }
-.sp-section-title { font-size: var(--sp-fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--sp-text-dim); }
-.sp-section-badge { font-size: var(--sp-fs-xs); font-weight: 600; padding: 1px 6px; border-radius: 8px; background: var(--sp-accent-dim); color: var(--sp-accent); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.sp-section-title { min-width: 0; font-size: var(--sp-fs-xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--sp-text-dim); }
+.sp-section-badge { min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; font-size: var(--sp-fs-xs); font-weight: 600; padding: 1px 6px; border-radius: 8px; background: var(--sp-accent-dim); color: var(--sp-accent); display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
 .sp-section-body {
     display: none;
     background: var(--sp-bg-solid);
@@ -73,6 +73,11 @@
 .sp-empty-icon { font-size: 32px; margin-bottom: 12px; opacity: 0.4; }
 .sp-empty-title { font-size: var(--sp-fs-md); font-weight: 600; color: var(--sp-text); margin-bottom: 6px; }
 .sp-empty-sub { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); line-height: 1.5; }
+.sp-empty-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; width: min(100%, 280px); margin-top: 18px; }
+.sp-empty-action { min-width: 0; min-height: 36px; padding: 7px 9px; border: 1px solid var(--sp-border-strong); border-radius: var(--sp-radius); background: var(--sp-surface); color: var(--sp-text); font: inherit; font-size: var(--sp-fs-xs); cursor: pointer; }
+.sp-empty-action:hover { border-color: var(--sp-accent); background: var(--sp-surface-hover); color: var(--sp-text-bright); }
+.sp-empty-action:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+.sp-empty-action-primary { grid-column: 1 / -1; color: var(--sp-accent); border-color: color-mix(in srgb, var(--sp-accent) 55%, var(--sp-border-strong)); background: var(--sp-accent-dim); font-weight: 600; }
 
 /* ═══ DATA ROWS ═══ */
 .sp-row { display: flex; gap: 8px; padding: 3px 0; align-items: baseline; }
@@ -120,11 +125,6 @@
     opacity: 0.6; border-style: dashed;
 }
 
-/* Solo scene indicator */
-.sp-scene-solo {
-    font-size: var(--sp-fs-xs); font-style: italic; color: var(--sp-text-dim);
-    opacity: 0.6;
-}
 
 /* Collapsed badge: tension dot */
 /* Tension-colored dot inline with badge text — small filled circle */

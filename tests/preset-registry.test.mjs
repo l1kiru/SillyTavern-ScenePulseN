@@ -18,7 +18,7 @@
 // Stub SillyTavern context BEFORE importing registry, so getActiveModelId
 // (which closes over a global SillyTavern reference) can be exercised.
 globalThis.SillyTavern = {
-    getContext: () => ({ chatCompletionSettings: {}, textGenerationSettings: {} }),
+    getContext: () => ({ chatCompletionSettings: {}, textCompletionSettings: {} }),
 };
 if (typeof document === 'undefined') {
     globalThis.document = {
@@ -143,7 +143,7 @@ console.log('\n── getActiveModelId source-aware probing ──');
     function _setCtx(cc, tg) {
         globalThis.SillyTavern.getContext = () => ({
             chatCompletionSettings: cc || {},
-            textGenerationSettings: tg || {},
+            textCompletionSettings: tg || {},
         });
     }
     // 1. NanoGPT (the user's case): chat_completion_source=nanogpt + nanogpt_model
@@ -171,7 +171,12 @@ console.log('\n── getActiveModelId source-aware probing ──');
     assertEq('Scan fallback finds *_model when source missing',
         getActiveModelId(), 'gpt-5.4');
 
-    // 6. Empty everything → '' (must not throw)
+    // 6. Text Completion uses the public context property exposed by ST.
+    _setCtx({}, { model: 'koboldcpp/model.gguf' });
+    assertEq('Text Completion reads textCompletionSettings.model',
+        getActiveModelId(), 'koboldcpp/model.gguf');
+
+    // 7. Empty everything → '' (must not throw)
     _setCtx({}, {});
     assertEq('Empty context → empty string', getActiveModelId(), '');
 }

@@ -94,7 +94,6 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 - Smart name resolution when models omit the `name` field
 <img width="860" height="326" alt="image" src="https://github.com/user-attachments/assets/cb314a4e-a6d4-449d-96ad-929556564d40" />
 
-
 ### Character Wiki
 - **Full-screen browser** for every character ever encountered, not just those currently in scene
 - Walks all snapshots once on open to aggregate **first seen, last seen, appearance count, last known location**
@@ -238,19 +237,15 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 - **Anti-cascade guard** — refuses to anchor on a previously-rewritten snapshot, so one bad turn can't poison every subsequent classification
 - Skips group chats cleanly (per-character clocks deferred to a future release)
 
-### Function Tool Calling *(Experimental, Separate Mode Only)*
-- Register `update_scene_tracker` as an LLM function tool via SillyTavern's ToolManager
-- When supported (OpenAI, Claude, Gemini), the tracker API call uses structured tool calling instead of text prompt
-- More reliable JSON output, no parsing needed
-- Status badge in footer: Tool OK (green), Tool Miss (red), Tool Standby (purple)
-- Has no effect in Together mode
-
 ### Localization (29 Languages)
-- Full UI translation — every section header, badge, tooltip, button, dialog, and setting
-- LLM output localization — narrative string values generated in the selected language
-- Enum values translated at display time (tension, dress state, fertility, meter labels)
+- 29 selectable locale dictionaries synchronized to the complete active UI key catalog
+- Explicit English fallback for untranslated values, with per-language coverage tracked in `locales/_coverage.json`
+- Complete Russian UI dictionary; the other dictionaries are community-maintained and currently partial
+- LLM output localization — narrative string values are requested in the selected language
+- Enum values translated at display time where translations are available
 - Auto-detect from SillyTavern's locale or manual override
 - Live language switch — changes take effect immediately, no reload required
+- Scoped right-to-left layout support for Arabic and Hebrew
 - **Languages:** Chinese (Simplified/Traditional), Spanish, Hindi, Arabic, Portuguese, Russian, Japanese, French, German, Korean, Turkish, Vietnamese, Italian, Thai, Polish, Ukrainian, Indonesian, Dutch, Romanian, Czech, Greek, Hungarian, Swedish, Malay, Finnish, Danish, Norwegian, Hebrew
 
 ### Accessibility
@@ -342,7 +337,7 @@ ScenePulse operates in **Together mode** by default:
 If the AI omits the tracker, ScenePulse can **automatically fall back** to a separate API call using a dedicated connection profile.
 
 ### Separate Mode
-Alternatively, ScenePulse can run a completely separate API call after each message — useful for models that struggle with inline instructions. Supports optional **function tool calling** for structured JSON output.
+Alternatively, ScenePulse can run a completely separate quiet API call after each message — useful for models that struggle with inline instructions.
 
 ### Delta Mode
 When enabled, the LLM returns only fields that changed since the last snapshot. The client merges the delta with the previous snapshot, reducing output tokens by ~70–90%. Entity arrays (characters, relationships, quests) are merged by name at the field level.
@@ -380,7 +375,6 @@ src/
     delta-merge.js          ← Delta response merging
     interceptor.js          ← SillyTavern generate interceptor
     pipeline.js              ← Shared extraction→normalize→save→update pipeline
-    function-tool.js         ← Function tool calling (Separate mode)
     validation.js            ← Post-extraction schema validation
   ui/
     mobile.js               ← Device detection, FAB, responsive layout
@@ -407,16 +401,18 @@ src/
     setup-guide.js          ← First-run wizard
     guided-tour.js          ← Interactive feature tour
   vendor/
-    jsonrepair.mjs          ← Vendored jsonrepair v3.12.0 (ISC) — tokenizer-based JSON repair
+    jsonrepair.mjs          ← ScenePulse wrapper for vendored jsonrepair
+    jsonrepair.bundle.mjs   ← Vendored jsonrepair v3.15.0 (ISC)
     jsonrepair.LICENSE      ← Full ISC license text
     README.md               ← Provenance, upgrade procedure, validation pointer
 css/
   29 modular stylesheets    ← Split by component, loaded via @import
 tests/
-  vendor/                   ← Manual dev scripts for the vendored library
+  run-all.mjs               ← Recursive runner for all test files
+  vendor/                   ← Validation scripts for the vendored library
     jsonrepair.test.mjs     ← 106-case smoke suite
     compare.test.mjs        ← Old regex repair vs jsonrepair head-to-head
-  *.test.mjs                ← 1,411-case regression suite (delta, profiles, slash,
+  *.test.mjs                ← Regression suite (delta, profiles, slash,
                               macros, normalize, group chat, character aliases,
                               wiki persistence, crash log, temporal validation, etc.)
 ```
@@ -425,7 +421,7 @@ No bundler required — SillyTavern loads extensions as `<script type="module">`
 
 ## Compatibility
 
-- **SillyTavern** 1.12.0+ (tested up to 1.17.x)
+- **SillyTavern** 1.12.0+ (tested up to 1.18.x)
 - **Tested models**: GLM-4/5/5.1, Claude, GPT-4o, Gemini, Llama 3, Mistral, Qwen
 - **API providers**: OpenAI-compatible, Anthropic, Google AI, any provider SillyTavern supports
 - **Browsers**: Chrome, Firefox, Safari (mobile & desktop)
@@ -442,7 +438,6 @@ Access settings via **Extensions** → **ScenePulse** in SillyTavern's settings 
 |---------|-------------|
 | **Enable ScenePulse** | Master toggle |
 | **Delta mode** | Enabled by default — LLM returns only changed fields, saving 66-77% output tokens. Auto-refreshes every 15 turns. Use `/sp-refresh` if data seems stale |
-| **Function tool calling** | Use structured tool calling in Separate mode (experimental) |
 | **Auto-generate** | Update tracker on every AI message |
 | **Reduce visual effects** | Disables the animated dashboard canvas, particles, and decorative blend modes. Recommended on laptops or integrated GPUs |
 | **Language** | UI + LLM output language (29 options, auto-detect) |
@@ -456,7 +451,6 @@ Access settings via **Extensions** → **ScenePulse** in SillyTavern's settings 
 | **Context messages** | How many recent messages to include (Separate mode) |
 | **Fallback profile** | Connection profile for auto-recovery |
 | **Model discovery (OpenRouter)** | Optional, off by default. When enabled, the preset browser pulls live OpenRouter pricing, context windows, and roleplay popularity for each model so you can compare alternatives at a glance. Read-only — never touches your prompts, samplers, or generations. One fetch per session, cached 24 h, ~30 KB |
-| **Lorebook filter** | How lorebooks are included in generation context |
 
 ### Prompts Tab
 | Setting | Description |
@@ -493,16 +487,15 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 - **Model compliance** — Some models intermittently skip the tracker block or output mangled markers; the fallback system handles this with a separate API call, and extraction supports multiple marker variants
 - **Delta mode** — Enabled by default since v6.9.0. If you see incomplete or stale data after many turns, use `/sp-refresh` to force a full-state regeneration. The system auto-refreshes every 15 delta turns
 - **Payload visibility** — The regex filter and streaming hider work together to hide tracker JSON during streaming. In rare cases with very fast token rates, a brief flash may occur before the hider locks
-- **Function tool calling** — Experimental, Separate mode only. GLM-5.1 tool calling is inconsistent; some generations may miss the tool call and fall back to text prompt
 - **Mobile** — Weather effects, time-of-day tint, inner thoughts panel, and condense view are disabled on mobile to optimize performance
 - **GPU on integrated graphics** — If the panel feels heavy on a laptop or low-power GPU, toggle **Reduce visual effects** in Settings → General. The animated dashboard canvas alone can be expensive on weaker hardware
-- **Translations** — While all 29 languages have full translation coverage, some translations may be imperfect. Community corrections welcome — edit the JSON files in [`locales/`](https://github.com/xenofei/SillyTavern-ScenePulse/tree/main/locales)
+- **Translations** — Russian currently has complete UI-dictionary coverage. Other languages use explicit English fallback for untranslated entries; exact counts are published in [`locales/_coverage.json`](locales/_coverage.json). Community corrections are welcome in [`locales/`](locales/).
 
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v6.27.6** — Preset browser polish + OpenRouter model-discovery overlay. Three new sort modes (Token usage / Cost / OR ranking) grouped in the dropdown alongside the existing Match-first / Name / Family / Context. Soft-green ✓ stock-prompts badge identifies templates that don't override the default prompts, paired with an amber footnote explaining the apply is informational pending community overrides. The OpenRouter connector (opt-in, off by default) fetches live pricing, context windows, and roleplay popularity once per session for the preset browser — read-only, never touches generation. Two new branded dialog modules (`or-connector-prompt.js`, `preset-suggestion-prompt.js`) replace the plain confirm boxes for the model-match and connector opt-in moments. Advanced tab Development section (collapsed + locked by default) lets you re-trigger every one-time popup for QA. Earlier in 6.27.x: temporal validator (6.24.0) auto-corrects backward time jumps from the LLM while respecting intentional flashbacks. 1,485 tests passing.
+**Latest: v7.0.0** — Major fork release combining the custom-panel security hardening, settings lifecycle fixes, complete locale-key synchronization, translation coverage reporting, and scoped RTL support.
 
 ## Contributing
 
@@ -510,7 +503,7 @@ Found a bug? Have a feature idea? Contributions welcome!
 
 1. [Open an issue](https://github.com/xenofei/SillyTavern-ScenePulse/issues) to report bugs or suggest features
 2. Fork the repo, create a branch, and submit a PR
-3. **Translations** — Add or improve translations in [`src/i18n.js`](src/i18n.js). Each language is a simple key-value object.
+3. **Translations** — Edit the relevant JSON file in [`locales/`](locales/), run `npm run sync-locales`, then run `npm test`. Do not edit generated `locales/_source.json` or `locales/_coverage.json` directly.
 4. Join the discussion in the issues tab
 
 ## Inspiration

@@ -939,7 +939,10 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     flex: 1; font-weight: 700; font-size: var(--sp-fs-md);
     color: var(--sp-accent); letter-spacing: 0.04em; text-transform: uppercase;
 }
-.sp-cl-count { color: var(--sp-text-dim); font-weight: 500; margin-left: 6px; font-size: var(--sp-fs-xs); }
+.sp-di-header-version {
+    margin-left: 6px; color: var(--sp-text-dim); font-size: 10px;
+    font-weight: 500; letter-spacing: 0; text-transform: none;
+}
 .sp-cl-export-btn {
     background: var(--sp-surface); color: var(--sp-text-dim);
     border: 1px solid var(--sp-border); border-radius: 4px;
@@ -1130,6 +1133,22 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     font-size: 9px; font-weight: 700;
     background: rgba(77,184,164,0.12); padding: 1px 5px; border-radius: 3px;
 }
+.sp-cl-address,
+.sp-cl-address-status {
+    flex-shrink: 0;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-family: var(--sp-font-mono);
+    border: 1px solid var(--sp-border);
+}
+.sp-cl-address { color: var(--sp-text); background: rgba(255,255,255,0.04); }
+.sp-cl-address-status { font-family: inherit; color: var(--sp-text-dim); }
+.sp-cl-address-status-current { color: #86efac; border-color: rgba(74,222,128,0.35); background: rgba(74,222,128,0.09); }
+.sp-cl-address-status-other-chat,
+.sp-cl-address-status-other-swipe { color: #fcd34d; border-color: rgba(245,158,11,0.3); background: rgba(245,158,11,0.08); }
+.sp-cl-address-status-deleted,
+.sp-cl-address-status-changed { color: #fca5a5; border-color: rgba(239,68,68,0.3); background: rgba(239,68,68,0.08); }
 /* v6.15.4: Group pill — appears on parent rows that bundle related parse
    retries. Distinct from the "×N" repeat pill (which is for *identical*
    repeated entries). Amber to suggest "these are connected events". */
@@ -1140,6 +1159,12 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     background: rgba(245,158,11,0.12);
     border: 1px solid rgba(245,158,11,0.25);
     padding: 1px 6px; border-radius: 3px;
+}
+.sp-cl-version-old {
+    flex-shrink: 0; padding: 1px 6px; border-radius: 3px;
+    color: var(--sp-text-dim); background: rgba(255,255,255,0.05);
+    border: 1px solid var(--sp-border); font-size: 9px;
+    font-family: var(--sp-font-mono); text-decoration: line-through;
 }
 /* v6.15.4: Group children list inside the expanded body. Indented, dimmer,
    chronologically ordered (oldest first — opposite of the main list, since
@@ -1222,6 +1247,26 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     font-weight: 600;
     margin-right: 3px;
 }
+.sp-cl-address-card {
+    border: 1px solid var(--sp-border);
+    border-radius: 3px;
+    background: rgba(0,0,0,0.16);
+    overflow: hidden;
+}
+.sp-cl-address-card .sp-cl-whenwhere { background: transparent; }
+.sp-cl-message-preview {
+    padding: 7px 9px;
+    border-top: 1px solid var(--sp-border);
+    color: var(--sp-text);
+    font-size: 11px;
+    line-height: 1.45;
+}
+.sp-cl-address-note {
+    padding: 6px 9px;
+    border-top: 1px solid var(--sp-border);
+    color: var(--sp-text-dim);
+    font-size: 10px;
+}
 .sp-cl-meta {
     display: flex; gap: 10px; margin-top: 6px;
     color: var(--sp-text-dim); font-size: 9px;
@@ -1272,6 +1317,7 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     .sp-cl-row-header { flex-wrap: wrap; }
     .sp-cl-msg { flex-basis: 100%; white-space: normal; }
     .sp-cl-ts { flex-basis: 100%; text-align: right; }
+    .sp-cl-address-status { margin-left: auto; }
 }
 
 /* ── Debug Inspector — tabbed shell on the same overlay (v6.12.8) ── */
@@ -1283,7 +1329,9 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     border-bottom: 1px solid var(--sp-border);
     background: linear-gradient(180deg, rgba(255,255,255,0.015), transparent);
     flex-shrink: 0;
+    overflow-x: auto; scrollbar-width: thin;
 }
+.sp-di-tabs::-webkit-scrollbar { height: 4px; }
 .sp-di-tab {
     background: none; border: 1px solid var(--sp-border); border-bottom: none;
     color: var(--sp-text-dim); cursor: pointer;
@@ -1332,6 +1380,66 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     border-top: none;
 }
 
+/* Overview: current state first; historic/raw detail remains one click away. */
+.sp-di-overview-scroll {
+    flex: 1; min-height: 0; overflow-y: auto;
+    padding: 14px;
+}
+.sp-di-health {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; margin-bottom: 12px;
+    border: 1px solid var(--sp-border); border-left-width: 4px;
+    border-radius: 5px; background: rgba(255,255,255,0.018);
+}
+.sp-di-health > div:nth-child(2) { flex: 1; min-width: 0; }
+.sp-di-health-dot { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; background: var(--sp-text-dim); }
+.sp-di-health-ok { border-left-color: #4ade80; }
+.sp-di-health-ok .sp-di-health-dot { background: #4ade80; }
+.sp-di-health-active { border-left-color: var(--sp-accent); }
+.sp-di-health-active .sp-di-health-dot { background: var(--sp-accent); box-shadow: 0 0 0 4px rgba(77,184,164,0.12); }
+.sp-di-health-error { border-left-color: #ef4444; }
+.sp-di-health-error .sp-di-health-dot { background: #ef4444; }
+.sp-di-health-idle { border-left-color: var(--sp-border-strong); }
+.sp-di-health-title { color: var(--sp-text); font-size: var(--sp-fs-md); font-weight: 700; }
+.sp-di-health-detail { color: var(--sp-text-dim); font-size: var(--sp-fs-xs); line-height: 1.45; margin-top: 2px; word-break: break-word; }
+.sp-di-overview-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.sp-di-overview-card {
+    min-width: 0; padding: 11px 12px;
+    border: 1px solid var(--sp-border); border-radius: 5px;
+    background: rgba(255,255,255,0.015);
+}
+.sp-di-overview-card-wide { grid-column: 1 / -1; }
+.sp-di-overview-card-title {
+    margin-bottom: 8px; color: var(--sp-text);
+    font-size: var(--sp-fs-xs); font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.06em;
+}
+.sp-di-overview-card dl { margin: 0 0 8px; }
+.sp-di-overview-card dl > div {
+    display: flex; align-items: baseline; justify-content: space-between; gap: 12px;
+    padding: 4px 0; border-bottom: 1px solid rgba(255,255,255,0.035);
+}
+.sp-di-overview-card dl > div:last-child { border-bottom: none; }
+.sp-di-overview-card dt { color: var(--sp-text-dim); font-size: 10px; }
+.sp-di-overview-card dd {
+    margin: 0; color: var(--sp-text); font-size: var(--sp-fs-xs);
+    text-align: right; overflow-wrap: anywhere;
+}
+.sp-di-value-error { color: #fca5a5 !important; }
+.sp-di-overview-metrics { display: flex; gap: 10px; }
+.sp-di-overview-metrics span {
+    flex: 1; display: flex; flex-direction: column; gap: 2px;
+    padding: 8px 10px; border-radius: 4px; background: rgba(0,0,0,0.2);
+    color: var(--sp-text-dim); font-size: 10px;
+}
+.sp-di-overview-metrics strong { color: var(--sp-text); font-size: 18px; font-family: var(--sp-font-mono); }
+.sp-di-overview-failure {
+    display: flex; gap: 8px; margin-top: 10px; padding: 8px 10px;
+    border-left: 3px solid #ef4444; background: rgba(239,68,68,0.07);
+    color: var(--sp-text); font-size: var(--sp-fs-xs);
+}
+.sp-di-overview-failure strong { color: #fca5a5; flex-shrink: 0; }
+
 /* Activity log specifics */
 .sp-di-stats {
     padding: 4px 14px;
@@ -1354,6 +1462,7 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
 .sp-di-live input { margin: 0; cursor: pointer; accent-color: var(--sp-accent); }
 
 /* Last Response specifics */
+.sp-di-provenance { padding: 6px 12px; border-bottom: 1px solid var(--sp-border); color: var(--sp-text-dim); font-size: var(--sp-fs-xs); }
 .sp-di-meta { flex: 1; }
 .sp-di-response {
     flex: 1; min-height: 0;
@@ -1450,6 +1559,11 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     }
     /* Copy / Clear buttons in tab toolbars get tighter padding. */
     .sp-di-tabpanel .sp-cl-toolbar { padding: 6px 10px; gap: 4px; }
+    .sp-di-overview-scroll { padding: 10px; }
+    .sp-di-overview-grid { grid-template-columns: 1fr; }
+    .sp-di-overview-card-wide { grid-column: auto; }
+    .sp-di-health { align-items: flex-start; flex-wrap: wrap; }
+    .sp-di-health .sp-di-overview-copy { margin-left: 22px; }
 }
 @media (max-width: 420px) {
     /* Smallest supported viewport — phone portrait. Trim padding everywhere

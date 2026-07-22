@@ -1,98 +1,80 @@
-// src/generation/validation.js — Post-extraction schema validation
-// Validates parsed tracker JSON against the active schema and logs warnings
+// Validate untrusted LLM output before normalization or persistence.
 
-import { log, warn } from '../logger.js';
+import { log } from '../logger.js';
 import { getActiveSchema } from '../settings.js';
 
-/**
- * Validate extracted data against the active schema.
- * Returns an array of validation warnings (not errors — we never reject data).
- * @param {object} data - Parsed tracker data
- * @returns {string[]} - Array of warning messages
- */
-export function validateExtraction(data) {
-    const warnings = [];
-    if (!data || typeof data !== 'object') {
-        warnings.push('Extracted data is not an object');
-        return warnings;
+function typeName(value){
+    if(Array.isArray(value))return'array';
+    if(value===null)return'null';
+    return typeof value;
+}
+
+function matchesType(value,type){
+    if(Array.isArray(type))return type.some(item=>matchesType(value,item));
+    if(type==='integer')return typeof value==='number'&&Number.isInteger(value);
+    if(type==='number')return typeof value==='number'&&Number.isFinite(value);
+    return typeName(value)===type;
+}
+
+function check(value,spec,path,errors,warnings){
+    if(!spec||typeof spec!=='object')return;
+    const actual=typeName(value);
+    if(spec.type&&!matchesType(value,spec.type)){
+        errors.push(`${path}: expected ${spec.type}, got ${actual}`);return;
     }
-
-    let schema;
-    try {
-        schema = getActiveSchema()?.value;
-    } catch {
-        return warnings; // Can't validate without schema
+    if(spec.enum&&!spec.enum.includes(value))errors.push(`${path}: value is not in the allowed enum`);
+    if(typeof value==='number'){
+        if(Number.isFinite(spec.minimum)&&value<spec.minimum)errors.push(`${path}: below minimum ${spec.minimum}`);
+        if(Number.isFinite(spec.maximum)&&value>spec.maximum)errors.push(`${path}: above maximum ${spec.maximum}`);
     }
-    if (!schema?.properties) return warnings;
-
-    const props = schema.properties;
-    const required = schema.required || [];
-
-    // Check required fields
-    for (const key of required) {
-        if (!(key in data)) {
-            warnings.push(`Missing required field: ${key}`);
-        } else if (data[key] === '' || data[key] === null || data[key] === undefined) {
-            warnings.push(`Empty required field: ${key}`);
-        }
+    if(typeof value==='string'&&value.trim()==='')warnings.push(`${path}: empty string`);
+    if(Array.isArray(value)){
+        if(Number.isFinite(spec.minItems)&&value.length<spec.minItems)errors.push(`${path}: needs at least ${spec.minItems} items`);
+        if(Number.isFinite(spec.maxItems)&&value.length>spec.maxItems)errors.push(`${path}: allows at most ${spec.maxItems} items`);
+        if(spec.items)for(let i=0;i<value.length;i++)check(value[i],spec.items,`${path}[${i}]`,errors,warnings);
     }
-
-    // Check field types
-    for (const [key, spec] of Object.entries(props)) {
-        if (!(key in data)) continue;
-        const val = data[key];
-
-        if (spec.type === 'string' && typeof val !== 'string' && val !== null) {
-            warnings.push(`${key}: expected string, got ${typeof val}`);
+    if(actual==='object'){
+        const props=spec.properties||{};
+        for(const key of spec.required||[]){
+            if(!Object.hasOwn(value,key)||value[key]===null||value[key]===undefined)errors.push(`${path}.${key}: missing required field`);
         }
-        if (spec.type === 'integer' && typeof val !== 'number') {
-            warnings.push(`${key}: expected integer, got ${typeof val}`);
-        }
-        if (spec.type === 'array' && !Array.isArray(val)) {
-            warnings.push(`${key}: expected array, got ${typeof val}`);
-        }
-
-        // Enum validation
-        if (spec.enum && typeof val === 'string' && !spec.enum.includes(val)) {
-            warnings.push(`${key}: "${val}" not in enum [${spec.enum.join(',')}]`);
-        }
-
-        // Integer range validation for meters (0-100)
-        if (spec.type === 'integer' && typeof val === 'number') {
-            if (val < 0 || val > 100) {
-                warnings.push(`${key}: value ${val} outside 0-100 range`);
-            }
-        }
-
-        // Array item validation
-        if (spec.type === 'array' && Array.isArray(val) && spec.items?.properties) {
-            const itemRequired = spec.items.required || [];
-            for (let i = 0; i < val.length; i++) {
-                const item = val[i];
-                if (!item || typeof item !== 'object') {
-                    warnings.push(`${key}[${i}]: expected object, got ${typeof item}`);
-                    continue;
-                }
-                for (const rk of itemRequired) {
-                    if (!(rk in item) || item[rk] === '' || item[rk] === null) {
-                        warnings.push(`${key}[${i}].${rk}: missing or empty required field`);
-                    }
-                }
-                // Validate nested enums
-                for (const [ik, ispec] of Object.entries(spec.items.properties)) {
-                    if (ispec.enum && ik in item && typeof item[ik] === 'string' && !ispec.enum.includes(item[ik])) {
-                        warnings.push(`${key}[${i}].${ik}: "${item[ik]}" not in enum`);
-                    }
-                }
-            }
+        for(const[key,nested]of Object.entries(props))if(Object.hasOwn(value,key))check(value[key],nested,`${path}.${key}`,errors,warnings);
+        if(spec.additionalProperties===false){
+            for(const key of Object.keys(value))if(!Object.hasOwn(props,key))warnings.push(`${path}.${key}: field is outside the request schema`);
         }
     }
+}
 
-    // Log warnings
-    if (warnings.length) {
-        log('Schema validation:', warnings.length, 'warnings');
-        for (const w of warnings) log('  ⚠', w);
+function normalizeOptionalTemporalIntent(data,schema,warnings){
+    if(!data||typeof data!=='object'||Array.isArray(data)||!Object.hasOwn(data,'temporalIntent'))return;
+    const spec=schema?.properties?.temporalIntent;
+    if(!Array.isArray(spec?.enum)||(schema.required||[]).includes('temporalIntent'))return;
+    const raw=data.temporalIntent;
+    if(typeof raw!=='string')return;
+    const compact=value=>String(value).trim().toLowerCase().replace(/[\s_-]+/g,'');
+    const normalized=spec.enum.find(value=>compact(value)===compact(raw));
+    if(normalized!==undefined){
+        if(raw!==normalized){data.temporalIntent=normalized;warnings.push('root.temporalIntent: normalized optional value')}
+        return;
     }
+    delete data.temporalIntent;
+    warnings.push('root.temporalIntent: ignored unsupported optional value');
+}
 
-    return warnings;
+/** @returns {{valid:boolean,errors:string[],warnings:string[]}} */
+export function validateExtraction(data,{schema}={}){
+    const errors=[];const warnings=[];
+    let active=schema;
+    if(!active){try{active=getActiveSchema()?.value}catch{}}
+    if(active?.value)active=active.value;
+    normalizeOptionalTemporalIntent(data,active,warnings);
+    if(!active?.properties){
+        if(!data||typeof data!=='object'||Array.isArray(data))errors.push('root: expected object');
+    }else check(data,active,'root',errors,warnings);
+    if(errors.length||warnings.length){
+        log('Schema validation:',errors.length,'errors,',warnings.length,'warnings');
+        for(const message of errors)log('  ✗',message);
+        for(const message of warnings)log('  ⚠',message);
+    }
+    return{valid:errors.length===0,errors,warnings};
 }

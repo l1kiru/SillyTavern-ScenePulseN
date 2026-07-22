@@ -206,7 +206,7 @@ async function _checkContextBudget() {
             // Try to read context window from active connection settings; fall back to assumptions.
             const limit =
                 ctx?.chatCompletionSettings?.openai_max_context
-                || ctx?.textGenerationSettings?.max_context
+                || ctx?.textCompletionSettings?.max_context
                 || 8192; // safe default; most models exceed this
             if (estimatedPromptTokens >= limit) {
                 throw new Error(`System prompt alone (~${estimatedPromptTokens} tok) exceeds limit (${limit} tok)`);

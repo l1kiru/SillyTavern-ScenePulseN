@@ -182,18 +182,6 @@
     opacity: 0.3; letter-spacing: 3px; font-style: normal;
 }
 
-/* Goals */
-.sp-tp-goal {
-    font-size: var(--sp-fs-xs); color: rgba(200,204,212,0.8); line-height: 1.4;
-    padding: 2px 0 2px 0; display: flex; align-items: baseline; gap: 5px;
-}
-.sp-tp-goal-icon { font-size: var(--sp-fs-xs); flex-shrink: 0; opacity: 0.5; }
-.sp-tp-goals { padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.03); margin-top: 6px; }
-
-/* ═══ CHARACTER GOALS SECTION ═══ */
-.sp-char-goals { margin-top: 5px; padding-top: 5px; border-top: 1px dashed var(--sp-border); }
-.sp-char-goals .sp-char-grid { padding-left: 2px; }
-
 /* Thought panel loading state */
 .sp-tp-loading {
     display: flex; flex-direction: column; align-items: center; justify-content: center;

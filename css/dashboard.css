@@ -262,7 +262,6 @@
 
 .sp-dash-clock { margin-bottom: 3px; line-height: 0; }
 .sp-dash-clock svg { width: 60px; height: 60px; filter: drop-shadow(0 0 6px rgba(77,184,164,0.25)); }
-.sp-dash-icon { font-size: 20px; margin-bottom: 3px; line-height: 1; }
 .sp-dash-value { font-size: var(--sp-fs-xs); font-weight: 700; color: var(--sp-text-bright); line-height: 1.2; }
 /* v6.9.6: raised from 8px (below practical legibility minimum) to 10px */
 .sp-dash-sub { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); text-transform: uppercase; letter-spacing: 0.06em; margin-top: 2px; }

@@ -47,7 +47,7 @@
 // edge during post-processing so the renderer doesn't have to do it.
 
 import { log, warn } from '../logger.js';
-import { getSettings, saveSettings, getLatestSnapshot } from '../settings.js';
+import { getSettings, getLatestSnapshot } from '../settings.js';
 
 // Canonical edge types. Mirrors the archetype set but uses generic
 // relationship nouns instead of {{user}}-facing terms ("family" stays but
@@ -189,19 +189,6 @@ export function clearCache() {
             log('relationship-graph: cache cleared');
         }
     } catch (e) { warn('relationship-graph: cache clear failed:', e?.message); }
-}
-
-// Read cached edges if the fingerprint still matches the current snapshot.
-// Returns null if no cache, stale cache, or empty cache.
-// v6.8.41: kept for back-compat — callers that want the full graph
-// should use getCachedGraph() which also returns organizations.
-export function getCachedEdges() {
-    const snap = getLatestSnapshot();
-    if (!snap) return null;
-    const fp = _fingerprint(snap);
-    const cache = _getCache();
-    if (!cache || cache.fingerprint !== fp) return null;
-    return Array.isArray(cache.edges) ? cache.edges : [];
 }
 
 // v6.8.41: Read the full cached graph (edges + organizations). Returns
@@ -739,11 +726,4 @@ export async function generateGraph() {
 // enabling it in one chat enables it in all.
 export function isEnabled() {
     return getSettings().npcRelationshipGraph === true;
-}
-
-export function setEnabled(on) {
-    const s = getSettings();
-    s.npcRelationshipGraph = !!on;
-    saveSettings();
-    if (!on) clearCache();
 }

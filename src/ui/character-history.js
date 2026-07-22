@@ -15,11 +15,10 @@
 // in later ones (with aliases=["Stranger"]) resolves to a single
 // history entry keyed by "jenna".
 //
-// Results are cached per-snapshot-set using object identity on the
-// trackerData.snapshots reference. The reference changes whenever
-// saveSnapshot writes new data, so the cache invalidates naturally.
+// Results are cached per chat and latest character roster.
 
 import { getTrackerData } from '../settings.js';
+import { currentChatKey } from '../message-fingerprint.js';
 
 let _cache = null;
 let _cacheKey = null;
@@ -51,6 +50,7 @@ function _buildHistory() {
     // Iterate snapshots in order so later entries overwrite earlier
     // ones when both appear in the same character's history.
     const canonLookup = new Map(); // lowercase any-name → canonical (original case)
+    const aliasOwners = new Map();
     for (const key of snapKeys) {
         const snap = snaps[String(key)];
         if (!snap || !Array.isArray(snap.characters)) continue;
@@ -65,10 +65,18 @@ function _buildHistory() {
                 for (const a of ch.aliases) {
                     const al = String(a || '').trim().toLowerCase();
                     if (!al) continue;
-                    canonLookup.set(al, canon);
+                    if (!aliasOwners.has(al)) aliasOwners.set(al, new Map());
+                    aliasOwners.get(al).set(canonLow, canon);
                 }
             }
         }
+    }
+    // A directed reveal (Stranger → Jenna) has one owner and may override
+    // the historical placeholder canonical. Shared aliases are ambiguous and
+    // deliberately remain unresolved instead of merging distinct people.
+    for (const [alias, owners] of aliasOwners) {
+        if (owners.size !== 1) continue;
+        canonLookup.set(alias, owners.values().next().value);
     }
 
     // Helper: resolve any name (canonical or alias) to the canonical
@@ -277,29 +285,11 @@ export function getCharacterHistory() {
             latestFingerprint = parts.sort().join(';');
         }
     }
-    const cacheKey = `${keyCount}|${latestFingerprint}`;
+    const cacheKey = `${currentChatKey()}|${keyCount}|${latestFingerprint}`;
     if (_cache && _cacheKey === cacheKey) return _cache;
     _cache = _buildHistory();
     _cacheKey = cacheKey;
     return _cache;
-}
-
-/**
- * Convenience accessor: look up a single character's history entry by
- * any name (canonical OR alias). Returns null if not found.
- */
-export function getCharacterHistoryEntry(name) {
-    if (!name) return null;
-    const hist = getCharacterHistory();
-    const low = name.toLowerCase().trim();
-    // Direct canonical hit
-    if (hist.has(low)) return hist.get(low);
-    // Walk the map looking for an alias match — O(n) but the map is
-    // typically small (< 30 characters per chat).
-    for (const meta of hist.values()) {
-        if (meta.aliasesLow.has(low)) return meta;
-    }
-    return null;
 }
 
 /**

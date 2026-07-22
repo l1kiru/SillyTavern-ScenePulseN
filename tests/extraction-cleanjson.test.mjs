@@ -1,59 +1,14 @@
-// Manual dev test for cleanJson() balanced-brace extraction.
-// Run from project root: node tests/extraction-cleanjson.test.mjs
-// Not loaded by the extension — manifest.json only references index.js.
-//
-// Tests the specific failure modes from real debug logs plus regression
-// coverage for the v6.8.5 jsonrepair integration.
-//
-// cleanJson() imports logger/settings modules that touch DOM globals, so we
-// can't import it directly in node. Instead, we replicate the function here
-// and keep it in sync via a short hash check at the top.
+// Regression coverage for the production JSON candidate extractor.
 
-import { jsonrepair } from '../src/vendor/jsonrepair.mjs';
+globalThis.SillyTavern={getContext:()=>({
+    name1:'User',name2:'Character',characterId:1,chatId:'clean-json',
+    chat:[],chatMetadata:{scenepulse:{snapshots:{},swipeSnapshots:{}}},
+    extensionSettings:{scenepulse:{deltaMode:false}},saveMetadata(){},saveSettingsDebounced(){},
+})};
+globalThis.localStorage={getItem:()=>null,setItem(){}};
+globalThis.document={querySelector:()=>null};
 
-// ═══════════════════════════════════════════════════════════════════════
-// Inlined copy of cleanJson() for node-runnable testing.
-// Must stay in sync with src/generation/extraction.js.
-// ═══════════════════════════════════════════════════════════════════════
-
-function _findBalancedEnd(s, from) {
-    let depth = 0, inString = false, escape = false;
-    for (let i = from; i < s.length; i++) {
-        const ch = s[i];
-        if (escape) { escape = false; continue; }
-        if (inString) {
-            if (ch === '\\') escape = true;
-            else if (ch === '"') inString = false;
-            continue;
-        }
-        if (ch === '"') { inString = true; continue; }
-        if (ch === '{') depth++;
-        else if (ch === '}') { depth--; if (depth === 0) return i; }
-    }
-    return -1;
-}
-
-function cleanJson(raw) {
-    let c = raw.trim().replace(/^```(?:json)?\s*\n?/i, '').replace(/\n?```\s*$/i, '');
-    const fb = c.indexOf('{');
-    if (fb === -1) throw new Error('No JSON object in response');
-    const balancedEnd = _findBalancedEnd(c, fb);
-    if (balancedEnd !== -1) {
-        c = c.substring(fb, balancedEnd + 1);
-    } else {
-        const lb = c.lastIndexOf('}');
-        if (lb === -1) throw new Error('No JSON object in response');
-        c = c.substring(fb, lb + 1);
-    }
-    try { return JSON.parse(c); }
-    catch (e1) {
-        let repaired;
-        try { repaired = jsonrepair(c); }
-        catch { throw e1; }
-        try { return JSON.parse(repaired); }
-        catch { throw e1; }
-    }
-}
+const{cleanJson}=await import('../src/generation/extraction.js');
 
 // ═══════════════════════════════════════════════════════════════════════
 // Test cases
@@ -119,6 +74,12 @@ const cases = [
     ['trailing comma',
      '{"a":1,"b":2,}',
      { a: 1, b: 2 }],
+    ['double trailing comma',
+     '{"a":1,,}',
+     { a: 1 }],
+    ['leading plus number',
+     '{"a":+5}',
+     { a: 5 }],
     ['single quotes (jsonrepair fixes)',
      "{'a':'hi'}",
      { a: 'hi' }],

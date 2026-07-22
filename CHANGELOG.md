@@ -2,6 +2,289 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.0.0] — 2026-07-22
+
+#### Major release — Fork baseline
+
+- Promote the hardened ScenePulse fork to the v7 release line.
+- Keep the extension manifest, runtime diagnostics, settings UI, slash-command output, and exported configuration metadata aligned on version 7.0.0.
+- Establish the security and localization improvements from 6.36.2–6.36.3 as the v7 baseline.
+
+### [6.36.3] — 2026-07-22
+
+#### Changed — Honest, enforceable localization coverage
+
+- Synchronize all 29 locale files to the complete active catalog generated from static `t()` calls, preserving existing translations and recording untranslated entries as explicit English fallbacks.
+- Publish deterministic per-language translation counts in `locales/_coverage.json` and add `npm run sync-locales` for contributors.
+- Replace the Russian-only coverage check with validation of every locale, including exact key parity, placeholders, and HTML tags.
+- Move the remaining identified user-visible English strings behind `t()` and add translations for those boundary strings across all locale files.
+- Add ScenePulse-scoped right-to-left direction and layout handling for Arabic and Hebrew.
+- Correct documentation that previously described all 29 dictionaries as fully translated.
+
+### [6.36.2] — 2026-07-22
+
+#### Security — Custom panel imports
+
+- Validate and normalize imported custom panels before they reach settings, profiles, chat metadata, schema generation, or the DOM.
+- Reject reserved prototype keys, invalid field types, duplicate field keys, malformed enum options, and oversized panel definitions.
+- Apply configuration imports atomically from clean allowlisted patches and ignore inherited or unsupported setting names.
+- Remove user-controlled values from HTML attribute and warning-message sinks, and escape dynamic CSS selectors.
+
+#### Fixed — Settings UI lifecycle
+
+- Register the global Debug Inspector shortcut and crash-log observer once per module lifetime instead of once per language rebuild.
+- Resolve current settings elements on each crash-log update so removed localized DOM nodes are not retained.
+- Avoid the duplicate `loadUI()` call after rebuilding the localized settings panel.
+
+#### Changed — Quality checks
+
+- Run `node --check` across `index.js` and all source modules before the test suite.
+- Remove unused ESLint configuration files that were not backed by an installed dependency or npm script.
+- Add regression coverage for custom-panel import security and global listener lifecycle.
+
+### [6.36.1] — 2026-07-22
+
+#### Fixed — Snapshot rendering after generation
+
+- Import and restore `setLastGenSource` correctly when a rendered snapshot contains `_spMeta.source`.
+- Prevent successful Together and Separate generations from failing during the panel update after the snapshot has already been saved.
+- Add a regression test for restoring persisted generation source, token counts, and elapsed time.
+
+#### Changed — Native VibeAudit support
+
+- Add a dependency-free Node project manifest and ESLint configuration so VibeAudit runs real checks instead of returning an empty `unknown`-stack pass.
+- Clear all remaining ESLint blockers without changing extension behavior.
+- Add an empty lockfile so dependency auditing reports a real clean result rather than being skipped.
+
+### [6.36.0] — 2026-07-22
+
+#### Changed — Useful empty states
+
+- Keep Regenerate, Debug Inspector, Analytics, Panel Manager, and Character Wiki available when the current chat or swipe has no scene snapshot.
+- Use the same interactive empty state after data clearing, failed or cancelled generation, and SillyTavern generation stops.
+- Preserve targeted regeneration for stale snapshots instead of falling back to a generic last-message request.
+- Give empty-state actions touch-sized controls on mobile and tablet layouts.
+
+### [6.35.1] — 2026-07-22
+
+#### Fixed — Scene restoration when switching swipes
+
+- Make `MESSAGE_SWIPED` render the snapshot belonging to that exact message and active swipe instead of resolving through the general latest-scene fallback.
+- Restore the 6.27.22 behavior for the latest response: a processed sibling displays its own scene immediately, while an unprocessed sibling shows an empty state rather than retaining an unrelated older scene.
+- Keep the general previous-scene fallback for message and swipe deletion recovery.
+
+### [6.35.0] — 2026-07-22
+
+#### Added — Optional story ideas
+
+- Add a profile-aware “Generate and show story ideas” switch to General settings.
+- When disabled, remove `plotBranches` from the request schema, full and delta prompts, Together-mode examples, and embedded previous state, then hide the Story Ideas panel.
+- Keep the new switch synchronized with the existing Panel Manager control.
+
+#### Fixed — Manual cancellation
+
+- Treat a user stop as the end of the whole generation chain instead of starting a retry or Together-mode recovery request.
+- Re-check cancellation after retry backoff and before the native-to-JSON continuation retry.
+
+### [6.34.0] — 2026-07-22
+
+#### Added — Traceable issues
+
+- Capture the active chat, message, swipe, role, and branch fingerprint with each new issue without storing a second copy of message text.
+- Show a compact error address and verification state in the Debug Inspector, including current, other-chat, other-swipe, changed, deleted, and legacy records.
+- Preview and jump to a message only after its chat and fingerprint are verified; never switch swipes automatically.
+- Keep identical errors from different messages as separate records so de-duplication cannot erase their addresses.
+
+#### Changed — Complete Russian UI coverage
+
+- Translate every static `t()` string used by the current interface, including the inspector, diagnostics, setup guide, guided tour, custom-panel editor, preset browser, performance tools, and recovery messages.
+- Add placeholder interpolation to localization strings and remove dynamic translation keys that could only fall back to English.
+- Localize genre-template names and visible field labels while keeping their LLM instructions unchanged.
+- Add an automated Russian-locale coverage test so newly introduced UI strings cannot silently fall back to English.
+
+### [6.33.0] — 2026-07-22
+
+#### Changed — Useful Debug Inspector overview
+
+- Open the inspector on a current-state overview showing runtime status, chat/swipe ownership, the latest model response, request latency, session issues, and snapshot integrity.
+- Make “This session” start when ScenePulse loads instead of when the inspector opens, so errors from the current page session are no longer hidden.
+- Scope prompt/response pairs and extraction failures to the current chat by default, preventing diagnostics from presenting another chat's generation as current.
+- Keep historical issues available while excluding them from the current diagnostics bundle, mark entries captured by older ScenePulse versions, and show their counts separately.
+- Add a compact copyable summary, direct links to the relevant response and issue tabs, readable responsive cards, horizontally scrollable tabs, and Russian labels for the revised inspector.
+- Replace speculative parse-error hints with descriptions based on the captured response and validation stage.
+
+### [6.32.2] — 2026-07-22
+
+#### Fixed — Separate generation reliability
+
+- Accept tracker JSON when an optional `temporalIntent` string is merely misspelled: normalize enum aliases or omit an unsupported value instead of regenerating the entire scene.
+- Stop applying the SillyTavern stop-button watchdog to quiet separate requests, which never expose that button; the existing abort timeout remains their hang protection.
+- Restore custom-panel rendering by importing `getActivePanels` where it is used.
+- Report the currently loaded ScenePulse version in diagnostics instead of inheriting the version attached to an older persisted crash entry.
+
+### [6.32.1] — 2026-07-22
+
+#### Removed — ScenePulse World Info integration
+
+- Stop scanning SillyTavern World Info for separate tracker and continuation requests.
+- Remove activated lorebook text and metadata from tracker prompts and snapshots.
+- Remove the ScenePulse lorebook controls; Together mode still follows SillyTavern's normal generation behavior without any ScenePulse-specific access.
+
+### [6.32.0] — 2026-07-21
+
+#### Fixed — Reliable separate generation and swipe ownership
+
+- Bind every delayed tracker request to the exact chat, assistant message, active swipe, parent context, and source text; silently discard work if any of them changes before completion.
+- Restore the selected swipe's trusted scene and character thoughts immediately instead of clearing the panel or forcing a premature regeneration.
+- Prefer SillyTavern's raw-data generation API, preserve malformed provider output for repair, and fall back from native structured output to a JSON-only prompt when a provider returns an empty object.
+- Scan all balanced JSON candidates, reject schema echoes and truncated outer objects, repair locally where possible, then validate required fields, types, enums, ranges, and nested objects before anything is normalized or saved.
+- Correctly validate JSON Schema `integer` fields (relationship meters and numeric custom panels) and retain the operational `elapsed` / `temporalIntent` fields in dynamic native schemas.
+- Use request-specific full, delta, and section schemas, adaptive output budgets, corrective retry prompts, bounded retry policy, and real cancellation through SillyTavern's public stop API.
+- Keep the last trusted scene visible when generation fails and attach a recovery card without replacing valid state.
+
+#### Changed — Exact context and native World Info
+
+- Build tracker context only from messages at or before the target response and include each recent message and the previous trusted snapshot exactly once.
+- Keep the previous trusted scene visible while an unprocessed swipe is pending, but clear message-local thoughts so they cannot appear under the wrong response.
+- Ask SillyTavern to scan World Info once against that same bounded context, pass up to five activated entries within the existing 30,000-character ceiling, and persist only safe entry IDs and labels.
+- Remove the obsolete quiet-prompt World Info capture path and the unused XML prompt-mode option. Existing XML settings migrate to JSON-only mode.
+- Add regression coverage for provider response shapes, candidate selection, schema validation, output budgets, raw transport, World Info boundaries, swipe event policy, and delayed-swipe cancellation.
+
+### [6.31.3] — 2026-07-21
+
+#### Fixed — Scene recovery after message and swipe deletion
+
+- Reconcile snapshots against the final SillyTavern chat instead of treating `MESSAGE_DELETED`'s new chat length as the deleted message index.
+- Preserve the latest trusted scene before deleted context while discarding dependent descendant snapshots rather than shifting them onto unrelated messages.
+- Handle `MESSAGE_SWIPE_DELETED`, remap surviving swipe snapshots, and retain descendants only when the active narrative branch did not change.
+- Skip unprocessed assistant messages while locating the latest scene, and refresh the panel, thoughts, and timeline from one reconciled snapshot state.
+- Serialize rapid chat mutations and add regression coverage for last, middle, tail, repeated, active-swipe, and inactive-swipe deletion.
+
+### [6.31.2] — 2026-07-21
+
+#### Fixed — SillyTavern 1.18 integration
+
+- Wait for SillyTavern's connection-profile and OpenAI-preset completion events instead of relying on fixed delays.
+- Read Text Completion settings from the public `textCompletionSettings` context field and use the public `stopGeneration` API for cancellation.
+- Build the panel only after localization is ready, resolve the active persona portrait from current SillyTavern state, and record the displayed SillyTavern version in crash diagnostics.
+- Enforce SillyTavern 1.12.0+ through `minimum_client_version` in the extension manifest.
+
+#### Removed — Incompatible function-tool mode
+
+- Remove the experimental function-tool module, setting, runtime state, footer badges, tests, styles, and documentation. SillyTavern invokes stealth tools after `CHARACTER_MESSAGE_RENDERED`, which made this path duplicate or lose tracker updates.
+
+### [6.31.1] — 2026-07-21
+
+#### Changed — Long World Info fallback entries
+
+- Raise the emergency `generateRaw` allowance from 2,500 to 20,000 characters per activated entry and from 6,000 to 30,000 characters overall.
+- Preserve a typical character description of roughly 4,000 tokens in full while retaining the five-entry ceiling and strict total bound.
+- Mark fallback context as truncated when additional activated entries are omitted by the five-entry limit.
+
+### [6.31.0] — 2026-07-21
+
+#### Added — Native World Info context for ScenePulse
+
+- Observe SillyTavern's own World Info activation for each owned quiet tracker request without loading, copying, or independently scanning lorebooks.
+- Preserve activated entry identity as bounded `world + uid + label` snapshot metadata while never storing entry content or regex keys.
+- Reuse up to five activated entries in `generateRaw` recovery only, capped at 6,000 characters (about 1,500 tokens); successful quiet requests never receive duplicate lore content.
+
+#### Changed — Honest lorebook controls
+
+- Replace the non-functional character-only and allowlist filters with two enforceable modes: follow SillyTavern or disable World Info for separate ScenePulse requests.
+- Migrate every legacy enabled mode to native SillyTavern handling while preserving the existing disabled choice.
+- Discard World Info capture when another generation overlaps, preventing cross-chat or cross-extension context leakage.
+
+### [6.30.1] — 2026-07-21
+
+#### Fixed — SillyTavern theme color hierarchy
+
+- Keep SillyTavern's active background, body text, borders, and fonts while preserving ScenePulse's teal accent and semantic status colors.
+- Derive surfaces and secondary text from the readable SillyTavern body color instead of optional quote/emphasis colors that can be nearly grey in custom themes.
+- Stabilize panel depth with a small neutral tint so transparent or low-contrast SillyTavern palettes no longer flatten the entire interface.
+
+### [6.30.0] — 2026-07-21
+
+#### Added — Native SillyTavern theme
+
+- Add a `SillyTavern` theme that inherits the active SillyTavern body, emphasis, quote, tint, border, and font variables in real time, with ST-style corner radii.
+- Apply theme variables at the document body so the main panel, thought panel, settings drawer, and detached ScenePulse dialogs stay visually consistent.
+
+#### Changed — Interface readability and focus
+
+- Keep the primary toolbar actions visible and move wiki, expand/collapse, compact, edit, and empty-field commands into an accessible `More actions` menu.
+- Collapse generation diagnostics behind a small disclosure while keeping profile, mode, and elapsed time immediately visible.
+- Move experimental settings to the Advanced tab, increase settings readability, and use touch-sized controls on mobile.
+- Widen and constrain the snapshot browser, remove horizontal overflow, improve long scene badges and story-idea titles, and expose useful timeline labels on mobile.
+- Complete the Russian labels used by the revised toolbar, settings, diagnostics, character cards, profiles, and weekday display.
+
+### [6.29.4] — 2026-07-21
+
+#### Fixed — Swipe regeneration retry
+
+- Keep the provider response and finish reason in scope when parsing fails, preventing the error handler itself from throwing `rawStr is not defined`.
+- Restore automatic retries for malformed tracker responses so a new swipe can save its own scene overview and character thoughts.
+- Add an end-to-end regression test proving the retried snapshot is stored only under the active swipe.
+
+### [6.29.3] — 2026-07-21
+
+#### Fixed — JSON repair coverage
+
+- Upgrade the vendored `jsonrepair` implementation from 3.12.0 to 3.15.0, improving recovery of ambiguous unescaped quotes, leading-dot numbers, and BOM-prefixed payloads.
+- Add narrow fallback handling for duplicate trailing commas and leading-plus numbers after upstream repair fails, bringing the 106-case vendor smoke suite to 106/106.
+- Add a dependency-free recursive runner so all 35 top-level and nested test files run with one command instead of silently omitting `tests/vendor`.
+
+### [6.29.2] — 2026-07-21
+
+#### Fixed — Multi-chat UI isolation
+
+- Scope the character-history cache by chat identity so chats with matching snapshot counts and rosters cannot reuse each other's locations, aliases, appearance history, or off-scene entries.
+- Clear the character-history and normalized panel-data caches on `CHAT_CHANGED`, preventing empty chats and custom-panel editing from displaying values from the previous chat.
+- Add regression coverage for switching between identically shaped chats without manually invalidating the cache.
+
+### [6.29.1] — 2026-07-21
+
+#### Changed — Safe dead-code cleanup
+
+- Remove the unreachable legacy path that temporarily overwrote SillyTavern sampler controls with bundled GLM-5 values.
+- Remove unused internal helpers, state wrappers, imports, and relationship-layout work that had no runtime or test callers.
+- Remove obsolete CSS selectors whose elements are no longer created by the extension.
+- Preserve diagnostic hooks, profile compatibility state, settings, saved snapshots, and all 81 reachable runtime modules.
+
+### [6.29.0] — 2026-07-21
+
+#### Fixed — Async ownership and recovery integrity
+
+- Use one operation-owner contract for inline, separate, continuation, JSON-repair, and Function Tool results, rejecting writes after chat, parent, message, or swipe changes.
+- Hold Function Tool output until its exact assistant message exists instead of attaching it to whichever assistant message is latest.
+- Share the typed JSON recovery card/editor between inline and separate generation, including provider errors and token-limit finish reasons.
+- Fix continuation recovery referencing an undeclared message index after a successful provider response.
+- Normalize common OpenAI- and Anthropic-style provider response wrappers before parsing.
+- Upgrade provenance fingerprints to a one-pass v2 index and show current, stale, and legacy state in Timeline, Browse All, Inspector, and diagnostics.
+- Add the new recovery and provenance strings to every locale, with Russian translations and readable English fallbacks elsewhere.
+
+### [6.28.0] — 2026-07-21
+
+#### Added — Branch provenance and JSON recovery
+
+- Bind every new snapshot to a deterministic fingerprint of the exact message and swipe branch that produced it.
+- Detect edits and ancestor swipe changes without deleting stored data; returning to the original branch restores its matching state.
+- Hide stale thoughts and scene data, skip stale snapshots as generation bases, force a full refresh, and reject delayed results when the chat changes mid-generation.
+- Establish a one-time provenance baseline for the active branch of existing chats while leaving unverifiable inactive legacy swipes untouched.
+- Classify inline extraction failures (`NO_TRACKER`, `TRUNCATED`, `NO_JSON_OBJECT`, `MALFORMED_JSON`, `TOO_SMALL`, `UNKNOWN_SCHEMA`) and expose the code in diagnostics.
+- Add a session-only JSON repair editor that validates corrected tracker data and saves it through the normal extraction pipeline only if chat/message/swipe ownership still matches.
+
+### [6.27.22] — 2026-07-21
+
+#### Fixed — Swipe-owned scene state and volatile thoughts
+
+- Store tracker snapshots per assistant message and swipe, so alternate replies no longer inherit another reply's characters or thoughts.
+- Build each generated snapshot from the selected previous message rather than a sibling swipe, and discard async results if the user switches swipes before completion.
+- Restore the matching dashboard and thought panel immediately on swipe; an unprocessed swipe shows an empty state instead of stale data.
+- Keep manual edits scoped to the active swipe, shift snapshot indices after message deletion, and clear all swipe variants when tracker data is cleared.
+- Lazily migrate legacy per-message snapshots to only the currently selected swipe.
+- Recompute `charactersPresent`, `witnesses`, `innerThought`, and `immediateNeed` every turn, while allowing genuinely empty arrays instead of encouraging invented entries.
+
 ### [6.27.6] — 2026-04-26
 
 #### Added — Stock-prompts disclaimer + token-usage / cost / OR-ranking sorts
@@ -2555,4 +2838,3 @@ Both changes target the inline (Together) generation path. Neither touches `clea
 
 ### v5.1.1
 - **Modular architecture** — Refactored from monolithic 5,500-line `index.js` into ~30 ES modules
-

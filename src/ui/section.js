@@ -1,10 +1,10 @@
 // src/ui/section.js — Collapsible section builder for the panel
-import { log } from '../logger.js';
 import { esc } from '../utils.js';
 import { getSettings, saveSettings } from '../settings.js';
-import { generating, setLastGenSource } from '../state.js';
+import { setLastGenSource } from '../state.js';
 import { generateTracker } from '../generation/engine.js';
 import { guardRegenIfBusy } from '../generation/regen-guard.js';
+import { t } from '../i18n.js';
 import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton } from './loading.js';
 
 
@@ -22,8 +22,9 @@ export function mkSection(key,title,badge,fn,s){
     const sec=document.createElement('div');sec.className='sp-section'+((s.openSections?.[key])?' sp-open':'');sec.dataset.key=key;
     const h=document.createElement('div');h.className='sp-section-header';
     const _icon=SECTION_ICONS[key]?`<span class="sp-section-icon">${SECTION_ICONS[key]}</span>`:'';
-    h.innerHTML=`<span class="sp-section-chevron">\u25B8</span>${_icon}<span class="sp-section-title">${esc(title)}</span>${badge!=null?`<span class="sp-section-badge">${esc(String(badge))}</span>`:''}<span class="sp-section-spacer"></span><button class="sp-section-refresh" title="Refresh ${title}"><svg viewBox="0 0 16 16" width="12" height="12" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-1.3-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13.5 3v2h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
-    const chevronArea=h.querySelector('.sp-section-chevron');
+    h.innerHTML=`<span class="sp-section-chevron">\u25B8</span>${_icon}<span class="sp-section-title">${esc(title)}</span>${badge!=null?`<span class="sp-section-badge">${esc(String(badge))}</span>`:''}<span class="sp-section-spacer"></span><button class="sp-section-refresh"><svg viewBox="0 0 16 16" width="12" height="12" fill="none"><path d="M13.5 8a5.5 5.5 0 1 1-1.3-3.5" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/><path d="M13.5 3v2h-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg></button>`;
+    const refreshButton=h.querySelector('.sp-section-refresh');
+    refreshButton.title=t('Refresh {title}',{title:String(title)});
     // Click anywhere on header toggles, except refresh button (debounced)
     let _secDebounce=false;
     h.addEventListener('click',(e)=>{
@@ -34,7 +35,7 @@ export function mkSection(key,title,badge,fn,s){
         st.openSections[key]=sec.classList.contains('sp-open');saveSettings();
     });
     // Refresh button regenerates just this section
-    h.querySelector('.sp-section-refresh').addEventListener('click',async(e)=>{
+    refreshButton.addEventListener('click',async(e)=>{
         e.stopPropagation();
         // v6.27.17: was a hard block + toast. Now offers cancel-and-restart.
         if (!(await guardRegenIfBusy())) return;
@@ -42,7 +43,7 @@ export function mkSection(key,title,badge,fn,s){
         const btn=e.target.closest('.sp-section-refresh');btn.classList.add('sp-spinning');
         // Show loading overlay on section content -- existing content visible behind
         const content=sec.querySelector('.sp-section-content');
-        showLoadingOverlay(content,'Refreshing '+title,'',true);
+        showLoadingOverlay(content,t('Refreshing {title}',{title:String(title)}),'',true);
         // Ensure section is open so user sees the loading
         if(!sec.classList.contains('sp-open'))sec.classList.add('sp-open');
         setLastGenSource('manual:section:'+key);

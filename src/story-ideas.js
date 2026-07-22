@@ -26,19 +26,11 @@ export function injectStoryIdea(idea,cat){
             toastr?.success?.(`${cat?.label}: ${idea.name}`,t('Story direction sent'));
         },100);
     } else {
-        // Fallback: try context API
+        // Last resort: copy the direction when SillyTavern's composer is absent.
         try{
-            const ctx=SillyTavern.getContext();
-            if(typeof ctx.sendMessage==='function'){
-                ctx.sendMessage(direction);
-                log('Story idea sent via context API');
-                toastr?.success?.(`${cat?.label}: ${idea.name}`,t('Story direction sent'));
-            } else {
-                // Last resort: copy to clipboard
-                navigator.clipboard.writeText(direction).then(()=>{
-                    toastr?.info?.(t('Story idea copied'),'Copied');
-                });
-            }
+            navigator.clipboard.writeText(direction).then(()=>{
+                toastr?.info?.(t('Story idea copied'),'Copied');
+            });
         }catch(e){warn('injectStoryIdea fallback:',e)}
     }
 }

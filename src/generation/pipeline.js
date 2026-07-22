@@ -3,19 +3,21 @@
 
 import { log, warn } from '../logger.js';
 import {
-    genMeta, lastGenSource,
     setCurrentSnapshotMesIdx, setLastGenSource, setLastRawResponse, setLastDeltaPayload,
-    addSessionTokens, setLastDeltaSavings, _lastDeltaSavings
+    addSessionTokens, setLastDeltaSavings, _lastDeltaSavings, setLastExtractionFailure
 } from '../state.js';
-import { getSettings, getLatestSnapshot, saveSnapshot, ensureChatSaved, shouldUseDelta } from '../settings.js';
+import { getSettings, getActiveSchema, getPrevSnapshot, getActiveSwipeId, saveSnapshot, ensureChatSaved, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
-import { mergeDelta } from './delta-merge.js';
+import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { spPostGenShow, spSetGenerating } from '../ui/mobile.js';
 import { addMesButton } from '../ui/message.js';
 import { stopStreamingHider } from './streaming.js';
 import { validateExtraction } from './validation.js';
+import { recordExtractionFailure } from './extraction.js';
+import { buildRequestSchema } from '../schema.js';
 import { classifyTimeChange } from '../temporal-check.js';
+import { currentChatFingerprint, currentChatKey, validateOperationOwner } from '../message-fingerprint.js';
 
 /**
  * Process extracted tracker data through the full pipeline:
@@ -42,8 +44,35 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
 
     // Delta merge — v6.8.50: use shouldUseDelta() which respects the
     // periodic full-state refresh counter.
-    const prevSnap = getLatestSnapshot();
-    const _useDelta = shouldUseDelta();
+    const targetSwipeId = opts.swipeId ?? getActiveSwipeId(mesIdx);
+    if(opts.owner){const ownerCheck=validateOperationOwner(opts.owner,{requireSource:!!opts.owner.sourceFingerprint});if(!ownerCheck.valid){warn('Pipeline: owner changed; discarding result for',mesIdx,ownerCheck.code);return null}}
+    if (opts.expectedSwipeId !== undefined && getActiveSwipeId(mesIdx) !== opts.expectedSwipeId) {
+        warn('Pipeline: active swipe changed before extraction; discarding result for', mesIdx, '/', opts.expectedSwipeId);
+        return null;
+    }
+    if (opts.expectedChatKey !== undefined && currentChatKey() !== opts.expectedChatKey) {
+        warn('Pipeline: chat changed before extraction; discarding result for', mesIdx);
+        return null;
+    }
+    if (opts.expectedParentFingerprint !== undefined && currentChatFingerprint(mesIdx - 1) !== opts.expectedParentFingerprint) {
+        warn('Pipeline: parent context changed before extraction; discarding result for', mesIdx);
+        return null;
+    }
+    if (opts.expectedSourceFingerprint !== undefined && currentChatFingerprint(mesIdx, targetSwipeId) !== opts.expectedSourceFingerprint) {
+        warn('Pipeline: source message changed before extraction; discarding result for', mesIdx);
+        return null;
+    }
+    const prevSnap = Object.hasOwn(opts, 'baseSnapshot') ? opts.baseSnapshot : getPrevSnapshot(mesIdx);
+    const _useDelta = !hasStaleSnapshotBefore(mesIdx)&&shouldUseDelta(prevSnap);
+    clearForceFullState();
+    const requestSchema=buildRequestSchema(getActiveSchema(),{mode:_useDelta?'delta':'full'}).value;
+    if(!Object.hasOwn(requestSchema.properties||{},'plotBranches'))delete extracted.plotBranches;
+    const _validation=validateExtraction(extracted,{schema:requestSchema});
+    if(!_validation.valid){
+        warn('Pipeline: rejecting invalid tracker payload:',_validation.errors.join('; '));
+        recordExtractionFailure('SEMANTIC_INVALID','Tracker JSON failed schema validation',JSON.stringify(extracted),mesIdx,{stage:'validate',owner:opts.owner,validationErrors:_validation.errors});
+        return null;
+    }
     if (_useDelta && prevSnap) {
         setLastDeltaPayload(extracted);
         const fullEstimate = Math.round(JSON.stringify(prevSnap).length / 4);
@@ -60,32 +89,16 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         // The LLM only returns characters in the current scene; without this
         // block, every periodic full-state refresh (default every 15 turns)
         // permanently drops the off-scene roster from the saved snapshot.
-        // Mirrors engine.js:367-380. (Issue #11)
-        if (prevSnap) {
-            for (const k of ['characters', 'relationships']) {
-                if (Array.isArray(extracted[k]) && Array.isArray(prevSnap[k])) {
-                    const newNames = new Set(extracted[k].map(e => (e.name || '').toLowerCase().trim()));
-                    for (const prev of prevSnap[k]) {
-                        const pn = (prev.name || '').toLowerCase().trim();
-                        if (pn && !newNames.has(pn)) {
-                            extracted[k].push(structuredClone(prev));
-                            log('Pipeline full-state: preserved off-scene entity:', prev.name, 'in', k);
-                        }
-                    }
-                }
-            }
-        }
+        // Shared with engine.js through preserveOffSceneEntities. (Issue #11)
+        preserveOffSceneEntities(extracted, prevSnap);
     }
-
-    // Validate against schema (warnings only, never rejects)
-    const _warnings = validateExtraction(extracted);
 
     // Normalize
     const norm = normalizeTracker(extracted);
     setCurrentSnapshotMesIdx(mesIdx);
 
     // Attach validation warnings for Inspector
-    if (_warnings.length) norm._validationWarnings = _warnings;
+    if (_validation.warnings.length) norm._validationWarnings = _validation.warnings;
 
     // v6.24.0: Temporal validation. Detects LLM-emitted time regressions and
     // implausible jumps; rewrites in-place when the model contradicts its own
@@ -127,9 +140,9 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         deltaMode: _useDelta,
         deltaTurnsSinceFull: _useDelta ? _prevCounter + 1 : 0,
     };
-
     // Save normalized snapshot (consistent with engine.js path)
-    saveSnapshot(mesIdx, norm);
+    saveSnapshot(mesIdx, norm, targetSwipeId);
+    setLastExtractionFailure(null);
 
     // Update panel
     updatePanel(norm);

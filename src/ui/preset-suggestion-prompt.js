@@ -86,7 +86,7 @@ export function showPresetSuggestionPrompt(preset, activeModelId = '', activePro
         const isStockPrompts = slotCount === 0;
 
         const detectionLine = activeModelId
-            ? t(`Detected <code>${esc(activeModelId)}</code> on your active connection.`)
+            ? t('Detected <code>{model}</code> on your active connection.', { model: esc(activeModelId) })
             : t('Your active connection matches this bundled preset.');
 
         overlay.innerHTML = `
@@ -111,7 +111,7 @@ export function showPresetSuggestionPrompt(preset, activeModelId = '', activePro
                             <div class="sp-psp-effect-head">${t('Will update')}</div>
                             <div class="sp-psp-effect-body">${isStockPrompts
                                 ? `${t('System-prompt role only')}<br><span class="sp-psp-effect-muted">${t('Default prompts unchanged')}</span>`
-                                : `${t(`${slotCount} prompt slot${slotCount === 1 ? '' : 's'}`)}: ${esc(slotList)}<br>${t('System-prompt role')}`
+                                : `${t('Prompt slots: {count}', { count: slotCount })}: ${esc(slotList)}<br>${t('System-prompt role')}`
                             }</div>
                         </div>
                         <div class="sp-psp-effect sp-psp-effect-keep">

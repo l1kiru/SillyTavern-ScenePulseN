@@ -41,8 +41,6 @@ export async function checkForUpdate() {
     }
 }
 
-export function getUpdateInfo() { return _updateInfo; }
-
 /**
  * Show pulsing dot on the brand icon.
  */

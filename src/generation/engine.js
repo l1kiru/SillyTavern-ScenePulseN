@@ -1,16 +1,12 @@
 // ── engine.js — Generation engine: preset management, profile switching, tracker generation ──
 
-import { BUILTIN_PRESET } from '../constants.js';
 import { log, warn, err } from '../logger.js';
 import {
-    generating, cancelRequested, genNonce, genMeta, inlineGenStartMs,
-    currentSnapshotMesIdx, lastGenSource, lastRawResponse,
-    _savedSamplerValues,
+    generating, genNonce, genMeta, lastGenSource,
     setGenerating, setCancelRequested, setGenNonce, setGenMeta,
     setCurrentSnapshotMesIdx, setLastGenSource, setLastRawResponse, setLastDeltaPayload,
-    set_savedSamplerValues,
-    setInlineGenStartMs, setInlineExtractionDone, setPendingInlineIdx,
-    addSessionTokens, setLastDeltaSavings
+    setInlineGenStartMs, setInlineExtractionDone, setPendingInlineIdx, setInlineGenerationContext,
+    addSessionTokens, setLastDeltaSavings, setLastExtractionFailure
 } from '../state.js';
 // v6.15.6: also push the (prompt, response) pair into the ring buffer for the
 // Last Response tab + Diagnostics bundle (Panel B's critical-missing add).
@@ -22,74 +18,60 @@ import { pushPair, markLastPairParseFailed } from '../raw-pairs.js';
 import { record as recordNetwork } from '../network-log.js';
 import {
     getSettings, getActiveSchema, getActivePrompt, getTrackerData,
-    getLatestSnapshot, saveSnapshot, getSnapshotFor, ensureChatSaved,
-    getConnectionProfiles, getChatPresets, shouldUseDelta
+    getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, saveSnapshot, getTrustedSnapshotFor, ensureChatSaved,
+    getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore, buildProfileView
 } from '../settings.js';
+import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
+import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker } from '../normalize.js';
-import { applyPromptRole } from '../prompts/role.js';
-import { cleanJson } from './extraction.js';
-import { mergeDelta } from './delta-merge.js';
+import { parseTrackerCandidate, normalizeProviderResponse, recordExtractionFailure } from './extraction.js';
+import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
+import { validateExtraction } from './validation.js';
+import { buildRequestSchema, SECTION_FIELDS } from '../schema.js';
+import { buildRecentContext, classifyRequestError, computeResponseLength, correctiveInstruction, requestTracker } from './request.js';
 import { spSetGenerating, spPostGenShow } from '../ui/mobile.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { cleanupGenUI } from '../ui/loading.js';
 import { setBrandState } from '../ui/panel.js';
-import { startStWatchdog } from './st-watchdog.js';
+import { renderEmptyState } from '../ui/empty-state.js';
+import { t } from '../i18n.js';
 
-// Apply built-in preset values by temporarily adjusting ST's sampler sliders
-export function applyBuiltinPreset(){
-    set_savedSamplerValues({});
-    const mappings=[
-        {key:'temperature',selectors:['#temp_openai','#temperature_slider','#temp'],val:BUILTIN_PRESET.temperature},
-        {key:'top_p',selectors:['#top_p_openai','#top_p_slider','#top_p'],val:BUILTIN_PRESET.top_p},
-        {key:'frequency_penalty',selectors:['#freq_pen_openai','#frequency_penalty_slider','#freq_pen'],val:BUILTIN_PRESET.frequency_penalty},
-        {key:'presence_penalty',selectors:['#pres_pen_openai','#presence_penalty_slider','#pres_pen'],val:BUILTIN_PRESET.presence_penalty},
-        // max_tokens intentionally omitted — user's SillyTavern preset controls token budget
-    ];
-    for(const m of mappings){
-        for(const sel of m.selectors){
-            const el=document.querySelector(sel);
-            if(el&&(el.type==='range'||el.type==='number'||el.tagName==='INPUT')){
-                const current=_savedSamplerValues;
-                current[sel]=el.value;
-                set_savedSamplerValues(current);
-                el.value=m.val;
-                el.dispatchEvent(new Event('input',{bubbles:true}));
-                log('Built-in preset: set',sel,'=',m.val,'(was',current[sel]+')');
-                break; // Only set first matching selector
-            }
-        }
+async function _changeAndWait(ctx,element,value,eventName,label){
+    if(!element||element.value===value)return;
+    const source=ctx.eventSource;
+    if(!eventName||!source?.on||!source?.removeListener){
+        element.value=value;element.dispatchEvent(new Event('change',{bubbles:true}));return;
     }
-}
-export function restorePresetValues(){
-    if(!_savedSamplerValues)return;
-    for(const[sel,val]of Object.entries(_savedSamplerValues)){
-        const el=document.querySelector(sel);
-        if(el){el.value=val;el.dispatchEvent(new Event('input',{bubbles:true}))}
-    }
-    log('Built-in preset: restored',Object.keys(_savedSamplerValues).length,'sampler values');
-    set_savedSamplerValues(null);
+    await new Promise((resolve,reject)=>{
+        let timer=null,done=false;
+        const finish=()=>{if(done)return;done=true;if(timer)clearTimeout(timer);source.removeListener(eventName,finish);resolve()};
+        source.on(eventName,finish);
+        try{
+            timer=setTimeout(()=>{warn(label+' switch timed out; continuing with current SillyTavern state');finish()},5000);
+            element.value=value;
+            element.dispatchEvent(new Event('change',{bubbles:true}));
+        }catch(e){source.removeListener(eventName,finish);reject(e)}
+    });
 }
 
 export async function withProfileAndPreset(pid,pre,fn){
-    const ctx=SillyTavern.getContext();let pp=null,pr=null;
+    const ctx=SillyTavern.getContext();const events=ctx.eventTypes||ctx.event_types||{};let pp=null,pr=null;
     // Save chat BEFORE switching profile — prevents message loss if switch triggers CHAT_CHANGED
     if(pid||pre)await ensureChatSaved();
-    if(pid){try{pp=document.querySelector('#connection_profiles, #connection_profile')?.value;if(typeof ctx.setConnectionProfile==='function')await ctx.setConnectionProfile(pid);else{const s=document.querySelector('#connection_profiles, #connection_profile');if(s){s.value=pid;s.dispatchEvent(new Event('change'));await new Promise(r=>setTimeout(r,300))}}}catch(e){warn('Profile:',e)}}
+    if(pid){try{const el=document.querySelector('#connection_profiles, #connection_profile');pp=el?.value??null;await _changeAndWait(ctx,el,pid,events.CONNECTION_PROFILE_LOADED,'Profile')}catch(e){warn('Profile:',e)}}
     // v6.23.7: empty preset is "(Same as current)" — leave the active preset
     // alone (no switch, no sampler mutation). Pre-v6.23.7 the empty branch
-    // implicitly called applyBuiltinPreset() to swap in GLM-5 sampler values
+    // implicitly swapped in GLM-5 sampler values
     // (temp 0.6, top_p 0.95, etc.), which (a) made user sliders move
     // unexpectedly during fallback and (b) was inconsistent with the profile
     // dropdown's clean "(Same as current)" semantics. Users who want
     // GLM-5 samplers can now save them as an explicit preset and select it.
-    if(pre){try{for(const sel of['#settings_preset_openai','#settings_preset_chat']){const el=document.querySelector(sel);if(el){const has=Array.from(el.options).some(o=>o.value===pre);if(has){pr=el.value;el.value=pre;el.dispatchEvent(new Event('change'));await new Promise(r=>setTimeout(r,200));break}}}}catch(e){warn('Preset:',e)}}
+    if(pre){try{for(const sel of['#settings_preset_openai','#settings_preset_chat']){const el=document.querySelector(sel);if(el){const has=Array.from(el.options).some(o=>o.value===pre);if(has){pr=el.value;await _changeAndWait(ctx,el,pre,sel==='#settings_preset_openai'?events.OAI_PRESET_CHANGED_AFTER:null,'Preset');break}}}}catch(e){warn('Preset:',e)}}
     try{return await fn()}finally{
         // Save chat BEFORE restoring profile — the generation may have saved new data
         await ensureChatSaved();
-        // Longer delay: profile restore triggers connection_profile_loaded → other extensions → CHAT_CHANGED
-        await new Promise(r=>setTimeout(r,2000));
-        if(pr){try{for(const sel of['#settings_preset_openai','#settings_preset_chat']){const el=document.querySelector(sel);if(el){el.value=pr;el.dispatchEvent(new Event('change'));break}}}catch{}}
-        if(pp){try{if(typeof ctx.setConnectionProfile==='function')await ctx.setConnectionProfile(pp);else{const s=document.querySelector('#connection_profiles, #connection_profile');if(s){s.value=pp;s.dispatchEvent(new Event('change'))}}}catch{}}
+        if(pr){try{for(const sel of['#settings_preset_openai','#settings_preset_chat']){const el=document.querySelector(sel);if(el){await _changeAndWait(ctx,el,pr,sel==='#settings_preset_openai'?events.OAI_PRESET_CHANGED_AFTER:null,'Preset restore');break}}}catch(e){warn('Preset restore:',e)}}
+        if(pp!==null){try{const el=document.querySelector('#connection_profiles, #connection_profile');await _changeAndWait(ctx,el,pp,events.CONNECTION_PROFILE_LOADED,'Profile restore')}catch(e){warn('Profile restore:',e)}}
     }
 }
 
@@ -104,7 +86,7 @@ export function cancelGeneration(){
     // If we cancel without clearing it, a subsequent CHARACTER_MESSAGE_RENDERED from
     // ANOTHER extension (MemoryBooks memory insertion, etc.) would be misattributed
     // to our still-pending generation and extraction would run on foreign content.
-    setInlineGenStartMs(0);setInlineExtractionDone(false);setPendingInlineIdx(-1);
+    setInlineGenStartMs(0);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenerationContext(null);
     // v6.27.18: also tear down the visible regen UI (loading overlay,
     // elapsed timer, Stop button). Previously this only fired when doGen
     // completed naturally, so a user-initiated cancel left the loading
@@ -114,54 +96,17 @@ export function cancelGeneration(){
     try { cleanupGenUI(); } catch {}
     log('CANCEL: nonce',oldNonce,'\u2192',genNonce,'— generation unlocked');
 
-    // Abort SillyTavern's in-flight HTTP request — try every known method
+    // Abort through SillyTavern's public context API, with the current stop
+    // button as a compatibility fallback.
     try{
         const ctx=SillyTavern.getContext();
-        let aborted=false;
-
-        // Method 1: ST's abortController on context
-        if(ctx.abortController&&typeof ctx.abortController.abort==='function'){
-            log('CANCEL: aborting via ctx.abortController');
-            ctx.abortController.abort();aborted=true;
+        let aborted=false,handled=false;
+        if(typeof ctx.stopGeneration==='function'){
+            handled=true;aborted=ctx.stopGeneration()!==false;
+            log(aborted?'CANCEL: stopped through SillyTavern context API':'CANCEL: no active SillyTavern request to abort');
         }
-
-        // Method 2: ST's global abortController
-        if(!aborted&&window.abortController&&typeof window.abortController.abort==='function'){
-            log('CANCEL: aborting via window.abortController');
-            window.abortController.abort();aborted=true;
-        }
-
-        // Method 3: Try clicking ST's stop button with multiple known selectors
-        const stopSelectors=['#mes_stop','.mes_stop','#stop_button','.stop_button','#form_sheld .stop_button','[id*="stop"]'];
-        for(const sel of stopSelectors){
-            try{
-                const el=document.querySelector(sel);
-                if(el){
-                    log('CANCEL: found ST stop element:',sel,'visible=',el.offsetParent!==null,'display=',getComputedStyle(el).display);
-                    if(el.offsetParent!==null||getComputedStyle(el).display!=='none'){
-                        el.click();
-                        log('CANCEL: clicked ST stop button via',sel);
-                        aborted=true;break;
-                    }
-                }
-            }catch(e2){}
-        }
-
-        // Method 4: Try jQuery click on common stop IDs
-        if(!aborted){
-            try{
-                if(typeof $==='function'){
-                    const $stop=$('#mes_stop, .mes_stop, .stop_button').filter(':visible');
-                    if($stop.length){
-                        $stop.first().trigger('click');
-                        log('CANCEL: jQuery-clicked ST stop button');
-                        aborted=true;
-                    }
-                }
-            }catch(e3){}
-        }
-
-        if(!aborted)log('CANCEL: could not find ST abort mechanism — API call will complete in background');
+        if(!handled){const stop=document.getElementById('mes_stop');if(stop){stop.click();aborted=true;log('CANCEL: clicked SillyTavern stop button')}}
+        if(!aborted)log('CANCEL: SillyTavern request could not be aborted — its response will be discarded by nonce');
     }catch(e){warn('CANCEL: ST abort attempt failed:',e?.message)}
 
     cleanupGenUI();
@@ -171,62 +116,33 @@ export function cancelGeneration(){
     if(snap){
         const norm=normalizeTracker(snap);
         updatePanel(norm);
-    }else if(body){
-        body.innerHTML='<div class="sp-empty-state"><div class="sp-empty-icon">\ud83d\udce1</div><div class="sp-empty-title">No scene data yet</div><div class="sp-empty-sub">Generation was cancelled. Click <strong>\u27f3</strong> to try again.</div></div>';
-    }
+    }else if(body)renderEmptyState();
 }
 
-// Smart snapshot selection: score snapshots by significance (location changes, new characters, quest completions, tension shifts)
-function _selectSignificantSnapshots(allSnaps,sortedDesc,count){
-    // Always include the most recent
-    const scores=[];
-    let prevSnap=null;
-    // Walk chronologically
-    const chronological=[...sortedDesc].reverse();
-    for(const key of chronological){
-        const snap=allSnaps[String(key)];if(!snap)continue;
-        let score=0;
-        if(prevSnap){
-            // Location change
-            if(snap.location&&snap.location!==prevSnap.location)score+=3;
-            // Tension shift
-            if(snap.sceneTension&&snap.sceneTension!==prevSnap.sceneTension)score+=2;
-            // New characters
-            const prevChars=new Set((prevSnap.characters||[]).map(c=>(c.name||'').toLowerCase()));
-            const newChars=(snap.characters||[]).filter(c=>!prevChars.has((c.name||'').toLowerCase()));
-            if(newChars.length)score+=2*newChars.length;
-            // Quest completions
-            const prevQuests=new Set([...(prevSnap.mainQuests||[]),...(prevSnap.sideQuests||[])].filter(q=>q.urgency!=='resolved').map(q=>(q.name||'').toLowerCase()));
-            const resolved=[...(snap.mainQuests||[]),...(snap.sideQuests||[])].filter(q=>q.urgency==='resolved'&&prevQuests.has((q.name||'').toLowerCase()));
-            if(resolved.length)score+=3*resolved.length;
-        } else {
-            score=1; // First snapshot gets baseline
-        }
-        scores.push({key,score});
-        prevSnap=snap;
-    }
-    // Always include latest (last in chronological)
-    const latest=chronological[chronological.length-1];
-    // Sort by score descending, pick top (count-1), then add latest and sort chronologically
-    const candidates=scores.filter(s=>s.key!==latest).sort((a,b)=>b.score-a.score);
-    const selected=[latest,...candidates.slice(0,count-1).map(s=>s.key)];
-    const result=selected.sort((a,b)=>a-b);
-    log('Smart snapshot selection:',result.join(','),'scores:',scores.filter(s=>result.includes(s.key)).map(s=>s.key+':'+s.score).join(','));
-    return result;
-}
 
 export async function generateTracker(mesIdx,partKey,opts){
     if(!getSettings().enabled){log('generateTracker: extension disabled, skipping');return null}
     if(generating){warn('Busy, nonce=',genNonce);return null}
     setGenerating(true);setCancelRequested(false);spSetGenerating(true);setBrandState('generating');
-    // v6.27.19: ST DOM watchdog (poll #mes_stop visibility every 3s).
-    // Catches ECONNRESET-class hangs in ~6-9s where ST has stopped
-    // generating but our await chain didn't reject. Auto-stops when
-    // SP's `generating` goes false (cleanup at line 432 / 656).
-    startStWatchdog();
     const myNonce=genNonce+1;setGenNonce(myNonce);
     const genStartMs=Date.now();
-    const settings=getSettings();const schema=getActiveSchema();const sysPr=getActivePrompt({ hasPrevState: !!getLatestSnapshot(), isDelta: shouldUseDelta() });
+    const targetSwipeId=getActiveSwipeId(mesIdx);
+    const operationOwner=captureOperationOwner(mesIdx,targetSwipeId);
+    const baseSnapshot=partKey?(getTrustedSnapshotFor(mesIdx,targetSwipeId)||getPrevSnapshot(mesIdx)):getPrevSnapshot(mesIdx);
+    const rootSettings=getSettings();
+    const settings=buildProfileView(rootSettings,getActiveProfile(rootSettings));
+    const useDelta=!hasStaleSnapshotBefore(mesIdx)&&shouldUseDelta(baseSnapshot);
+    clearForceFullState();
+    let requestFields=partKey?(SECTION_FIELDS[partKey]||[]):[];
+    if(partKey?.startsWith('custom_')){
+        const panel=(settings.customPanels||[]).find(item=>customPanelSectionKey(item?.name)===partKey);
+        requestFields=(Array.isArray(panel?.fields)?panel.fields:[])
+            .filter(field=>field?.enabled!==false&&isValidCustomFieldKey(field?.key))
+            .map(field=>field.key);
+    }
+    const requestMode=partKey?'section':(useDelta?'delta':'full');
+    const schema=buildRequestSchema(getActiveSchema(),{mode:requestMode,fields:requestFields});
+    const sysPr=getActivePrompt({ hasPrevState: !!baseSnapshot, isDelta: useDelta });
     let profileOverride=opts?.profile||settings.connectionProfile;
     let presetOverride=opts?.preset||settings.chatPreset;
     log('=== GENERATION START === mesIdx=',mesIdx,'partKey=',partKey||'(full)','nonce=',myNonce,'source=',lastGenSource||'unknown','profile=',profileOverride||'(current)');
@@ -246,110 +162,78 @@ export async function generateTracker(mesIdx,partKey,opts){
         if(!match)match=_genPresets.find(p=>p.name.toLowerCase().includes(norm)||norm.includes(p.name.toLowerCase()));
         if(match){log('Generation: resolved preset:',presetOverride,'\u2192',match.id);presetOverride=match.id}
     }
+    let terminalFailure=null;
+    let successfulRequestMeta=null;
+    let successfulValidationWarnings=[];
+    const requestAbort=new AbortController();
     const doGen=async()=>{
-        const{chat,generateQuietPrompt,generateRaw}=SillyTavern.getContext();
-        log('Chat length:',chat.length,'API funcs:','quietPrompt=',!!generateQuietPrompt,'raw=',!!generateRaw);
-        const recent=chat.slice(Math.max(0,chat.length-settings.contextMessages));
-        const ctxText=recent.map(m=>`${m.is_user?'{{user}}':(m.name||'{{char}}')}: ${m.mes}`).join('\n\n');
-        const lastSnap=getLatestSnapshot();
+        const stContext=SillyTavern.getContext();
+        const{chat}=stContext;
+        log('Chat length:',chat.length,'API funcs:','rawData=',!!stContext.generateRawData,'raw=',!!stContext.generateRaw,'quiet=',!!stContext.generateQuietPrompt);
+        const{recent,text:ctxText}=buildRecentContext(chat,settings.contextMessages,mesIdx);
+        const lastSnap=baseSnapshot;
         // Filter resolved quests from snapshot before embedding in prompt
-        function _cleanSnapForPrompt(s){const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(Array.isArray(c.charactersPresent)&&c.charactersPresent.length>0){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c}
+        function _cleanSnapForPrompt(s){const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(settings.panels?.storyIdeas===false)delete c.plotBranches;if(Array.isArray(c.charactersPresent)){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c}
         let snapCtx='';
         if(lastSnap){
-            const allSnaps=getTrackerData().snapshots;
-            const sorted=Object.keys(allSnaps).map(Number).sort((a,b)=>b-a);
-            const snapCount=Math.min(settings.embedSnapshots||1, sorted.length);
-            // Smart snapshot selection: pick most significant state changes instead of just N most recent
-            let snapsToEmbed;
-            if(snapCount>1&&sorted.length>2){
-                snapsToEmbed=_selectSignificantSnapshots(allSnaps,sorted,snapCount);
-            }else{
-                snapsToEmbed=sorted.slice(0,snapCount).reverse();
-            }
             const hasEmptyChars=!lastSnap.characters||!lastSnap.characters.length;
-            if(snapCount<=1){
-                snapCtx=`\n\nPREVIOUS STATE (for reference \u2014 update as needed):\n${JSON.stringify(_cleanSnapForPrompt(lastSnap),null,2)}`;
-            }else{
-                snapCtx='\n\nPREVIOUS STATES (most recent last, for tracking changes over time):';
-                for(const k of snapsToEmbed){
-                    snapCtx+=`\n--- Snapshot from message #${k} ---\n${JSON.stringify(_cleanSnapForPrompt(allSnaps[String(k)]),null,2)}`;
-                }
-            }
+            snapCtx=`\n\nPREVIOUS STATE (carry forward unchanged facts; update only what the recent narrative changed):\n${JSON.stringify(_cleanSnapForPrompt(lastSnap),null,2)}`;
             snapCtx+=settings.panels?.quests!==false?`\n\nIMPORTANT: Quest Journal must be from {{user}}'s perspective. If {{char}} is hostile, {{user}}'s quests OPPOSE {{char}}'s goals. If {{char}} is an ally, {{user}}'s quests SUPPORT them \u2014 but framed as {{user}}'s action. NEVER write what {{char}} is doing \u2014 write what {{user}} is doing about it. NEVER drop unresolved quests.`:`\n\nIMPORTANT: Carry forward unchanged details. Only update what changed in the story.`;
             if(hasEmptyChars){
                 snapCtx+=`\n\nWARNING: The previous state has EMPTY characters. This is a bug \u2014 you MUST generate full character details for ALL characters present in the scene.`;
                 log('Previous state has empty characters \u2014 added generation warning');
             }
         }
-        log('Gen context: msgs=',recent.length,'snapshots=',settings.embedSnapshots||1,'snapCtxLen~',snapCtx.length);
-        let prompt=`${sysPr}\n\nRECENT:\n${ctxText}${snapCtx}\n\nGenerate updated JSON.`;
-        if(partKey&&lastSnap)prompt+=`\n\nFOCUS: Only update fields related to "${partKey}". You MUST still return the complete JSON schema, but ONLY change the ${partKey}-related fields. Copy all other fields exactly as-is from the previous state.`;
-        const promptLen=prompt.length;
-        log('Prompt length:',promptLen,'chars (~',Math.round(promptLen/4),'tokens)');
+        log('Gen context: msgs=',recent.length,'snapshotCopies=',lastSnap?1:0,'snapCtxLen~',snapCtx.length);
+        let prompt=`RECENT SCENE CONTEXT:\n${ctxText}${snapCtx}\n\nGenerate the updated ScenePulse tracker as one JSON object.`;
+        if(partKey)prompt+=`\n\nFOCUS: Return ONLY these requested fields: ${requestFields.join(', ')}. Do not copy unrelated fields.`;
+        let lastErrorCode='';let validationErrors=[];let attemptPromptMode=settings.promptMode==='native'?'native':'json';
+        let totalPromptTokens=0,totalCompletionTokens=0;
         for(let a=0;a<=settings.maxRetries;a++){
+            let raw;let rawStr='';let finishReason='';let strategy='';
+            const responseLength=computeResponseLength({mode:requestMode,previousSnapshot:lastSnap,attempt:a,lastErrorCode});
+            const attemptPrompt=a?`${prompt}\n\nCORRECTION AFTER ATTEMPT ${a}: ${correctiveInstruction(lastErrorCode,validationErrors)}`:prompt;
+            totalPromptTokens+=Math.round((sysPr.length+attemptPrompt.length)/4);
             // Nonce check at every opportunity — if cancelled, bail immediately
             if(myNonce!==genNonce){log('STALE nonce',myNonce,'(current',genNonce+') \u2014 discarding silently');return null}
-            try{if(a>0){log(`Retry ${a}/${settings.maxRetries}`);await new Promise(r=>setTimeout(r,1000*a))}
-                let raw;
-                log('Attempt',a+1,': calling generateQuietPrompt... nonce=',myNonce);
+            try{if(a>0){log(`Retry ${a}/${settings.maxRetries}`);await new Promise(r=>setTimeout(r,1000*a));if(myNonce!==genNonce){log('Retry cancelled during backoff');return null}}
+                log('Attempt',a+1,': mode=',attemptPromptMode,'outputBudget=',responseLength,'nonce=',myNonce);
+                let quietError=null;
                 try{
-                    raw=await generateQuietPrompt({quietPrompt:prompt,jsonSchema:settings.promptMode==='native'?schema:undefined});
-                }
-                catch(e){
-                    if(myNonce!==genNonce){log('STALE after quiet error, nonce',myNonce);return null}
-                    const msg=e?.message||String(e);
-                    warn('API error:',msg);
-                    // ── Fatal API errors: stop immediately, no retry ──
-                    const FATAL_PATTERNS=['401','403','404','authentication','unauthorized','forbidden','model not found','invalid api key','api key','billing','quota','insufficient','deactivated','account','permission','not allowed','blocked','banned'];
-                    const msgLow=msg.toLowerCase();
-                    const isFatal=FATAL_PATTERNS.some(p=>msgLow.includes(p));
-                    if(isFatal){
-                        err('FATAL API ERROR \u2014 stopping generation:',msg);
-                        setLastRawResponse('FATAL API ERROR: '+msg);
-                        toastr.error('API Error: '+msg.substring(0,100),'Generation stopped');
+                    const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true});
+                    raw=response.value;strategy=response.strategy;
+                }catch(e){quietError=e}
+                if(quietError){
+                    if(myNonce!==genNonce){log('STALE after request error, nonce',myNonce);return null}
+                    const info=classifyRequestError(quietError);
+                    warn('API error:',info.message);
+                    terminalFailure=recordExtractionFailure('API_ERROR',info.message,'',mesIdx,{stage:'provider',retryable:info.retryable,owner:operationOwner,attempt:a+1,strategy,responseLength});
+                    if(!info.retryable){
+                        if(info.kind!=='cancelled')toastr.error(info.kind==='rate_limit'?'Rate limited — try again later':'API Error: '+info.message.substring(0,100),'Generation stopped');
                         return null;
                     }
-                    // ── Rate limit: stop, don't waste retries ──
-                    if(msgLow.includes('429')||msgLow.includes('rate limit')||msgLow.includes('too many requests')){
-                        err('RATE LIMITED \u2014 stopping generation:',msg);
-                        setLastRawResponse('RATE LIMITED: '+msg);
-                        toastr.error('Rate limited \u2014 try again in a moment','Generation stopped');
-                        return null;
-                    }
-                    // ── Network errors: retry with delay ──
-                    if(msg.includes('ECONNRESET')||msg.includes('socket')||msg.includes('500')||msg.includes('502')||msg.includes('503')||msg.includes('timeout')){
-                        log('Network error, waiting 2s before fallback...');
-                        await new Promise(r=>setTimeout(r,2000));
-                    }
-                    log('Trying generateRaw fallback...');
-                    // v6.19.0 (issue #16): route through applyPromptRole so the
-                    // active profile's systemPromptRole (system/user/assistant)
-                    // takes effect before the call. Default 'system' is a no-op.
-                    try{raw=await generateRaw(applyPromptRole({systemPrompt:sysPr,prompt:`RECENT:\n${ctxText}${snapCtx}\n\nOutput ONLY valid JSON.`}))}
-                    catch(e2){
-                        const msg2=e2?.message||String(e2);
-                        err('Fallback also failed:',msg2);
-                        // Check if fallback hit a fatal error too
-                        const msg2Low=msg2.toLowerCase();
-                        if(FATAL_PATTERNS.some(p=>msg2Low.includes(p))||msg2Low.includes('429')||msg2Low.includes('rate limit')){
-                            err('FATAL on fallback \u2014 stopping:',msg2);
-                            setLastRawResponse('FATAL API ERROR (fallback): '+msg2);
-                            toastr.error('API Error: '+msg2.substring(0,100),'Generation stopped');
-                            return null;
-                        }
-                        continue;
-                    }
+                    if(attemptPromptMode==='native'&&info.kind==='provider'){attemptPromptMode='json';warn('Native structured request failed; retrying in JSON-only mode')}
+                    if(a<settings.maxRetries)await new Promise(resolve=>setTimeout(resolve,Math.min(4000,500*Math.pow(2,a))));
+                    continue;
                 }
                 // Check nonce AFTER API returns — this is the critical discard point
                 if(myNonce!==genNonce){log('STALE after API return, nonce',myNonce,'(current',genNonce+') \u2014 discarding response');return null}
-                if(!raw||raw==='{}'){warn('Empty response on attempt',a+1);continue}
-                const rawStr=String(raw);
+                const provider=normalizeProviderResponse(raw);rawStr=provider.text;finishReason=provider.finishReason;
+                if(!rawStr||rawStr.trim()==='{}'){
+                    lastErrorCode='NO_JSON_OBJECT';
+                    if(attemptPromptMode==='native'){attemptPromptMode='json';warn('Native structured output was empty; retrying in JSON-only mode')}
+                    terminalFailure=recordExtractionFailure(lastErrorCode,'Provider returned an empty response',rawStr,mesIdx,{stage:'provider',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});continue
+                }
+                const finishLow=finishReason.toLowerCase();
+                const responseTruncated=['length','max_tokens','max_output_tokens','token_limit'].includes(finishLow);
+                if(responseTruncated)lastErrorCode='TRUNCATED';
                 const rawLen=rawStr.length;
+                totalCompletionTokens+=Math.round(rawLen/4);
                 setLastRawResponse(rawStr); // store for debug copy
                 // v6.15.6: also capture the pair for the inspector's pair browser.
                 // v6.16.0: synthesize a network log entry linked to the pair via id.
                 let _capturedPair = null;
-                try { _capturedPair = pushPair({ prompt, response: rawStr, mesIdx, source: 'engine' }); } catch {}
+                try { _capturedPair = pushPair({ prompt:attemptPrompt, response: rawStr, mesIdx, chatKey:operationOwner.chatKey, source: 'engine' }); } catch {}
                 try {
                     recordNetwork({
                         label: 'generate',
@@ -357,7 +241,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                         url: '(SillyTavern generate)',
                         status: 200, // we got a response; HTTP-level errors short-circuit earlier
                         latencyMs: (Date.now() - genStartMs),
-                        reqBytes: prompt.length,
+                        reqBytes: attemptPrompt.length,
                         respBytes: rawStr.length,
                         pairId: _capturedPair?.id || null,
                     });
@@ -370,20 +254,32 @@ export async function generateTracker(mesIdx,partKey,opts){
                         if(errObj.error){
                             const errMsg=typeof errObj.error==='string'?errObj.error:(errObj.error.message||JSON.stringify(errObj.error));
                             err('API returned error object:',errMsg);
-                            toastr.error('API Error: '+errMsg.substring(0,100),'Generation stopped');
+                            terminalFailure=recordExtractionFailure('API_ERROR',errMsg,rawStr,mesIdx,{stage:'provider',finishReason,owner:operationOwner});
+                            toastr.error(t('API Error: {error}',{error:errMsg.substring(0,100)}),t('Generation stopped'));
                             return null;
                         }
                     }catch{}// Not JSON error, continue normally
                 }
                 log('Got response, length:',rawLen,'chars, nonce=',myNonce);
-                log('Response preview:',String(raw).substring(0,200)+'\u2026');
+                log('Response preview:',rawStr.substring(0,200)+'\u2026');
                 const meta=genMeta;
-                meta.promptTokens=Math.round(promptLen/4);
-                meta.completionTokens=Math.round(rawLen/4);
+                meta.promptTokens=totalPromptTokens;
+                meta.completionTokens=totalCompletionTokens;
                 meta.elapsed=((Date.now()-genStartMs)/1000);
                 setGenMeta(meta);
-                addSessionTokens(meta.promptTokens + meta.completionTokens);
-                const parsed=cleanJson(raw);
+                if(responseTruncated){const cut=new Error('Provider stopped at its output token limit');cut.code='TRUNCATED';throw cut}
+                const parsed=parseTrackerCandidate(rawStr,{mode:requestMode,knownKeys:Object.keys(schema.value.properties||{})});
+                if(!Object.hasOwn(schema.value.properties||{},'plotBranches'))delete parsed.plotBranches;
+                const validation=validateExtraction(parsed,{schema:schema.value});
+                if(!validation.valid){
+                    lastErrorCode='SEMANTIC_INVALID';validationErrors=validation.errors;
+                    terminalFailure=recordExtractionFailure(lastErrorCode,'Tracker JSON failed schema validation',rawStr,mesIdx,{stage:'validate',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength,validationErrors});
+                    try{markLastPairParseFailed(validation.errors.join('; '))}catch{}
+                    continue;
+                }
+                successfulValidationWarnings=validation.warnings;
+                addSessionTokens(meta.promptTokens+meta.completionTokens);
+                successfulRequestMeta={strategy,responseLength,attempt:a+1,promptMode:attemptPromptMode};
                 // Delta merge: combine delta response with previous snapshot.
                 // v6.8.50: use the shared shouldUseDelta() helper which
                 // respects the periodic full-state refresh counter. When the
@@ -391,7 +287,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // false and the interceptor would have already sent a full-
                 // state prompt, so the parsed response is a complete snapshot
                 // — we should NOT merge it, just use it as-is.
-                if(shouldUseDelta() && lastSnap){
+                if(useDelta && lastSnap){
                     log('Delta mode: merging',Object.keys(parsed).length,'delta keys with previous');
                     setLastDeltaPayload(parsed);
                     // Estimate delta savings: compare output tokens to typical full output
@@ -406,25 +302,12 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // from the previous snapshot. The LLM only returns characters
                 // in the current scene, but we must keep accumulated data for
                 // characters who left (for wiki, returning-character support).
-                if(lastSnap){
-                    for(const k of['characters','relationships']){
-                        if(Array.isArray(parsed[k])&&Array.isArray(lastSnap[k])){
-                            const newNames=new Set((parsed[k]||[]).map(e=>(e.name||'').toLowerCase().trim()));
-                            for(const prev of lastSnap[k]){
-                                const pn=(prev.name||'').toLowerCase().trim();
-                                if(pn&&!newNames.has(pn)){
-                                    parsed[k].push(structuredClone(prev));
-                                    log('Full-state: preserved off-scene entity:',prev.name,'in',k);
-                                }
-                            }
-                        }
-                    }
-                }
+                preserveOffSceneEntities(parsed,lastSnap);
                 return parsed;
-            }catch(e){err(`Parse fail (${a+1}):`,e?.message||String(e)); try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
+            }catch(e){lastErrorCode=e?.code||'MALFORMED_JSON';err(`Parse fail (${a+1}):`,e?.message||String(e));terminalFailure=recordExtractionFailure(lastErrorCode,e?.message||String(e),rawStr,mesIdx,{stage:'parse',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
         }
         warn('All',settings.maxRetries+1,'attempts exhausted, returning null');
-        toastr.error('All retry attempts failed \u2014 check SP Log for details','Generation failed');
+        toastr.error(t('All retry attempts failed — open the Debug Inspector for details'),t('Generation failed'));
         return null;
     };
     let result;
@@ -438,45 +321,53 @@ export async function generateTracker(mesIdx,partKey,opts){
     // On timeout the catch below logs and result stays undefined; the
     // cleanup at line 432 then runs normally and the UI unlocks.
     const ENGINE_TIMEOUT_MS = 180000;
+    let engineTimeoutId=null;
     try{
         result = await Promise.race([
             withProfileAndPreset(profileOverride,presetOverride,doGen),
-            new Promise((_, reject) => setTimeout(
-                () => reject(new Error('TIMEOUT: tracker generation exceeded ' + (ENGINE_TIMEOUT_MS / 1000) + 's with no completion (network drop or upstream hang?)')),
-                ENGINE_TIMEOUT_MS
-            )),
+            new Promise((_, reject) => {engineTimeoutId=setTimeout(()=>{
+                const timeoutError=new Error('TIMEOUT: tracker generation exceeded '+(ENGINE_TIMEOUT_MS/1000)+'s with no completion (network drop or upstream hang?)');
+                requestAbort.abort(timeoutError);reject(timeoutError);
+            },ENGINE_TIMEOUT_MS)}),
         ]);
     }
     catch(e){
         err('Gen:',e);
+        terminalFailure=recordExtractionFailure('API_ERROR',e?.message||String(e),'',mesIdx,{stage:'provider',retryable:true,owner:operationOwner});
         if (e?.message?.startsWith('TIMEOUT')) {
             try { toastr.warning(e.message + ' UI unlocked.', 'ScenePulse'); } catch {}
         }
-    }
+    }finally{if(engineTimeoutId)clearTimeout(engineTimeoutId)}
     // Only the CURRENT generation is allowed to touch state
     if(myNonce!==genNonce){
         log('POST-GEN: stale nonce',myNonce,'(current',genNonce+') \u2014 result discarded, state untouched');
         return null; // Don't reset generating — the newer cancel/gen already did
     }
+    if(getActiveSwipeId(mesIdx)!==targetSwipeId){
+        log('POST-GEN: active swipe changed for message',mesIdx,'— result discarded');
+        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        return null;
+    }
+    const ownerCheck=validateOperationOwner(operationOwner,{requireSource:true});
+    if(!ownerCheck.valid){
+        log('POST-GEN: owner changed for message',mesIdx,'— result discarded:',ownerCheck.code);
+        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        try{toastr.info(t('Chat changed while ScenePulse was working. Run the tracker again.'),'ScenePulse')}catch{}
+        return null;
+    }
     setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');
     if(result){
+        terminalFailure=null;
+        setLastExtractionFailure(null);
         log('Raw output keys:',Object.keys(result).join(', '));
         log('Raw characters?',Array.isArray(result.characters)?'array('+result.characters.length+')':typeof result.characters);
         log('Raw relationships?',Array.isArray(result.relationships)?'array('+result.relationships.length+')':typeof result.relationships);
         result=normalizeTracker(result);
         // ── SECTION MERGE: Only accept fields belonging to the requested section ──
         if(partKey){
-            const SECTION_FIELDS={
-                dashboard:['time','date','location','weather','temperature'],
-                scene:['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent'],
-                quests:['northStar','mainQuests','sideQuests'],
-                relationships:['relationships'],
-                characters:['characters'],
-                branches:['plotBranches']
-            };
             const allowedFields=SECTION_FIELDS[partKey];
             if(allowedFields||partKey.startsWith('custom_')){
-                const existingSnap=getSnapshotFor(mesIdx)||getLatestSnapshot();
+                const existingSnap=getTrustedSnapshotFor(mesIdx)||getLatestSnapshot();
                 if(existingSnap){
                     const merged=normalizeTracker(existingSnap);
                     if(allowedFields){
@@ -487,7 +378,6 @@ export async function generateTracker(mesIdx,partKey,opts){
                             // not in the new response (e.g. off-scene characters)
                             if(_entityArrays[f]&&Array.isArray(result[f])&&Array.isArray(merged[f])){
                                 const keyField=_entityArrays[f];
-                                const newNames=new Set(result[f].map(e=>(e[keyField]||'').toLowerCase().trim()));
                                 // Update/add entities from result
                                 for(const newE of result[f]){
                                     const nk=(newE[keyField]||'').toLowerCase().trim();
@@ -504,9 +394,9 @@ export async function generateTracker(mesIdx,partKey,opts){
                     } else {
                         // Custom panel — accept only its field keys
                         const s=getSettings();
-                        const cp=(s.customPanels||[]).find(c=>'custom_'+c.name.replace(/\s+/g,'_').toLowerCase()===partKey);
-                        if(cp?.fields){
-                            const cpFields=cp.fields.map(f=>f.key);
+                        const cp=(s.customPanels||[]).find(c=>customPanelSectionKey(c?.name)===partKey);
+                        if(Array.isArray(cp?.fields)){
+                            const cpFields=cp.fields.filter(f=>isValidCustomFieldKey(f?.key)).map(f=>f.key);
                             for(const f of cpFields){if(result[f]!==undefined)merged[f]=result[f]}
                             log('Section merge (custom): partKey=',partKey,'accepted fields:',cpFields.join(','));
                         }
@@ -515,6 +405,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 }
             }
         }
+        if(successfulValidationWarnings.length)result._validationWarnings=successfulValidationWarnings;
         log('=== POST-NORMALIZE SUMMARY === source=',lastGenSource);
         log('  chars:',result.characters?.length||0,'rels:',result.relationships?.length||0);
         log('  quests: main=',result.mainQuests?.length||0,'side=',result.sideQuests?.length||0);
@@ -530,14 +421,15 @@ export async function generateTracker(mesIdx,partKey,opts){
         // The shouldUseDelta() helper reads this counter from the
         // previous snapshot to decide whether the NEXT turn should be
         // delta or forced-full.
-        const _wasDelta = shouldUseDelta();
-        const _prevCounter = (getLatestSnapshot()?._spMeta?.deltaTurnsSinceFull ?? 0);
+        const _wasDelta = useDelta;
+        const _prevCounter = (baseSnapshot?._spMeta?.deltaTurnsSinceFull ?? 0);
         result._spMeta={promptTokens:genMeta.promptTokens,completionTokens:genMeta.completionTokens,elapsed:genMeta.elapsed,source:lastGenSource,injectionMethod:getSettings().injectionMethod||'inline',deltaMode:_wasDelta,deltaTurnsSinceFull:_wasDelta?_prevCounter+1:0};
+        if(successfulRequestMeta)result._spMeta.request=successfulRequestMeta;
         // v6.9.8: first-run success confirmation — if this is the very
         // first snapshot in the chat, show a welcome toast so the user
         // knows ScenePulse is working.
         const _isFirstSnap = Object.keys(getTrackerData().snapshots || {}).length === 0;
-        saveSnapshot(mesIdx,result);log('Snapshot saved for mesIdx=',mesIdx,'keys=',Object.keys(result).length,'elapsed=',genMeta.elapsed.toFixed(1)+'s','~tokens:',genMeta.promptTokens+genMeta.completionTokens);
+        saveSnapshot(mesIdx,result,targetSwipeId);log('Snapshot saved for mesIdx=',mesIdx,'swipe=',targetSwipeId,'keys=',Object.keys(result).length,'elapsed=',genMeta.elapsed.toFixed(1)+'s','~tokens:',genMeta.promptTokens+genMeta.completionTokens);
         if (_isFirstSnap) {
             const _charCount = (result.characters || []).length;
             toastr.success(
@@ -548,9 +440,12 @@ export async function generateTracker(mesIdx,partKey,opts){
         updatePanel(result);
         spPostGenShow(); // mobile: banner instead of panel popup
     }else{
-        // Show error in panel instead of stuck spinner
+        // Keep the last trusted scene visible; the recovery card is additive.
         const body=document.getElementById('sp-panel-body');
-        if(body)body.innerHTML='<div class="sp-error"><div style="font-weight:700;margin-bottom:4px">Generation Failed</div><div style="font-size:10px">Network timeout or API issue. Try \u27f3 Regen or check debug log.</div></div>';
+        const previous=getPrevSnapshot(mesIdx)||getLatestSnapshot();
+        if(previous){try{updatePanel(normalizeTracker(previous))}catch{}}
+        if(body&&!terminalFailure)body.innerHTML='<div class="sp-error"><div style="font-weight:700;margin-bottom:4px">Generation Failed</div><div style="font-size:10px">Network timeout or API issue. Try \u27f3 Regen or check debug log.</div></div>';
+        if(terminalFailure){try{const{showJsonRecovery}=await import('../ui/json-recovery.js');showJsonRecovery({mesIdx,failure:terminalFailure,stripInline:false,onRetry:async()=>{setLastGenSource('manual:recovery');await generateTracker(mesIdx,partKey,opts)}})}catch(e){warn('Recovery UI:',e?.message)}}
         warn('Generation returned null for',mesIdx);
     }
     return result;
@@ -583,36 +478,36 @@ export async function continuationReprompt(narrativeText, opts){
     if(!getSettings().enabled){log('continuationReprompt: extension disabled, skipping');return null}
     if(generating){warn('continuationReprompt: busy, nonce=',genNonce);return null}
     setGenerating(true);setCancelRequested(false);spSetGenerating(true);setBrandState('generating');
-    // v6.27.19: ST DOM watchdog (poll #mes_stop visibility every 3s).
-    // Catches ECONNRESET-class hangs in ~6-9s where ST has stopped
-    // generating but our await chain didn't reject. Auto-stops when
-    // SP's `generating` goes false (cleanup at line 432 / 656).
-    startStWatchdog();
     const myNonce=genNonce+1;setGenNonce(myNonce);
     const startMs=Date.now();
-    const settings=getSettings();
+    const mesIdx=Number(opts?.mesIdx);
+    const operationOwner=opts?.owner||captureOperationOwner(mesIdx,opts?.swipeId);
+    const rootSettings=getSettings();
+    const settings=buildProfileView(rootSettings,getActiveProfile(rootSettings));
     const profileOverride=opts?.profile||settings.connectionProfile;
     const presetOverride=opts?.preset||settings.chatPreset;
     log('=== CONTINUATION START === narrativeLen=',narrativeText.length,'nonce=',myNonce,'source=',lastGenSource||'auto:together:continuation','profile=',profileOverride||'(current)');
     // Build the continuation prompt — just the narrative + a focused JSON-only instruction.
     // We deliberately do NOT inject the full schema again; the model already saw it on
     // the original turn. Asking only for the missing piece is what makes this cheap.
-    const sysPr=getActivePrompt({hasPrevState:!!getLatestSnapshot(),isDelta:shouldUseDelta()});
-    const lastSnap=getLatestSnapshot();
+    const lastSnap=Object.hasOwn(opts||{},'baseSnapshot')?opts.baseSnapshot:(opts?.mesIdx!=null?getPrevSnapshot(opts.mesIdx):getLatestSnapshot());
+    const isDelta=!hasStaleSnapshotBefore(opts?.mesIdx??SillyTavern.getContext().chat?.length)&&shouldUseDelta(lastSnap)&&!!lastSnap;
+    const sysPr=getActivePrompt({hasPrevState:!!lastSnap,isDelta});
+    const continuationMode=isDelta?'delta':'full';
+    const continuationSchema=buildRequestSchema(getActiveSchema(),{mode:continuationMode});
+    const continuationAbort=new AbortController();
     let prevState='';
     if(lastSnap){
-        function _cleanSnap(s){const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(Array.isArray(c.charactersPresent)&&c.charactersPresent.length>0){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c}
+        const _cleanSnap=(s)=>{const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(settings.panels?.storyIdeas===false)delete c.plotBranches;if(Array.isArray(c.charactersPresent)){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c};
         prevState=`\n\nPREVIOUS STATE (carry forward unchanged details, update only what changed):\n${JSON.stringify(_cleanSnap(lastSnap),null,2)}`;
     }
     // v6.9.1: use the shared shouldUseDelta() helper to respect the
     // periodic refresh counter and the forceFullNextTurn flag.
-    const isDelta=shouldUseDelta()&&!!lastSnap;
+    const deltaAlways=settings.panels?.storyIdeas===false?'time, date, elapsed, charactersPresent, and witnesses':'time, date, elapsed, plotBranches, charactersPresent, and witnesses';
     const deltaInstruction=isDelta
-        ?'\n\nDELTA MODE: Include ONLY fields that changed since the previous state. Always include time, date, elapsed, and plotBranches. Omit unchanged fields.'
+        ?`\n\nDELTA MODE: Include ONLY fields that changed since the previous state. Always include ${deltaAlways}. Include a full character entry for every present NPC and recompute innerThought and immediateNeed from this narrative. Use [] when nobody is present or witnessed the scene. Omit other unchanged fields.`
         :'';
-    const prompt=`${sysPr}
-
-The previous turn produced this narrative:
+    const prompt=`The previous turn produced this narrative:
 
 ${narrativeText}
 
@@ -620,42 +515,47 @@ You forgot to append the required tracker JSON block. Output ONLY the tracker JS
 
 Output the JSON object now:`;
     log('Continuation prompt length:',prompt.length,'chars (~',Math.round(prompt.length/4),'tokens)');
+    let continuationPromptTokens=0,continuationCompletionTokens=0,continuationStrategy='';
     const doGen=async()=>{
-        const{generateQuietPrompt,generateRaw}=SillyTavern.getContext();
+        const stContext=SillyTavern.getContext();
         if(myNonce!==genNonce){log('CONTINUATION: stale nonce',myNonce,'(current',genNonce+') — bailing');return null}
+        let rawStr='';let finishReason='';
         try{
-            log('Continuation: calling generateQuietPrompt... nonce=',myNonce);
-            let raw;
-            try{
-                raw=await generateQuietPrompt({quietPrompt:prompt,jsonSchema:settings.promptMode==='native'?getActiveSchema():undefined});
-            }catch(e){
-                if(myNonce!==genNonce){log('CONTINUATION: stale after API error');return null}
-                warn('Continuation generateQuietPrompt error:',e?.message||String(e));
-                // Try generateRaw as a single fallback (no retry loop — keep this path cheap)
-                // v6.19.0 (issue #16): route through applyPromptRole.
-                try{raw=await generateRaw(applyPromptRole({systemPrompt:sysPr,prompt:`Narrative:\n${narrativeText}${prevState}\n\nOutput ONLY the tracker JSON object.`}))}
-                catch(e2){err('Continuation generateRaw also failed:',e2?.message||String(e2));return null}
+            const requestPrompt=prompt;
+            const responseLength=computeResponseLength({mode:continuationMode,previousSnapshot:lastSnap});
+            let promptMode=settings.promptMode==='native'?'native':'json';
+            let response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt,responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true});
+            continuationStrategy=response.strategy;
+            let provider=normalizeProviderResponse(response.value);rawStr=provider.text;finishReason=provider.finishReason;
+            if((!rawStr||rawStr.trim()==='{}')&&promptMode==='native'){
+                if(myNonce!==genNonce){log('CONTINUATION: native retry cancelled');return null}
+                promptMode='json';
+                response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt+'\n\nReturn strict JSON, not prose.',responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true});
+                continuationStrategy=response.strategy+'+json-retry';provider=normalizeProviderResponse(response.value);rawStr=provider.text;finishReason=provider.finishReason;
             }
+            if(!rawStr||rawStr.trim()==='{}'){const empty=new Error('Provider returned an empty response');empty.code='NO_JSON_OBJECT';throw empty}
+            if(['length','max_tokens','max_output_tokens','token_limit'].includes(finishReason.toLowerCase())){const cut=new Error('Provider stopped at its output token limit');cut.code='TRUNCATED';throw cut}
             if(myNonce!==genNonce){log('CONTINUATION: stale after API return — discarding');return null}
-            if(!raw||raw==='{}'){warn('Continuation: empty response');return null}
-            const rawStr=String(raw);
+            const ownerCheck=validateOperationOwner(operationOwner,{requireSource:!!operationOwner.sourceFingerprint});
+            if(!ownerCheck.valid){warn('Continuation: owner changed, discarding:',ownerCheck.code);return null}
             setLastRawResponse(rawStr);
-            // v6.15.6: capture continuation pair too — its prompt is built earlier
-            // in the same function. The variable name is `prompt` in this scope.
-            try { pushPair({ prompt, response: rawStr, mesIdx, source: 'continuation' }); } catch {}
-            log('Continuation: got response,',rawStr.length,'chars');
-            const parsed=cleanJson(rawStr);
-            if(!parsed||typeof parsed!=='object'){warn('Continuation: parse returned non-object');return null}
-            // Sanity check: must have at least one known tracker key
-            const KNOWN=['time','sceneTopic','sceneMood','sceneTension','characters','relationships','mainQuests','sideQuests','plotBranches'];
-            if(!KNOWN.some(k=>k in parsed)){warn('Continuation: parsed object lacks known tracker keys:',Object.keys(parsed).slice(0,8).join(','));return null}
-            // NOTE: we deliberately do NOT delta-merge here. processExtraction() in the
-            // caller's pipeline handles the merge under the same deltaMode check, and
-            // double-merging would corrupt entity arrays (each entity merged on top of
-            // itself). Return the raw parsed payload — the caller forwards it to
-            // processExtraction which performs the (single) merge correctly.
+            try{pushPair({prompt:requestPrompt,response:rawStr,mesIdx,chatKey:operationOwner.chatKey,source:'continuation'})}catch{}
+            const parsed=parseTrackerCandidate(rawStr,{mode:continuationMode,knownKeys:Object.keys(continuationSchema.value.properties||{})});
+            if(!Object.hasOwn(continuationSchema.value.properties||{},'plotBranches'))delete parsed.plotBranches;
+            const validation=validateExtraction(parsed,{schema:continuationSchema.value});
+            if(!validation.valid){const invalid=new Error(validation.errors.join('; '));invalid.code='SEMANTIC_INVALID';invalid.validationErrors=validation.errors;throw invalid}
+            continuationPromptTokens=Math.round((sysPr.length+requestPrompt.length)/4);
+            continuationCompletionTokens=Math.round(rawStr.length/4);
             return parsed;
-        }catch(e){err('Continuation parse fail:',e?.message||String(e)); try { markLastPairParseFailed(e?.message || String(e)); } catch {} return null}
+        }catch(e){
+            const requestInfo=rawStr?null:classifyRequestError(e);
+            const code=requestInfo?'API_ERROR':(e?.code||'MALFORMED_JSON');
+            const message=requestInfo?.message||e?.message||String(e);
+            err('Continuation failed:',message);
+            recordExtractionFailure(code,message,rawStr,mesIdx,{stage:requestInfo?'provider':'parse',retryable:requestInfo?.retryable,finishReason,owner:operationOwner,strategy:continuationStrategy,validationErrors:e?.validationErrors});
+            try{markLastPairParseFailed(message)}catch{}
+            return null;
+        }
     };
     let result;
     // v6.27.18: 60s timeout. Continuation is meant to be a cheap fast-path
@@ -664,16 +564,17 @@ Output the JSON object now:`;
     // The full-separate-generation fallback at the caller will retry with
     // its own 180s budget.
     const CONTINUATION_TIMEOUT_MS = 60000;
+    let continuationTimeoutId=null;
     try{
         result = await Promise.race([
             withProfileAndPreset(profileOverride,presetOverride,doGen),
-            new Promise((_, reject) => setTimeout(
-                () => reject(new Error('TIMEOUT: continuation reprompt exceeded ' + (CONTINUATION_TIMEOUT_MS / 1000) + 's')),
-                CONTINUATION_TIMEOUT_MS
-            )),
+            new Promise((_,reject)=>{continuationTimeoutId=setTimeout(()=>{
+                const timeoutError=new Error('TIMEOUT: continuation reprompt exceeded '+(CONTINUATION_TIMEOUT_MS/1000)+'s');
+                continuationAbort.abort(timeoutError);reject(timeoutError);
+            },CONTINUATION_TIMEOUT_MS)}),
         ]);
     }
-    catch(e){err('Continuation:',e)}
+    catch(e){err('Continuation:',e)}finally{if(continuationTimeoutId)clearTimeout(continuationTimeoutId)}
     if(myNonce!==genNonce){
         log('CONTINUATION POST: stale nonce',myNonce,'(current',genNonce+') — discarded');
         return null;
@@ -683,7 +584,7 @@ Output the JSON object now:`;
     if(result){
         log('=== CONTINUATION SUCCESS === elapsed=',elapsed.toFixed(1)+'s','keys=',Object.keys(result).length);
         // Stash meta for the caller to forward into processExtraction
-        result._spContinuationMeta={promptTokens:Math.round(prompt.length/4),completionTokens:Math.round(JSON.stringify(result).length/4),elapsed};
+        result._spContinuationMeta={promptTokens:continuationPromptTokens,completionTokens:continuationCompletionTokens,elapsed,strategy:continuationStrategy};
     }else{
         log('=== CONTINUATION FAILED === elapsed=',elapsed.toFixed(1)+'s — caller should fall back to full separate generation');
     }

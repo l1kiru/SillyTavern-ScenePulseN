@@ -21,8 +21,8 @@
 import { t } from '../i18n.js';
 import { esc, spConfirm } from '../utils.js';
 import { debugLog } from '../logger.js';
-import { getLastRawResponse } from '../state.js';
-import { getPairs as rawGetPairs, lastPair as rawLastPair, pairCount as rawPairCount } from '../raw-pairs.js';
+import { getLastRawResponse, getLastExtractionFailure, generating, genMeta, lastGenSource, currentSnapshotMesIdx } from '../state.js';
+import { getPairs as rawGetPairs } from '../raw-pairs.js';
 import { getEntries as netGetEntries, addChangeListener as netAddChangeListener, clearAll as netClearAll, entryCount as netEntryCount } from '../network-log.js';
 import { runDoctor, DOCTOR_STEPS, runSingleDoctorCheck } from '../doctor.js';
 import {
@@ -32,10 +32,12 @@ import {
     getFpsHistory, INSTRUMENTED_MARKS, getCapturePartial,
     getLastCaptureResult,
 } from '../perf-monitor.js';
-import { getEntries as crashGetEntries, clearAll as crashClearAll, flushNow as crashFlushNow, entryCount as crashEntryCount, markSeen as crashMarkSeen } from '../crash-log.js';
-import { getSettings, getTrackerData } from '../settings.js';
+import { getEntries as crashGetEntries, clearAll as crashClearAll, flushNow as crashFlushNow, entryCount as crashEntryCount, markSeen as crashMarkSeen, SESSION_STARTED_AT as CRASH_SESSION_STARTED_AT } from '../crash-log.js';
+import { getSettings, getTrackerData, getSnapshotProvenance } from '../settings.js';
 import { getActiveProfile } from '../profiles.js';
-import { DEFAULTS as DEFAULT_SETTINGS } from '../constants.js';
+import { DEFAULTS as DEFAULT_SETTINGS, VERSION } from '../constants.js';
+import { currentChatFingerprint, currentChatKey } from '../message-fingerprint.js';
+import { _scrollToMessage } from './sparklines.js';
 
 const REPO_NEW_ISSUE = 'https://github.com/xenofei/SillyTavern-ScenePulse/issues/new';
 
@@ -44,6 +46,62 @@ const REPO_NEW_ISSUE = 'https://github.com/xenofei/SillyTavern-ScenePulse/issues
 function _fmtTs(iso) {
     if (!iso) return '';
     try { return new Date(iso).toLocaleString(); } catch { return iso; }
+}
+
+function _sessionIssues() {
+    return crashGetEntries().filter(entry => {
+        const ts = new Date(entry.ts).getTime();
+        return Number.isFinite(ts) && ts >= CRASH_SESSION_STARTED_AT;
+    });
+}
+
+function _currentChatPairs() {
+    const key = currentChatKey();
+    return rawGetPairs().filter(pair => !pair.chatKey || pair.chatKey === key);
+}
+
+function _currentChatFailure() {
+    const failure = getLastExtractionFailure();
+    return failure && (!failure.chatKey || failure.chatKey === currentChatKey()) ? failure : null;
+}
+
+function _issueAddress(entry) {
+    const stored = entry?.context || {};
+    const mesIdx = Number(stored.mesIdx);
+    const swipeId = Math.max(0, Number(stored.swipeId ?? 0) || 0);
+    const character = String(stored.character || '').trim();
+    const chatId = String(stored.chatId || '').trim();
+    const short = [character, chatId ? `…${chatId.slice(-8)}` : ''].filter(Boolean).join(' · ');
+    const label = [short, Number.isInteger(mesIdx) && mesIdx >= 0 ? `#${mesIdx}` : '', stored.swipeId != null ? `S${swipeId + 1}` : '']
+        .filter(Boolean).join(' · ');
+    const result = { mesIdx, swipeId, label, status: 'legacy', canJump: false, preview: '', role: stored.messageRole || '' };
+    if (!stored.chatKey || !Number.isInteger(mesIdx) || mesIdx < 0) return result;
+    if (stored.chatKey !== currentChatKey()) return { ...result, status: 'other-chat' };
+    let ctx;
+    try { ctx = SillyTavern.getContext(); } catch { return { ...result, status: 'other-chat' }; }
+    const message = ctx?.chat?.[mesIdx];
+    if (!message) return { ...result, status: 'deleted' };
+    const activeSwipe = Math.max(0, Number(message.swipe_id ?? 0) || 0);
+    if (stored.messageFingerprint
+        && currentChatFingerprint(mesIdx, swipeId) !== stored.messageFingerprint) {
+        return { ...result, status: activeSwipe === swipeId ? 'changed' : 'other-swipe' };
+    }
+    if (activeSwipe !== swipeId) return { ...result, status: 'other-swipe' };
+    const preview = String(message.mes || '').replace(/\s+/g, ' ').trim().slice(0, 220);
+    return { ...result, status: 'current', canJump: true, preview };
+}
+
+function _addressStatusLabel(status) {
+    if (status === 'current') return t('Current message');
+    if (status === 'other-chat') return t('Another chat');
+    if (status === 'other-swipe') return t('Another swipe is selected');
+    if (status === 'deleted') return t('Message deleted');
+    if (status === 'changed') return t('Message changed');
+    return t('Address unavailable');
+}
+
+function _messageRoleLabel(role) {
+    return t(role === 'user' ? 'User message' : role === 'system' ? 'System message' : 'Assistant message');
 }
 
 function _copy(text, successMsg) {
@@ -86,14 +144,14 @@ function _exportFile(text, filename) {
 // Bundle" — bundle is webpack-coded; the action is to gather diagnostics).
 
 const _REDACT_PATTERNS = [
-    [/sk-(?:ant-)?[A-Za-z0-9_\-]{20,}/g, '[REDACTED:api_key]'],
-    [/(?:gsk|pk_live|pk_test|sk_live|sk_test)_[A-Za-z0-9_\-]{16,}/g, '[REDACTED:api_key]'],
-    [/Bearer\s+[A-Za-z0-9._\-]{16,}/gi, 'Bearer [REDACTED]'],
-    [/\b(?:api[_-]?key|token|secret|password|auth)["'\s:=]+["']?[A-Za-z0-9_\-./+=]{12,}["']?/gi, '$1=[REDACTED]'],
+    [/sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, '[REDACTED:api_key]'],
+    [/(?:gsk|pk_live|pk_test|sk_live|sk_test)_[A-Za-z0-9_-]{16,}/g, '[REDACTED:api_key]'],
+    [/Bearer\s+[A-Za-z0-9._-]{16,}/gi, 'Bearer [REDACTED]'],
+    [/\b(?:api[_-]?key|token|secret|password|auth)["'\s:=]+["']?[A-Za-z0-9_./+=-]{12,}["']?/gi, '$1=[REDACTED]'],
     [/[A-Z]:\\Users\\[^\\\s"'<>|]+/g, '[REDACTED:user_path]'],
-    [/\/(?:home|Users)\/[^\/\s"'<>]+/g, '[REDACTED:user_path]'],
+    [/\/(?:home|Users)\/[^/\s"'<>]+/g, '[REDACTED:user_path]'],
     [/\bfile:\/\/\/?[^\s"'<>]+/g, '[REDACTED:file_url]'],
-    [/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}/g, '[REDACTED:email]'],
+    [/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}/g, '[REDACTED:email]'],
 ];
 function _redact(text) {
     if (typeof text !== 'string' || !text) return text;
@@ -218,17 +276,27 @@ function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
     // response — the prompt is what the maintainer actually needs to diagnose
     // prose-not-JSON failures. Fall back to lastRawResponse for upgrade-window
     // sessions where no pairs have been captured yet.
-    const lp = rawLastPair();
-    const rawResp = lp?.response || getLastRawResponse() || '';
+    const allPairs = rawGetPairs();
+    const lp = _currentChatPairs().slice(-1)[0] || null;
+    const rawResp = lp?.response || (!allPairs.length ? getLastRawResponse() : '') || '';
     const rawPrompt = lp?.prompt || '';
+    const extractionFailure = _currentChatFailure();
+    let provenance=[];
+    try{provenance=getSnapshotProvenance()}catch{}
+    const provenanceCounts=provenance.reduce((out,p)=>{out[p.status]=(out[p.status]||0)+1;return out},{current:0,stale:0,legacy:0});
     const respTrunc = rawResp.length > 4000
         ? rawResp.slice(0, 4000) + `\n\n[…truncated, total ${rawResp.length} chars]`
         : rawResp;
     const promptTrunc = rawPrompt.length > 6000
         ? rawPrompt.slice(0, 6000) + `\n\n[…truncated, total ${rawPrompt.length} chars]`
         : rawPrompt;
-    // Last 10 issues, redacted, with diagnosis hints inline
-    const issues = crashGetEntries().slice(-10).reverse().map(e => {
+    // Current-session issues only. Persisted historical entries remain visible
+    // in the Issues tab but must not make a fresh diagnostics bundle look broken.
+    const allIssues = crashGetEntries();
+    const sessionIssues = _sessionIssues();
+    const historicalIssues = allIssues.length - sessionIssues.length;
+    const olderVersionIssues = allIssues.filter(e => e.spVersion && e.spVersion !== VERSION).length;
+    const issues = sessionIssues.slice(-10).reverse().map(e => {
         const dx = _diagnose(e.message || '');
         return `[${_fmtTs(e.ts)}] ${(e.severity || 'error').toUpperCase()} (${e.source})${e.repeat > 1 ? ` ×${e.repeat}` : ''}\n`
             + `Message: ${_redact(e.message || '(empty)')}\n`
@@ -298,6 +366,7 @@ function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
         `- SillyTavern: ${stVersion || '(unknown)'}`,
         `- UA: ${(typeof navigator !== 'undefined' && navigator.userAgent) || '(unknown)'}`,
         `- Viewport: ${typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : '(unknown)'}`,
+        `- Runtime state: ${generating ? 'generating' : 'idle'} · source=${lastGenSource || '(none)'} · trackedMessage=${currentSnapshotMesIdx}`,
         '',
         '## Effective configuration (what the UI actually uses)',
         '```', effectiveBlock, '```',
@@ -314,11 +383,17 @@ function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
         '## Other non-default root settings (excluding profile-overlaid)',
         '```json', otherSettingsBlock, '```',
         '',
-        `## Recent issues (last ${Math.min(10, crashGetEntries().length)} of ${crashGetEntries().length})`,
+        `## Current session issues (last ${Math.min(10, sessionIssues.length)} of ${sessionIssues.length})`,
         '```', issues || '(none)', '```',
+        '',
+        '## Historical issue summary',
+        `- Before this page session: ${historicalIssues}`,
+        `- Tagged with another ScenePulse version: ${olderVersionIssues}`,
         '',
         '## Latest pair',
         lp ? `*${_fmtTs(lp.ts)} · source=${lp.source}${lp.parseFailed ? ' · **PARSE FAILED**' : ''}*` : '*no pair captured yet*',
+        extractionFailure ? `*Extraction: ${extractionFailure.code} · stage=${extractionFailure.stage||'extract'} · finish=${extractionFailure.finishReason||'(none)'} · message=${extractionFailure.mesIdx} · swipe=${extractionFailure.swipeId}*` : '*Extraction: no active failure*',
+        `*Snapshots: current=${provenanceCounts.current} · stale=${provenanceCounts.stale} · legacy=${provenanceCounts.legacy}*`,
         '',
         '### Prompt sent',
         rawPrompt ? '```\n' + _redact(promptTrunc) + '\n```' : '(none)',
@@ -333,6 +408,132 @@ function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
     return `# ScenePulse Diagnostics — ${new Date().toISOString()}\n`
         + `**Bundle ID:** \`${hash}\` · API keys / paths / emails auto-redacted.\n\n`
         + body;
+}
+
+// ── Tab: Overview ─────────────────────────────────────────────────────
+
+function _overviewTab(panel, ctx = {}) {
+    const switchTo = ctx.switchTo || (() => {});
+    const issues = _sessionIssues();
+    const allIssues = crashGetEntries();
+    const errors = issues.filter(entry => entry.severity === 'error').length;
+    const warnings = issues.filter(entry => entry.severity === 'warning').length;
+    const olderVersionIssues = allIssues.filter(entry => entry.spVersion && entry.spVersion !== VERSION).length;
+    const pair = _currentChatPairs().slice(-1)[0] || null;
+    const failure = _currentChatFailure();
+    const network = netGetEntries();
+    const latestRequest = network.filter(entry => entry.label === 'generate').slice(-1)[0] || network.slice(-1)[0] || null;
+    const settings = (() => { try { return getSettings(); } catch { return null; } })();
+    const st = (() => { try { return SillyTavern.getContext(); } catch { return null; } })();
+    const profile = (() => { try { return settings ? getActiveProfile(settings) : null; } catch { return null; } })();
+    const provenance = (() => { try { return getSnapshotProvenance(); } catch { return []; } })();
+    const snapshots = provenance.reduce((out, item) => {
+        out[item.status] = (out[item.status] || 0) + 1;
+        return out;
+    }, { current: 0, stale: 0, legacy: 0 });
+    const latestMessage = Array.isArray(st?.chat) ? st.chat[st.chat.length - 1] : null;
+    const swipeId = Math.max(0, Number(latestMessage?.swipe_id ?? 0) || 0);
+    let responseKind = t('No response captured');
+    if (pair) {
+        try { JSON.parse(pair.response); responseKind = t('Valid JSON'); }
+        catch { responseKind = t('Raw text'); }
+    }
+    let state = 'idle';
+    let stateLabel = t('Waiting for a generation');
+    let stateDetail = t('Generate or regenerate a scene to populate the inspector.');
+    if (generating) {
+        state = 'active';
+        stateLabel = t('Generation in progress');
+        stateDetail = lastGenSource || t('ScenePulse is waiting for the model response.');
+    } else if (failure || pair?.parseFailed) {
+        state = 'error';
+        stateLabel = t('Latest generation needs attention');
+        stateDetail = failure?.code || pair?.parseError || t('The latest response could not be accepted.');
+    } else if (pair) {
+        state = 'ok';
+        stateLabel = t('Latest generation completed');
+        stateDetail = `${responseKind} · ${pair.response.length} ${t('chars')} · ${_fmtTs(pair.ts)}`;
+    }
+    const mode = settings?.injectionMethod === 'separate' ? t('Separate') : t('Together');
+    const requestStatus = latestRequest
+        ? `${latestRequest.status ?? t('transport error')} · ${(latestRequest.latencyMs / 1000).toFixed(1)}s`
+        : t('No request captured');
+    const summaryText = [
+        `ScenePulse ${VERSION}`,
+        `Status: ${stateLabel}${stateDetail ? ' — ' + stateDetail : ''}`,
+        `Mode: ${mode} · prompt=${settings?.promptMode || '(default)'} · profile=${profile?.name || '(default)'}`,
+        `Chat: ${st?.chatId ? String(st.chatId).slice(-12) : '(unknown)'} · message=${Array.isArray(st?.chat) ? st.chat.length - 1 : '?'} · swipe=${swipeId}`,
+        `Latest pair: ${pair ? `${pair.source} · ${responseKind} · ${pair.response.length} chars` : '(none)'}`,
+        `Current session issues: ${errors} errors · ${warnings} warnings`,
+        `Snapshots: ${snapshots.current} current · ${snapshots.stale} stale · ${snapshots.legacy} legacy`,
+        `Latest request: ${requestStatus}`,
+    ].join('\n');
+
+    panel.innerHTML = `
+        <div class="sp-di-overview-scroll">
+            <section class="sp-di-health sp-di-health-${state}">
+                <div class="sp-di-health-dot" aria-hidden="true"></div>
+                <div>
+                    <div class="sp-di-health-title">${esc(stateLabel)}</div>
+                    <div class="sp-di-health-detail">${esc(stateDetail)}</div>
+                </div>
+                <button class="sp-cl-export-btn sp-di-overview-copy">${t('Copy summary')}</button>
+            </section>
+            <div class="sp-di-overview-grid">
+                <section class="sp-di-overview-card">
+                    <div class="sp-di-overview-card-title">${t('Runtime')}</div>
+                    <dl>
+                        <div><dt>ScenePulse</dt><dd>v${esc(VERSION)}</dd></div>
+                        <div><dt>SillyTavern</dt><dd>${esc(st?.version || t('Unknown'))}</dd></div>
+                        <div><dt>${t('Mode')}</dt><dd>${esc(mode)}</dd></div>
+                        <div><dt>${t('Profile')}</dt><dd>${esc(profile?.name || t('Default'))}</dd></div>
+                    </dl>
+                </section>
+                <section class="sp-di-overview-card">
+                    <div class="sp-di-overview-card-title">${t('Current chat')}</div>
+                    <dl>
+                        <div><dt>${t('Character')}</dt><dd>${esc(st?.name2 || t('Unknown'))}</dd></div>
+                        <div><dt>${t('Message')}</dt><dd>${Array.isArray(st?.chat) ? st.chat.length - 1 : '—'}</dd></div>
+                        <div><dt>${t('Swipe')}</dt><dd>${swipeId}</dd></div>
+                        <div><dt>${t('Tracked message')}</dt><dd>${currentSnapshotMesIdx >= 0 ? currentSnapshotMesIdx : '—'}</dd></div>
+                    </dl>
+                </section>
+                <section class="sp-di-overview-card">
+                    <div class="sp-di-overview-card-title">${t('Latest model response')}</div>
+                    <dl>
+                        <div><dt>${t('Result')}</dt><dd class="sp-di-value-${pair?.parseFailed ? 'error' : 'normal'}">${esc(pair?.parseFailed ? t('Rejected') : responseKind)}</dd></div>
+                        <div><dt>${t('Source')}</dt><dd>${esc(pair?.source || '—')}</dd></div>
+                        <div><dt>${t('Size')}</dt><dd>${pair ? `${pair.response.length} ${t('chars')}` : '—'}</dd></div>
+                        <div><dt>${t('Generation time')}</dt><dd>${genMeta?.elapsed ? `${genMeta.elapsed.toFixed(1)}s` : '—'}</dd></div>
+                    </dl>
+                    <button class="sp-btn sp-di-open-response" ${pair ? '' : 'disabled'}>${t('Open response')}</button>
+                </section>
+                <section class="sp-di-overview-card">
+                    <div class="sp-di-overview-card-title">${t('Current session')}</div>
+                    <dl>
+                        <div><dt>${t('Errors')}</dt><dd class="sp-di-value-${errors ? 'error' : 'normal'}">${errors}</dd></div>
+                        <div><dt>${t('Warnings')}</dt><dd>${warnings}</dd></div>
+                        <div><dt>${t('Older-version records')}</dt><dd>${olderVersionIssues}</dd></div>
+                        <div><dt>${t('Latest request')}</dt><dd>${esc(requestStatus)}</dd></div>
+                    </dl>
+                    <button class="sp-btn sp-di-open-issues">${t('Open issues')}</button>
+                </section>
+                <section class="sp-di-overview-card sp-di-overview-card-wide">
+                    <div class="sp-di-overview-card-title">${t('Snapshot integrity')}</div>
+                    <div class="sp-di-overview-metrics">
+                        <span><strong>${snapshots.current}</strong>${t('Current')}</span>
+                        <span><strong>${snapshots.stale}</strong>${t('Stale')}</span>
+                        <span><strong>${snapshots.legacy}</strong>${t('Legacy')}</span>
+                    </div>
+                    ${failure ? `<div class="sp-di-overview-failure"><strong>${esc(failure.code || t('Failure'))}</strong><span>${esc(failure.message || '')}</span></div>` : ''}
+                </section>
+            </div>
+        </div>
+    `;
+    panel.querySelector('.sp-di-overview-copy').addEventListener('click', () => _copy(summaryText, t('Summary copied')));
+    panel.querySelector('.sp-di-open-response').addEventListener('click', () => switchTo('response'));
+    panel.querySelector('.sp-di-open-issues').addEventListener('click', () => switchTo('crashes'));
+    return () => {};
 }
 
 // ── Crash Log helpers (port of crash-log-viewer.js) ─────────────────────
@@ -458,31 +659,34 @@ function _diagnose(message) {
     if (!message) return '';
     const m = message.toLowerCase();
     if (m.includes('no json object found') || m.includes('cleanjson')) {
-        return 'The model emitted prose instead of JSON — likely broke out of structured-output mode mid-generation. Common in long, charged, or NSFW scenes. The first 200 chars of the response are shown above; check the Last Response tab for more.';
+        return t('The response contained no JSON object. Open Responses to compare the exact prompt and raw model output.');
     }
     if (m.includes('parse fail')) {
-        return 'A parse retry attempt failed. ScenePulse retries up to 3 times before giving up. See the cleanJson entry just before this one for the actual response.';
+        return t('One tracker attempt failed. Related attempts are grouped with this event; open Responses for the raw output.');
+    }
+    if (m.includes('schema validation') || m.includes('semantic_invalid')) {
+        return t('The response was valid JSON but one or more values did not satisfy the active tracker schema.');
     }
     if (m.includes('502') || m.includes('503') || m.includes('504') || m.includes('bad gateway')) {
-        return 'Backend HTTP error (transient). ScenePulse skips tracking for this turn. If it recurs, check your API endpoint or proxy.';
+        return t('Backend HTTP error (transient). ScenePulse skips tracking for this turn. If it recurs, check your API endpoint or proxy.');
     }
     if (m.includes('networkerror') || m.includes('failed to fetch') || m.includes('network request failed')) {
-        return 'Network failure (transient). Could be a dropped connection, DNS hiccup, or CORS issue. ScenePulse will retry on the next turn.';
+        return t('Network failure (transient). Could be a dropped connection, DNS hiccup, or CORS issue. ScenePulse will retry on the next turn.');
     }
     if (m.includes('aborted') || m.includes('cancelled by stop') || m.includes('cancelled by user')) {
-        return 'Generation cancelled — usually because you clicked Stop, or another generation was already in flight. Not actually an error.';
+        return t('Generation cancelled — usually because you clicked Stop, or another generation was already in flight. Not actually an error.');
     }
     if (m.includes('streamingprocessor is null')) {
-        return 'SillyTavern internal race when stop is clicked during streaming. Harmless — ST is cleaning up. Not caused by ScenePulse.';
+        return t('SillyTavern internal race when stop is clicked during streaming. Harmless — ST is cleaning up. Not caused by ScenePulse.');
     }
     if (m.includes('quota') || m.includes('rate limit') || m.includes('429')) {
-        return 'Rate-limited by the API provider. Wait a few seconds and try again. Lower temperature or shorter context can also help.';
+        return t('Rate-limited by the API provider. Wait a few seconds and try again. Lower temperature or shorter context can also help.');
     }
     if (m.includes('context length') || m.includes('maximum context') || m.includes('token limit')) {
-        return 'Prompt exceeded the model\'s context window. Trim chat history, lower max snapshots, or switch to a longer-context model.';
+        return t('Prompt exceeded the model\'s context window. Trim chat history, lower max snapshots, or switch to a longer-context model.');
     }
     if (m.includes('401') || m.includes('unauthorized') || m.includes('invalid api key')) {
-        return 'API authentication failed. Check your API key in SillyTavern\'s connection settings.';
+        return t('API authentication failed. Check your API key in SillyTavern\'s connection settings.');
     }
     return '';
 }
@@ -615,8 +819,14 @@ function _lastResponseTab(panel, ctx = {}) {
     // v6.15.6: navigate among the last 10 (prompt, response) pairs captured
     // by raw-pairs.js. When arrived via "Show in Last Response" with an
     // issue payload, jump to the pair whose ts is closest to the issue's ts.
-    const pairs = rawGetPairs(); // chronological, oldest first
+    const allPairs = rawGetPairs(); // chronological, oldest first
+    const pairs = payload.fromIssue ? allPairs : _currentChatPairs();
+    const hiddenOtherChats = payload.fromIssue ? 0 : allPairs.length - pairs.length;
     const hasPairs = pairs.length > 0;
+    const extractionFailure = _currentChatFailure();
+    let provenance=[];
+    try{provenance=getSnapshotProvenance()}catch{}
+    const provenanceCounts=provenance.reduce((out,p)=>{out[p.status]=(out[p.status]||0)+1;return out},{current:0,stale:0,legacy:0});
     let activeIdx = pairs.length - 1; // default to latest
     if (payload.fromIssue && pairs.length) {
         const issueTs = new Date(payload.fromIssue.ts).getTime();
@@ -646,6 +856,7 @@ function _lastResponseTab(panel, ctx = {}) {
             <span style="flex:1"></span>
             <span class="sp-di-pair-meta"></span>
         </div>` : ''}
+        <div class="sp-di-provenance">${t('Snapshots')}: ${provenanceCounts.current} ${t('current')} · ${provenanceCounts.stale} ${t('stale')} · ${provenanceCounts.legacy} ${t('legacy')}${hiddenOtherChats?` · ${hiddenOtherChats} ${t('responses from other chats hidden')}`:''}${extractionFailure?` · ${esc(extractionFailure.code)}${extractionFailure.finishReason?' ('+esc(extractionFailure.finishReason)+')':''}`:''}</div>
         <div class="sp-di-response"></div>
     `;
     const stats = panel.querySelector('.sp-di-meta');
@@ -656,10 +867,10 @@ function _lastResponseTab(panel, ctx = {}) {
     // Fallback: no pairs captured yet, but there might still be a legacy
     // lastRawResponse from a generation that ran before v6.15.6. Show that
     // so the tab isn't useless during the upgrade transition.
-    const fallbackRaw = getLastRawResponse();
+    const fallbackRaw = allPairs.length ? '' : getLastRawResponse();
     if (!hasPairs && !fallbackRaw) {
         stats.textContent = '';
-        body.innerHTML = `<div class="sp-cl-empty">${t('No API response captured yet. Generate a scene first.')}</div>`;
+        body.innerHTML = `<div class="sp-cl-empty">${t('No API response captured for this chat yet. Generate a scene first.')}</div>`;
         panel.querySelector('.sp-di-copy').disabled = true;
         panel.querySelector('.sp-di-copy-pair').disabled = true;
         panel.querySelector('.sp-di-export').disabled = true;
@@ -673,7 +884,7 @@ function _lastResponseTab(panel, ctx = {}) {
         let rendered = respStr;
         let isJson = false;
         try { rendered = JSON.stringify(JSON.parse(respStr), null, 2); isJson = true; } catch {}
-        stats.textContent = `${respStr.length} ${t('chars')}${isJson ? ' · ' + t('valid JSON') : ' · ' + t('raw text')}`;
+        stats.textContent = `${respStr.length} ${t('chars')}${isJson ? ' · ' + t('valid JSON') : ' · ' + t('raw text')}${extractionFailure?' · '+extractionFailure.code:''}`;
         if (indicator) indicator.textContent = `${t('Pair')} ${activeIdx + 1} / ${pairs.length}`;
         if (pairMeta && pair) {
             const fail = pair.parseFailed ? ` · <span class="sp-di-pair-failed">${t('Parse failed')}</span>` : '';
@@ -804,7 +1015,7 @@ function _issuesTab(panel, ctx = {}) {
     let source = 'all';
     let search = '';
     let timeWindow = 'session';
-    const sessionStart = Date.now();
+    const sessionStart = CRASH_SESSION_STARTED_AT;
 
     const tw = TIME_WINDOWS.map(w =>
         `<button class="sp-cl-filter${w.key === 'session' ? ' sp-cl-filter-active' : ''}" data-tw="${w.key}">${esc(t(w.label))}</button>`
@@ -892,6 +1103,9 @@ function _issuesTab(panel, ctx = {}) {
         const row = document.createElement('div');
         row.className = 'sp-cl-row sp-cl-sev-' + (e.severity || 'error');
         const repeat = e.repeat > 1 ? `<span class="sp-cl-repeat">×${e.repeat}</span>` : '';
+        const versionBadge = e.spVersion && e.spVersion !== VERSION
+            ? `<span class="sp-cl-version-old" title="${esc(t('Recorded by an older ScenePulse version'))}">v${esc(e.spVersion)}</span>`
+            : '';
         // v6.15.4: grouped entry — show "+N attempts" pill in header, list
         // children at the top of the expanded body. The parent (cleanJson)
         // already carries the diagnosis hint; children are just timestamps
@@ -903,6 +1117,11 @@ function _issuesTab(panel, ctx = {}) {
             ? `<span class="sp-cl-group-pill" title="${esc(t('Includes related parse retries'))}">+${grp.children.length} ${esc(t(grp.children.length === 1 ? 'attempt' : 'attempts'))}</span>`
             : '';
         const dx = _diagnose(e.message || '');
+        const address = _issueAddress(e);
+        const addressPill = address.label
+            ? `<span class="sp-cl-address" title="${esc(t('Error address'))}">${esc(address.label)}</span>`
+            : '';
+        const addressStatus = `<span class="sp-cl-address-status sp-cl-address-status-${esc(address.status)}">${esc(_addressStatusLabel(address.status))}</span>`;
         const ctxKeys = e.context ? Object.keys(e.context) : [];
         const hasCtx = ctxKeys.length > 0;
         const _section = (label, html) => `<div class="sp-cl-stack-label">${esc(t(label))}</div>${html}`;
@@ -933,6 +1152,18 @@ function _issuesTab(panel, ctx = {}) {
             e.repeat > 1 ? `<span><strong>${esc(t('Occurrences'))}:</strong> ${e.repeat}</span>` : '',
         ].filter(Boolean).join('');
         bodyParts.push(_section('When', `<div class="sp-cl-whenwhere">${whenWhere}</div>`));
+        const addressFields = [
+            address.label ? `<span><strong>${esc(t('Chat and message'))}:</strong> ${esc(address.label)}</span>` : '',
+            address.role ? `<span><strong>${esc(t('Role'))}:</strong> ${esc(_messageRoleLabel(address.role))}</span>` : '',
+            `<span><strong>${esc(t('Verification'))}:</strong> ${addressStatus}</span>`,
+        ].filter(Boolean).join('');
+        bodyParts.push(_section('Error address', `
+            <div class="sp-cl-address-card">
+                <div class="sp-cl-whenwhere">${addressFields}</div>
+                ${address.preview ? `<div class="sp-cl-message-preview">${esc(address.preview)}${address.preview.length >= 220 ? '…' : ''}</div>` : ''}
+                ${address.status === 'other-swipe' ? `<div class="sp-cl-address-note">${esc(t('The error belongs to another swipe of this message. Select that swipe to verify it.'))}</div>` : ''}
+                ${address.status === 'other-chat' ? `<div class="sp-cl-address-note">${esc(t('Open the recorded chat to verify and show this message.'))}</div>` : ''}
+            </div>`));
         if (e.stack) {
             bodyParts.push(_section('Stack', `<pre class="sp-cl-stack">${esc(e.stack)}</pre>`));
         }
@@ -950,6 +1181,9 @@ function _issuesTab(panel, ctx = {}) {
                 <span class="sp-cl-sev-pill sp-cl-sev-pill-${esc(e.severity || 'error')}">${esc((e.severity || 'error').toUpperCase())}</span>
                 <span class="sp-cl-src">${esc(e.source || 'unknown')}</span>
                 <span class="sp-cl-msg">${esc(e.message || '(no message)')}</span>
+                ${addressPill}
+                ${addressStatus}
+                ${versionBadge}
                 ${groupPill}
                 ${repeat}
                 <span class="sp-cl-ts">${esc(_fmtTs(e.ts))}</span>
@@ -958,6 +1192,7 @@ function _issuesTab(panel, ctx = {}) {
                 ${bodyParts.join('')}
                 <div class="sp-cl-row-actions">
                     <button class="sp-btn sp-cl-copy-one">${t('Copy')}</button>
+                    ${address.canJump ? `<button class="sp-btn sp-cl-go-message">${t('Show message')}</button>` : ''}
                     ${_isParseRelated(e.message) ? `<button class="sp-btn sp-cl-show-response">${t('Show in Last Response')}</button>` : ''}
                     <button class="sp-btn sp-cl-report-one">${t('Report on GitHub')}</button>
                 </div>
@@ -974,6 +1209,14 @@ function _issuesTab(panel, ctx = {}) {
                 : _crashEntryToText(e);
             _copy(text, t('Entry copied'));
         });
+        const goBtn = row.querySelector('.sp-cl-go-message');
+        if (goBtn) {
+            goBtn.addEventListener('click', ev => {
+                ev.stopPropagation();
+                panel.closest('.sp-cl-overlay')?.querySelector('.sp-cl-close')?.click();
+                setTimeout(() => { _scrollToMessage(address.mesIdx); }, 60);
+            });
+        }
         // v6.15.5: jump to Last Response tab for parse-related entries — Panel B's
         // MUST. The payload tells the response tab to scroll to where parsing
         // likely failed (top of the buffer for now; precise byte-range highlight
@@ -1079,7 +1322,7 @@ function _issuesTab(panel, ctx = {}) {
         const ok = await spConfirm(
             t('Clear issue log?'),
             count
-                ? t(`This permanently deletes ${count} captured ${count === 1 ? 'entry' : 'entries'} from this device. The actual errors are NOT undone — only the log is cleared.`)
+                ? t('Captured issue records to delete: {count}. The actual errors are not undone — only the log is cleared.', { count })
                 : t('The log is already empty.'),
             { okLabel: t('Delete log'), cancelLabel: t('Keep'), danger: true }
         );
@@ -1211,7 +1454,7 @@ function _netTab(panel, ctx = {}) {
         const ok = await spConfirm(
             t('Clear network log?'),
             count
-                ? t(`This deletes ${count} captured network ${count === 1 ? 'entry' : 'entries'}. Future requests will still be captured.`)
+                ? t('Captured network records to delete: {count}. Future requests will still be captured.', { count })
                 : t('The network log is already empty.'),
             { okLabel: t('Clear'), cancelLabel: t('Keep'), danger: true }
         );
@@ -2033,12 +2276,13 @@ function _configTab(panel) {
 // v6.17.0: Perf tab added (Panel A MVP: FPS headline + capture mode for
 // component attribution via sp:* marks).
 const TABS = [
-    { id: 'crashes', label: 'Issues', render: _issuesTab, badge: () => crashEntryCount() },
+    { id: 'overview', label: 'Overview', render: _overviewTab },
+    { id: 'response', label: 'Responses', render: _lastResponseTab },
+    { id: 'crashes', label: 'Issues', render: _issuesTab, badge: () => _sessionIssues().length },
     { id: 'activity', label: 'Activity', render: _activityTab },
     // v6.16.1: renamed from "Last Response" — the tab is a pair-navigator
     // over the last 10 prompt+response tuples, not a stream-of-one. Plural
     // matches the reality (Panel B audit).
-    { id: 'response', label: 'Responses', render: _lastResponseTab },
     { id: 'network', label: 'Network', render: _netTab, badge: () => netEntryCount() },
     // v6.17.1: full word "Performance" in the tab; CSS cascades down to "Perf"
     // at <720px and an icon at <420px so the bar never wraps.
@@ -2104,7 +2348,7 @@ function _wireInfoPopovers(overlay) {
     return () => { _disposers.forEach(fn => { try { fn(); } catch {} }); };
 }
 
-export function openDebugInspector(initialTab = 'crashes') {
+export function openDebugInspector(initialTab = 'overview') {
     document.querySelector('.sp-cl-overlay')?.remove();
     // v6.15.4: opening the inspector marks all captured entries as "seen" so the
     // toolbar button's flash/dot indicator clears.
@@ -2119,7 +2363,7 @@ export function openDebugInspector(initialTab = 'crashes') {
     overlay.innerHTML = `
         <div class="sp-cl-container sp-di-container">
             <div class="sp-cl-header">
-                <div class="sp-cl-title">${t('Debug Inspector')}</div>
+                <div class="sp-cl-title">${t('Debug Inspector')} <span class="sp-di-header-version">v${esc(VERSION)}</span></div>
                 <div class="sp-di-doctor-wrap">
                     <button class="sp-cl-export-btn sp-di-doctor">${t('Doctor')}</button>
                     <span class="sp-di-info-area">
@@ -2246,14 +2490,13 @@ export function openDebugInspector(initialTab = 'crashes') {
         _runDoctorAndShow(overlay);
     });
     overlay.querySelector('.sp-di-diagnostics').addEventListener('click', () => {
-        let spVersion = '', stVersion = '';
+        let stVersion = '';
         try {
-            // Pull versions from the same source as the issues entries — the most
-            // recent captured entry has them.
+            stVersion = SillyTavern.getContext()?.version || '';
             const recent = crashGetEntries().slice(-1)[0];
-            if (recent) { spVersion = recent.spVersion || ''; stVersion = recent.stVersion || ''; }
+            if (!stVersion && recent) stVersion = recent.stVersion || '';
         } catch {}
-        const md = _buildDiagnostics({ spVersion, stVersion });
+        const md = _buildDiagnostics({ spVersion: VERSION, stVersion });
         _copy(md, t('Diagnostics copied'));
     });
     overlay.addEventListener('click', e => { if (e.target === overlay) _close(); });
@@ -2268,5 +2511,3 @@ export function openDebugInspector(initialTab = 'crashes') {
     document.body.appendChild(overlay);
     _switchTo(activeTab);
 }
-
-export function getCrashLogCount() { return crashEntryCount(); }

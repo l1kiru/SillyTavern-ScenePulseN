@@ -1,11 +1,46 @@
 // ── extraction.js — Inline/Together Mode: Extract tracker JSON from AI response ──
 
 import { log, warn, err } from '../logger.js';
-import { ensureChatSaved, getSettings, shouldUseDelta } from '../settings.js';
+import { ensureChatSaved, shouldUseDelta } from '../settings.js';
 import { jsonrepair } from '../vendor/jsonrepair.mjs';
+import { setLastExtractionFailure } from '../state.js';
+import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
 
 export const SP_MARKER_START='<!--SP_TRACKER_START-->';
 export const SP_MARKER_END='<!--SP_TRACKER_END-->';
+export const KNOWN_KEYS=['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','characters','relationships','northStar','plotBranches','mainQuests','sideQuests'];
+
+function _codedError(code,message){const e=new Error(message);e.code=code;return e}
+
+export function recordExtractionFailure(code,message,rawCandidate,mesIdx,opts={}){
+    let swipeId=0;
+    try{swipeId=Math.max(0,Number(SillyTavern.getContext().chat?.[mesIdx]?.swipe_id??0)||0)}catch{}
+    const failure={
+        code,message,retryable:opts.retryable??code!=='UNKNOWN_SCHEMA',mesIdx,swipeId,
+        rawCandidate:String(rawCandidate||'').slice(0,100000),
+        chatKey:currentChatKey(),sourceFingerprint:currentChatFingerprint(mesIdx,swipeId),
+        owner:opts.owner||captureOperationOwner(mesIdx,swipeId),stage:opts.stage||'extract',finishReason:opts.finishReason||'',
+        attempt:Number(opts.attempt)||0,strategy:opts.strategy||'',responseLength:Number(opts.responseLength)||0,
+        validationErrors:Array.isArray(opts.validationErrors)?opts.validationErrors.slice(0,12):[]
+    };
+    setLastExtractionFailure(failure);return failure;
+}
+
+export function normalizeProviderResponse(value){
+    if(typeof value==='string')return{text:value,finishReason:''};
+    if(!value||typeof value!=='object')return{text:String(value??''),finishReason:''};
+    const finishReason=value.finish_reason??value.finishReason??value.stop_reason??value.stopReason
+        ??value.choices?.[0]?.finish_reason??value.results?.[0]?.finish_reason??value.candidates?.[0]?.finishReason??'';
+    if(!Array.isArray(value)&&KNOWN_KEYS.some(key=>Object.hasOwn(value,key))){
+        return{text:JSON.stringify(value),finishReason:String(finishReason||'')};
+    }
+    let text=value.text??value.output_text??value.content??value.response
+        ??value.choices?.[0]?.message?.content??value.choices?.[0]?.text
+        ??value.results?.[0]?.text??value.generations?.[0]?.text??value.data?.response
+        ??value.candidates?.[0]?.content?.parts??value.message?.content??value.output?.[0]?.content??'';
+    if(Array.isArray(text))text=text.map(part=>typeof part==='string'?part:(part?.text??part?.content??part?.output_text??'')).join('');
+    return{text:typeof text==='string'?text:JSON.stringify(text??''),finishReason:String(finishReason||'')};
+}
 
 // Extract V8/Chromium "position N" AND Firefox "line N column N" from a JSON parse error.
 // Both report 1-based positions; we normalize to a 0-based offset into the original string.
@@ -42,46 +77,89 @@ function _findBalancedEnd(s,from){
     return -1;
 }
 
-export function cleanJson(raw){
-    let c=raw.trim().replace(/^```(?:json)?\s*\n?/i,'').replace(/\n?```\s*$/i,'');
-    const fb=c.indexOf('{');
-    if(fb===-1){err('cleanJson: no JSON object found. First 200:',c.substring(0,200));throw new Error('No JSON object in response')}
-    // Walk forward from the first `{` tracking brace depth (string-aware), stop at
-    // the first balanced close. Discards any trailing junk after the first complete
-    // JSON object — e.g. MemoryBooks' {"@schema":"1.1"} version tag echoed by the
-    // model inside the SP markers. Fall back to lastIndexOf('}') only if the walk
-    // can't find a balanced close, so we still get a best-effort shot at jsonrepair.
-    const balancedEnd=_findBalancedEnd(c,fb);
-    if(balancedEnd!==-1){
-        c=c.substring(fb,balancedEnd+1);
-    }else{
-        const lb=c.lastIndexOf('}');
-        if(lb===-1){err('cleanJson: no closing brace found. First 200:',c.substring(0,200));throw new Error('No JSON object in response')}
-        log('cleanJson: unbalanced braces from first `{`, falling back to lastIndexOf(`}`) for repair attempt');
-        c=c.substring(fb,lb+1);
+function _candidateStrings(raw){
+    const source=String(raw??'').trim();
+    const starts=[];let inString=false,escape=false;
+    for(let i=0;i<source.length&&starts.length<96;i++){
+        const ch=source[i];
+        if(escape){escape=false;continue}
+        if(inString){if(ch==='\\')escape=true;else if(ch==='"')inString=false;continue}
+        if(ch==='"'){inString=true;continue}
+        if(ch==='{')starts.push(i);
     }
-    try{return JSON.parse(c)}catch(e1){
-        // Strict parse failed — delegate to jsonrepair (tokenizer-based, handles unescaped quotes,
-        // missing commas, single quotes, comments, trailing commas, Python-style True/False/None, etc.)
-        log('cleanJson: strict parse failed, attempting jsonrepair...');
-        let repaired;
-        try{repaired=jsonrepair(c)}catch(eRepair){
-            const pos=_parseErrorOffset(e1.message,c);
-            err('cleanJson: parse error at pos',pos,'context: \u2026'+c.substring(Math.max(0,pos-40),pos+40)+'\u2026');
-            err('cleanJson: jsonrepair failed:',eRepair?.message||String(eRepair));
-            throw e1;
-        }
-        try{const result=JSON.parse(repaired);log('cleanJson: jsonrepair succeeded ('+c.length+'\u2192'+repaired.length+' chars)');return result}catch(e2){
-            const pos=_parseErrorOffset(e1.message,c);
-            err('cleanJson: parse error at pos',pos,'context: \u2026'+c.substring(Math.max(0,pos-40),pos+40)+'\u2026');
-            err('cleanJson: jsonrepair output still unparseable:',e2.message);
-            throw e1;
-        }
+    const seen=new Set();const candidates=[];const unbalancedStarts=[];
+    for(const start of starts){
+        const end=_findBalancedEnd(source,start);
+        if(end<0){unbalancedStarts.push(start);continue}
+        const key=start+':'+end;if(seen.has(key))continue;seen.add(key);
+        candidates.push({text:source.slice(start,end+1),start,end});
     }
+    return{source,candidates,hadOpening:starts.length>0,unbalancedStarts};
+}
+
+function _parseJsonObject(candidate){
+    try{return{value:JSON.parse(candidate),repaired:false}}
+    catch(strictError){
+        try{return{value:JSON.parse(jsonrepair(candidate)),repaired:true}}
+        catch(repairError){strictError.repairError=repairError;throw strictError}
+    }
+}
+
+function _candidateScore(value,candidate,knownKeys){
+    if(!value||typeof value!=='object'||Array.isArray(value))return-1;
+    const keys=Object.keys(value);
+    const known=knownKeys.filter(key=>Object.hasOwn(value,key)).length;
+    const schemaKeys=['properties','required','$schema','@schema','$defs','definitions'].filter(key=>Object.hasOwn(value,key)).length;
+    return known*10000+keys.length*100+Math.min(candidate.length,9999)-schemaKeys*5000;
+}
+
+export function cleanJson(raw,{knownKeys=KNOWN_KEYS}={}){
+    const scan=_candidateStrings(raw);
+    if(!scan.hadOpening){err('cleanJson: no JSON object found. First 200:',scan.source.substring(0,200));throw _codedError('NO_JSON_OBJECT','No JSON object in response')}
+    let best=null;let firstError=null;
+    for(const candidateInfo of scan.candidates){
+        // A balanced inner object is not a complete tracker when it sits
+        // inside an earlier object whose closing brace never arrived.
+        if(scan.unbalancedStarts.some(start=>start<candidateInfo.start))continue;
+        const candidate=candidateInfo.text;
+        try{
+            const parsed=_parseJsonObject(candidate);const score=_candidateScore(parsed.value,candidate,knownKeys);
+            if(score>=0&&(!best||score>best.score))best={...parsed,score,candidate};
+        }catch(error){if(!firstError)firstError={error,candidate}}
+    }
+    if(best){
+        if(best.repaired)log('cleanJson: jsonrepair succeeded ('+best.candidate.length+' chars)');
+        if(scan.candidates.length>1)log('cleanJson: selected tracker candidate from',scan.candidates.length,'balanced objects');
+        return best.value;
+    }
+    if(scan.unbalancedStarts.length)throw _codedError('TRUNCATED','Tracker JSON is missing its closing brace');
+    if(firstError){
+        const pos=_parseErrorOffset(firstError.error.message,firstError.candidate);
+        err('cleanJson: parse error at pos',pos,'context: \u2026'+firstError.candidate.substring(Math.max(0,pos-40),pos+40)+'\u2026');
+        firstError.error.code='MALFORMED_JSON';throw firstError.error;
+    }
+    throw _codedError('MALFORMED_JSON','No parseable JSON object in response');
+}
+
+export function parseTrackerCandidate(raw,{mode,knownKeys}={}){
+    const expectedKeys=Array.isArray(knownKeys)&&knownKeys.length?knownKeys:KNOWN_KEYS;
+    const parsed=cleanJson(raw,{knownKeys:expectedKeys});
+    if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw _codedError('MALFORMED_JSON','Tracker data must be a JSON object');
+    const SCHEMA_META=['$schema','$id','type','properties','required','additionalProperties','definitions','$defs','description'];
+    let strippedCount=0;
+    for(const k of SCHEMA_META){if(k in parsed&&typeof parsed[k]!=='string'){delete parsed[k];strippedCount++}
+        else if(k==='type'&&typeof parsed[k]==='string'&&parsed[k]==='object'){delete parsed[k];strippedCount++}}
+    if(strippedCount)log('parseTrackerCandidate: stripped',strippedCount,'schema metadata keys');
+    const keys=Object.keys(parsed);const requestMode=mode||(shouldUseDelta()?'delta':'full');
+    const minKeys=requestMode==='full'?Math.max(1,Math.min(5,expectedKeys.length)):1;
+    if(keys.length<minKeys)throw _codedError('TOO_SMALL','Tracker JSON contains too few fields ('+keys.length+'/'+minKeys+')');
+    if(!expectedKeys.some(k=>k in parsed))throw _codedError('UNKNOWN_SCHEMA','JSON does not contain fields from the active ScenePulse schema');
+    return parsed;
 }
 
 export function extractInlineTracker(mesIdx){
     try{
+        setLastExtractionFailure(null);
         const ctx=SillyTavern.getContext();
         const msg=ctx.chat[mesIdx];
         if(!msg||msg.is_user)return null;
@@ -143,31 +221,17 @@ export function extractInlineTracker(mesIdx){
                 }
             }
         }
-        if(!jsonStr){log('extractInlineTracker: no tracker JSON found in message',mesIdx,'(len:',raw.length+')');return null}
+        if(!jsonStr){
+            const open=startIdx!==-1?combined.substring(startIdx+_mStartLen):(raw.lastIndexOf('{')!==-1?raw.substring(raw.lastIndexOf('{')):'');
+            const code=(startIdx!==-1&&endIdx<=startIdx)||(open&&_findBalancedEnd(open,open.indexOf('{'))===-1)?'TRUNCATED':'NO_TRACKER';
+            const message=code==='TRUNCATED'?'Tracker JSON was cut off before completion':'AI response did not contain ScenePulse tracker data';
+            recordExtractionFailure(code,message,open,mesIdx);
+            log('extractInlineTracker: no tracker JSON found in message',mesIdx,'(len:',raw.length+', code:',code+')');return null
+        }
         log('extractInlineTracker: found via',extractMethod,'(json:',jsonStr.length,'chars)');
         // Parse the JSON
         let parsed;
-        try{parsed=cleanJson(jsonStr)}catch(e){warn('extractInlineTracker: cleanJson failed:',e?.message);return null}
-        if(!parsed||typeof parsed!=='object'){warn('extractInlineTracker: not an object');return null}
-        // Strip schema metadata keys that models sometimes echo back
-        const SCHEMA_META=['$schema','$id','type','properties','required','additionalProperties','definitions','$defs','description'];
-        let strippedCount=0;
-        for(const k of SCHEMA_META){if(k in parsed&&typeof parsed[k]!=='string'){delete parsed[k];strippedCount++}
-            // Keep 'type' if it's a string value (could be a tracker field), strip if it's an object/array
-            else if(k==='type'&&typeof parsed[k]==='string'&&parsed[k]==='object'){delete parsed[k];strippedCount++}
-        }
-        if(strippedCount)log('extractInlineTracker: stripped',strippedCount,'schema metadata keys');
-        const keys=Object.keys(parsed);
-        const _isDelta=shouldUseDelta();
-        const _minKeys=_isDelta?3:5; // Delta mode: 3+ keys (time + date + at least one changed field)
-        if(keys.length<_minKeys){
-            warn('extractInlineTracker: parsed object too small after stripping ('+keys.length+' keys:',keys.join(',')+') min='+_minKeys);
-            return null;
-        }
-        // Validate it looks like tracker data — must have at least one known tracker key
-        const KNOWN_KEYS=['time','location','weather','sceneTopic','sceneMood','sceneTension','characters','relationships','plotBranches','mainQuests','sideQuests'];
-        const hasKnown=KNOWN_KEYS.some(k=>k in parsed);
-        if(!hasKnown){warn('extractInlineTracker: no known tracker keys found in',keys.slice(0,8).join(','));return null}
+        try{parsed=parseTrackerCandidate(jsonStr)}catch(e){warn('extractInlineTracker: candidate failed:',e?.message);recordExtractionFailure(e?.code||'MALFORMED_JSON',e?.message||'Invalid tracker JSON',jsonStr,mesIdx);return null}
         // Strip the tracker block from the message
         let cleanedMsg=raw;
         if(foundInReasoning){
@@ -201,6 +265,8 @@ export function extractInlineTracker(mesIdx){
         // Update the message in memory
         if(cleanedMsg!==raw){
             msg.mes=cleanedMsg;
+            const activeSwipe=Math.max(0,Number(msg.swipe_id??0)||0);
+            if(Array.isArray(msg.swipes)&&msg.swipes[activeSwipe]!=null)msg.swipes[activeSwipe]=cleanedMsg;
             // Update DOM — find the message element and replace its content
             const mesEl=document.querySelector(`.mes[mesid="${mesIdx}"] .mes_text`);
             if(mesEl){
@@ -247,9 +313,11 @@ export function extractInlineTracker(mesIdx){
             setTimeout(_safetyRestrip,1500);
             setTimeout(_safetyRestrip,3000);
         }
+        setLastExtractionFailure(null);
         return parsed;
     }catch(e){
         warn('extractInlineTracker:',e?.message||String(e));
+        recordExtractionFailure(e?.code||'MALFORMED_JSON',e?.message||String(e),'',mesIdx);
         return null;
     }
 }

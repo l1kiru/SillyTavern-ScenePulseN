@@ -17,7 +17,6 @@
 #sp-panel.sp-compact .sp-dashboard { gap: 3px; }
 #sp-panel.sp-compact .sp-dashboard .sp-dash-card { flex: 1 1 calc(50% - 3px); min-width: 60px; }
 #sp-panel.sp-compact .sp-dash-card { min-height: 40px; padding: 4px 3px; border-radius: 7px; }
-#sp-panel.sp-compact .sp-dash-icon { font-size: var(--sp-fs-md); margin-bottom: 1px; }
 #sp-panel.sp-compact .sp-dash-clock svg { width: 36px; height: 36px; }
 #sp-panel.sp-compact .sp-dash-value { font-size: var(--sp-fs-xs); }
 #sp-panel.sp-compact .sp-dash-sub { font-size: var(--sp-fs-xs); }
@@ -78,9 +77,7 @@
 #sp-panel.sp-compact .sp-char-card { padding: 3px 5px; margin-bottom: 2px; }
 #sp-panel.sp-compact .sp-char-header { margin-bottom: 0; padding-bottom: 0; border-bottom: none; }
 #sp-panel.sp-compact .sp-char-name { font-size: var(--sp-fs-xs); }
-#sp-panel.sp-compact .sp-char-role-badge { font-size: var(--sp-fs-xs); padding: 0 3px; }
 #sp-panel.sp-compact .sp-char-grid { display: none; }
-#sp-panel.sp-compact .sp-char-goals { display: none; }
 #sp-panel.sp-compact .sp-fert-section { display: none; }
 
 /* Focus: Story Ideas — condensed chips instead of full cards */

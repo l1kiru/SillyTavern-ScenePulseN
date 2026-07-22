@@ -43,7 +43,7 @@ if (typeof document === 'undefined') {
     globalThis.document = { createElement: () => ({ style: {} }), body: { appendChild: () => {} } };
 }
 
-const { mergeDelta } = await import('../src/generation/delta-merge.js');
+const { mergeDelta, preserveOffSceneEntities } = await import('../src/generation/delta-merge.js');
 const { getCharacterHistory, invalidateCharacterHistory } = await import('../src/ui/character-history.js');
 
 // ─── Assertion helpers ─────────────────────────────────────────────────
@@ -60,25 +60,6 @@ function assertEq(name, actual, expected) {
     }
 }
 function assertTrue(name, v) { assertEq(name, !!v, true); }
-
-// Inline copy of the pipeline non-delta preservation block (pipeline.js
-// imports state/ui modules that don't load cleanly outside ST). The
-// test verifies the algorithm itself, not the surrounding plumbing.
-function preserveOffScene(extracted, prevSnap) {
-    if (!prevSnap) return extracted;
-    for (const k of ['characters', 'relationships']) {
-        if (Array.isArray(extracted[k]) && Array.isArray(prevSnap[k])) {
-            const newNames = new Set(extracted[k].map(e => (e.name || '').toLowerCase().trim()));
-            for (const prev of prevSnap[k]) {
-                const pn = (prev.name || '').toLowerCase().trim();
-                if (pn && !newNames.has(pn)) {
-                    extracted[k].push(JSON.parse(JSON.stringify(prev)));
-                }
-            }
-        }
-    }
-    return extracted;
-}
 
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 console.log('issue #11 — wiki persistence + cumulative roster');
@@ -114,7 +95,7 @@ console.log('\n── Scenario 1: pipeline non-delta preservation ──');
         ],
     };
 
-    const result = preserveOffScene(extracted, prev);
+    const result = preserveOffSceneEntities(extracted, prev);
 
     assertEq('chars roster size after preservation', result.characters.length, 3);
     assertEq('Alice updated to new thought', result.characters.find(c => c.name === 'Alice').innerThought, 'Focused.');
@@ -304,6 +285,23 @@ console.log('\n── Scenario 4: alias-aware lookup (Stranger → Jenna reveal)
     assertTrue('aliasesLow contains jenna', jennaMeta.aliasesLow.has('jenna'));
     assertEq('Jenna firstSeen=0 (when she was Stranger)', jennaMeta.firstSeen, 0);
     assertEq('Jenna canonical reflects latest name', jennaMeta.canonical, 'Jenna');
+}
+
+// Identical roster shape in another chat must not reuse history.
+console.log('\n── Scenario 5: character-history cache is chat-scoped ──');
+{
+    _stCtx.chatId = 'chat-a';
+    _stCtx.chatMetadata.scenepulse = { snapshots: {
+        '1': { location: 'Chat A room', charactersPresent: ['Alice'], characters: [{ name: 'Alice', aliases: [] }] },
+    } };
+    invalidateCharacterHistory();
+    assertEq('first chat location', getCharacterHistory().get('alice').lastLocation, 'Chat A room');
+
+    _stCtx.chatId = 'chat-b';
+    _stCtx.chatMetadata.scenepulse = { snapshots: {
+        '1': { location: 'Chat B room', charactersPresent: ['Alice'], characters: [{ name: 'Alice', aliases: [] }] },
+    } };
+    assertEq('second chat does not reuse first chat cache', getCharacterHistory().get('alice').lastLocation, 'Chat B room');
 }
 
 // ─── Summary ──────────────────────────────────────────────────────────

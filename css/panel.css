@@ -35,8 +35,6 @@
 #sp-panel-body::-webkit-scrollbar-thumb { background: rgba(100,110,130,0.3); border-radius: 2px; }
 #sp-panel * { pointer-events: auto; }
 
-#sp-panel-toggle { display: none; }
-
 /* Panel header */
 /* ═══ UNIFIED TOOLBAR ═══ */
 .sp-toolbar {
@@ -113,6 +111,29 @@
 .sp-toolbar-btn svg { display: block; }
 .sp-toolbar-btn:hover { background: var(--sp-surface-hover); color: var(--sp-text-bright); border-color: var(--sp-accent); }
 .sp-toolbar-btn.sp-tb-active { background: var(--sp-accent-dim); color: var(--sp-accent); border-color: rgba(77,184,164,0.3); }
+
+.sp-toolbar-more { position: relative; display: inline-flex; }
+.sp-toolbar-more-menu {
+    display: none; position: absolute; top: calc(100% + 4px); right: 0; z-index: 110;
+    min-width: 220px; padding: 4px;
+    background: var(--sp-bg-solid); border: 1px solid var(--sp-border-strong);
+    border-radius: var(--sp-radius-lg); box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+}
+.sp-toolbar-more-open .sp-toolbar-more-menu { display: flex; flex-direction: column; }
+.sp-toolbar-more-menu .sp-toolbar-menu-btn {
+    width: 100%; min-height: 36px; justify-content: flex-start; gap: 9px;
+    padding: 7px 10px; border-color: transparent; background: transparent;
+}
+.sp-toolbar-menu-label {
+    display: block; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    color: var(--sp-text); font-size: var(--sp-fs-sm); line-height: 1.25; white-space: nowrap;
+}
+.sp-toolbar-more-menu .sp-toolbar-menu-btn:hover .sp-toolbar-menu-label { color: var(--sp-text-bright); }
+
+@media (max-width: 600px) {
+    .sp-toolbar-more-menu { position: fixed; top: 98px; right: 10px; left: 10px; min-width: 0; }
+    .sp-toolbar-more-menu .sp-toolbar-menu-btn { min-height: 44px; }
+}
 
 /* ═══ FEATURES DROPDOWN ═══ */
 .sp-feat-wrap { position: relative; display: inline-flex; }

@@ -255,8 +255,8 @@ export function openPresetBrowser(opts = {}) {
                 <div class="sp-pb-detection">
                     ${detectedModel
                         ? (detectedPreset
-                            ? t(`Active model: <code>${esc(detectedModel)}</code> → matched preset: <strong>${esc(detectedPreset.displayName)}</strong>`)
-                            : t(`Active model: <code>${esc(detectedModel)}</code> — no bundled preset matched. Browse below or contribute one.`))
+                            ? t('Active model: <code>{model}</code> → matched preset: <strong>{preset}</strong>', { model: esc(detectedModel), preset: esc(detectedPreset.displayName) })
+                            : t('Active model: <code>{model}</code> — no bundled preset matched. Browse below or contribute one.', { model: esc(detectedModel) }))
                         : t('No active model detected. Connect to an API to see preset suggestions.')}
                 </div>
                 ${_createNewMode ? `<div class="sp-pb-mode-banner">${t('Pick a template to create a NEW profile from. The template seeds the profile with model-tuned prompt slots; your existing profiles are not touched.')}</div>` : ''}
@@ -330,11 +330,11 @@ export function openPresetBrowser(opts = {}) {
             if (!Number.isFinite(ms) || ms < 0) return '';
             const min = Math.round(ms / 60000);
             if (min < 1) return t('just now');
-            if (min < 60) return t(`${min} minute${min === 1 ? '' : 's'} ago`);
+            if (min < 60) return t('{count} min ago', { count: min });
             const hr = Math.round(min / 60);
-            if (hr < 24) return t(`${hr} hour${hr === 1 ? '' : 's'} ago`);
+            if (hr < 24) return t('{count} h ago', { count: hr });
             const day = Math.round(hr / 24);
-            return t(`${day} day${day === 1 ? '' : 's'} ago`);
+            return t('{count} d ago', { count: day });
         } catch { return ''; }
     }
 
@@ -376,7 +376,7 @@ export function openPresetBrowser(opts = {}) {
             const slotCount = Object.keys(p.promptOverrides || {}).length;
             const overridesSummary = slotCount === 0
                 ? t('Stock prompts — only the system-prompt role is set.')
-                : t(`Overrides ${slotCount} slot${slotCount === 1 ? '' : 's'}: ${Object.keys(p.promptOverrides).join(', ')}`);
+                : t('Overrides {count} prompt slots: {slots}', { count: slotCount, slots: Object.keys(p.promptOverrides).join(', ') });
             const orStats = statsByPresetId.get(p.id) || null;
             return `
                 <li class="sp-pb-row ${isApplied ? 'sp-pb-row-applied' : ''} ${isMatched ? 'sp-pb-row-matched' : ''}" data-preset-id="${esc(p.id)}">
@@ -433,7 +433,7 @@ export function openPresetBrowser(opts = {}) {
         }
         const chosenName = await spPrompt(
             t('Create new profile from template'),
-            t(`Pick a name for the new profile. The "${preset.displayName}" template will seed its prompt slots and system-prompt role; panels, schema, and other settings start empty (you can copy from another profile via Duplicate later).`),
+            t('Pick a name for the new profile. The "{preset}" template will seed its prompt slots and system-prompt role; panels, schema, and other settings start empty (you can copy from another profile via Duplicate later).', { preset: preset.displayName }),
             { value: suggestedName, placeholder: suggestedName, okLabel: t('Create profile') }
         );
         if (!chosenName || !chosenName.trim()) return;
@@ -442,7 +442,7 @@ export function openPresetBrowser(opts = {}) {
         // systemPromptRole / appliedPresetId) flow through one path.
         const newProfile = makeProfile({
             name: finalName,
-            description: t(`Seeded from template: ${preset.displayName}`),
+            description: t('Seeded from template: {preset}', { preset: preset.displayName }),
             promptOverrides: { ...(preset.promptOverrides || {}) },
             systemPromptRole: preset.systemPromptRole || 'system',
             appliedPresetId: preset.id,
@@ -451,7 +451,7 @@ export function openPresetBrowser(opts = {}) {
         sNow.profiles.push(newProfile);
         sNow.activeProfileId = newProfile.id;
         saveSettings();
-        try { toastr.success(t(`Created "${finalName}" from ${preset.displayName} template — switched to it.`)); } catch {}
+        try { toastr.success(t('Created "{profile}" from {preset} template — switched to it.', { profile: finalName, preset: preset.displayName })); } catch {}
         // Local view update so the row reflects the new applied state.
         profile.appliedPresetId = newProfile.appliedPresetId;
         profile.promptOverrides = newProfile.promptOverrides;
@@ -472,17 +472,17 @@ export function openPresetBrowser(opts = {}) {
         if (!profileNow) { try { toastr.error(t('No active profile')); } catch {} return; }
         const slotCount = Object.keys(preset.promptOverrides || {}).length;
         const ok = await spConfirm(
-            t(`Apply ${preset.displayName} on top of "${profileNow.name}"?`),
+            t('Apply {preset} on top of "{profile}"?', { preset: preset.displayName, profile: profileNow.name }),
             `${preset.notes}\n\n${slotCount === 0
                 ? t('This preset only sets the system-prompt role; no prompt slots will be modified.')
-                : t(`This template will OVERWRITE ${slotCount} slot${slotCount === 1 ? '' : 's'} in your current profile (${Object.keys(preset.promptOverrides).join(', ')}). Your edits in OTHER slots are preserved.`)}\n\n${t('Your panels, schema, and other settings are not touched. Reversible from the prompt editor (Clear preset).')}\n\n${t('Tip: prefer "+ New profile" if you want to keep your current setup unchanged.')}`,
+                : t('This template will overwrite {count} prompt slots in your current profile ({slots}). Your edits in other slots are preserved.', { count: slotCount, slots: Object.keys(preset.promptOverrides).join(', ') })}\n\n${t('Your panels, schema, and other settings are not touched. Reversible from the prompt editor (Clear preset).')}\n\n${t('Tip: prefer "+ New profile" if you want to keep your current setup unchanged.')}`,
             { okLabel: t('Apply to current'), cancelLabel: t('Cancel'), danger: true }
         );
         if (!ok) return;
         const patch = buildPresetPatch(preset, profileNow);
         updateActiveProfile(sNow, { ...patch, appliedPresetId: preset.id });
         saveSettings();
-        try { toastr.success(t(`Applied ${preset.displayName} to "${profileNow.name}"`)); } catch {}
+        try { toastr.success(t('Applied {preset} to "{profile}"', { preset: preset.displayName, profile: profileNow.name })); } catch {}
         // Update the local profile reference + re-render so the new "applied"
         // badge reflects the change without closing the browser.
         profile.appliedPresetId = preset.id;
@@ -522,7 +522,7 @@ export function openPresetBrowser(opts = {}) {
                 _resetOrStatsCache();
                 await _renderList();
                 await _renderFooter();
-                try { toastr.success(t(`Refreshed ${r.count} models from OpenRouter`)); } catch {}
+                try { toastr.success(t('Refreshed OpenRouter models: {count}', { count: r.count })); } catch {}
             } else if (r?.ok === false) {
                 try { toastr.warning(t('Refresh failed: ') + (r.reason || 'unknown')); } catch {}
             } else {
