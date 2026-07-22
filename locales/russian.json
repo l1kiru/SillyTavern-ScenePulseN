@@ -636,6 +636,7 @@
   "One click → runs 5 checks against the actual ScenePulse code paths (no mocks):": "Одно нажатие запускает 5 проверок реальных путей ScenePulse без имитаций:",
   "One refresh per session": "Одно обновление за сеанс",
   "One tracker attempt failed. Related attempts are grouped with this event; open Responses for the raw output.": "Одна попытка трекера завершилась ошибкой. Связанные попытки объединены с этим событием; исходный ответ доступен на вкладке «Ответы».",
+  "Open a chat and send a message before generating ScenePulse.": "Open a chat and send a message before generating ScenePulse.",
   "Open Debug Inspector (Ctrl+Shift+D)": "Открыть инспектор отладки (Ctrl+Shift+D)",
   "Open issues": "Открыть проблемы",
   "Open response": "Открыть ответ",

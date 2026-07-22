@@ -636,6 +636,7 @@
   "One click → runs 5 checks against the actual ScenePulse code paths (no mocks):": "One click → runs 5 checks against the actual ScenePulse code paths (no mocks):",
   "One refresh per session": "One refresh per session",
   "One tracker attempt failed. Related attempts are grouped with this event; open Responses for the raw output.": "One tracker attempt failed. Related attempts are grouped with this event; open Responses for the raw output.",
+  "Open a chat and send a message before generating ScenePulse.": "Open a chat and send a message before generating ScenePulse.",
   "Open Debug Inspector (Ctrl+Shift+D)": "Open Debug Inspector (Ctrl+Shift+D)",
   "Open issues": "Open issues",
   "Open response": "Open response",
