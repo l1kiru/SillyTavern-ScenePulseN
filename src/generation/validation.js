@@ -75,8 +75,9 @@ function coerceKnownProviderShapes(data,schema,warnings){
         if(moved)warnings.push(`root.${wrapperKey}: hoisted ${moved} field(s) to top level`);
     };
     hoist('questJournal',['northStar','mainQuests','sideQuests']);
+    hoist('quests',['northStar','mainQuests','sideQuests']);
     hoist('environment',['elapsed','time','date','location','weather','temperature']);
-    for(const key of['scene','sceneDetails','sceneInfo']){
+    for(const key of['scene','sceneDetails','sceneInfo','sceneAnalysis']){
         hoist(key,['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent','witnesses']);
     }
     if(Object.hasOwn(props,'witnesses')&&!Object.hasOwn(data,'witnesses')&&Array.isArray(data.charactersPresent)){
@@ -84,6 +85,21 @@ function coerceKnownProviderShapes(data,schema,warnings){
         warnings.push('root.witnesses: defaulted missing array to []');
     }
     const invSpec=props.characters?.items?.properties?.inventory;
+    const relProps=props.relationships?.items?.properties;
+    if(relProps&&Array.isArray(data.relationships)){
+        const meterKeys=['affection','affectionLabel','trust','trustLabel','desire','desireLabel','stress','stressLabel','compatibility','compatibilityLabel'];
+        for(let i=0;i<data.relationships.length;i++){
+            const rel=data.relationships[i];
+            const meters=rel?.meters;
+            if(!rel||typeof rel!=='object'||Array.isArray(rel)||!meters||typeof meters!=='object'||Array.isArray(meters))continue;
+            let moved=0;
+            for(const key of meterKeys){
+                if(!Object.hasOwn(relProps,key)||!Object.hasOwn(meters,key)||Object.hasOwn(rel,key))continue;
+                rel[key]=meters[key];moved++;
+            }
+            if(moved)warnings.push(`root.relationships[${i}].meters: hoisted ${moved} field(s) to relationship`);
+        }
+    }
     if(!invSpec||!Array.isArray(data.characters))return;
     for(let i=0;i<data.characters.length;i++){
         const ch=data.characters[i];

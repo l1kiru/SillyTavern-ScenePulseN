@@ -2,6 +2,13 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.0.4] — 2026-07-22
+
+#### Fixed — Separate-mode wrapper extraction
+
+- Prefer the outer tracker object when providers nest valid fields under wrappers like `environment`, `sceneAnalysis`, or `quests`, preventing separate-mode validation from accidentally selecting an inner section object.
+- Hoist `quests`, `sceneAnalysis`, and relationship `meters` aliases before schema validation.
+
 ### [7.0.3] — 2026-07-22
 
 #### Fixed — Nested provider response recovery
