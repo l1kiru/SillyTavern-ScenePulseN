@@ -7,7 +7,7 @@
   "js": "index.js",
   "css": "style.css",
   "author": "xenofei (upstream), l1kiru (ScenePulseN maintainer)",
-  "version": "7.0.1",
+  "version": "7.0.2",
   "minimum_client_version": "1.18.0",
   "homePage": "https://github.com/l1kiru/SillyTavern-ScenePulseN",
   "auto_update": true,
