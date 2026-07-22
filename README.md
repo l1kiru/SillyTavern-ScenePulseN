@@ -504,7 +504,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.0.2** — Saves otherwise-valid tracker generations when providers omit `witnesses` for private scenes or return character `inventory` as a string.
+**Latest: v7.0.3** — Saves valid tracker generations when providers nest quest, environment, or scene fields under wrapper objects.
 
 ## Contributing
 

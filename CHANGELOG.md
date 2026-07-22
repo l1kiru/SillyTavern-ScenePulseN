@@ -2,6 +2,12 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.0.3] — 2026-07-22
+
+#### Fixed — Nested provider response recovery
+
+- Hoist known `questJournal`, `environment`, and scene wrapper fields before schema validation so valid tracker generations are not discarded before normalization can recover them.
+
 ### [7.0.2] — 2026-07-22
 
 #### Fixed — Tracker validation recovery
