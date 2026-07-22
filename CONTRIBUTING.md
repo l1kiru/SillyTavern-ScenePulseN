@@ -22,7 +22,7 @@ Open an issue using the feature request template describing:
 2. Create a feature branch (`git checkout -b feature/my-feature`)
 3. Make your changes
 4. Test with at least one AI model in both Together and Separate modes
-5. Bump the version in `manifest.json` and `src/constants.js`
+5. Bump the version in `manifest.json`; `src/constants.js`, `package.json`, README, and CHANGELOG must agree (the tests enforce this)
 6. Submit a pull request
 
 ## Translation Contributions

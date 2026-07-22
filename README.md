@@ -1,10 +1,10 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fxenofei%2FSillyTavern-ScenePulse%2Fmain%2Fmanifest.json&query=%24.version&label=version&style=flat-square&labelColor=1a1c24&color=4db8a4" alt="Version">
+<img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fl1kiru%2FSillyTavern-ScenePulseN%2Fmain%2Fmanifest.json&query=%24.version&label=version&style=flat-square&labelColor=1a1c24&color=4db8a4" alt="Version">
 <img src="https://img.shields.io/badge/license-GPL--3.0-blue?style=flat-square&labelColor=1a1c24" alt="License">
-<img src="https://img.shields.io/badge/platform-SillyTavern%201.12%2B-orange?style=flat-square&labelColor=1a1c24" alt="Platform">
+<img src="https://img.shields.io/badge/platform-SillyTavern%201.18%2B-orange?style=flat-square&labelColor=1a1c24" alt="Platform">
 <img src="https://img.shields.io/badge/languages-29-9b7ac4?style=flat-square&labelColor=1a1c24" alt="Languages">
-<img src="https://img.shields.io/github/stars/xenofei/SillyTavern-ScenePulse?style=flat-square&labelColor=1a1c24&color=e8b341" alt="Stars">
+<img src="https://img.shields.io/github/stars/l1kiru/SillyTavern-ScenePulseN?style=flat-square&labelColor=1a1c24&color=e8b341" alt="Stars">
 
 # <img width="836" height="200" alt="image" src="https://github.com/user-attachments/assets/041e92d6-f126-45da-8a2f-7a64a6a8d609" />
 
@@ -18,6 +18,9 @@
 </div>
 
 ---
+
+> [!NOTE]
+> **ScenePulseN** is a community-maintained fork of [ScenePulse](https://github.com/xenofei/SillyTavern-ScenePulse). The original project and core architecture are by [xenofei](https://github.com/xenofei); this fork is maintained by [l1kiru](https://github.com/l1kiru).
 
 ScenePulse is a SillyTavern extension that automatically extracts and tracks scene data from AI responses — characters, relationships, quests, mood, tension, and more — all displayed in a real-time dashboard alongside your roleplay.
 
@@ -34,7 +37,7 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 > - New presets for models we don't ship — finetunes, niche providers, jailbreak variants, local models
 >
 > **How to contribute (pick whichever is easier):**
-> - 💬 **Quick suggestion** → [open an issue](https://github.com/xenofei/SillyTavern-ScenePulse/issues/new) describing your model + the change that worked. Even one-line tips are valuable.
+> - 💬 **Quick suggestion** → [open an issue](https://github.com/l1kiru/SillyTavern-ScenePulseN/issues/new) describing your model + the change that worked. Even one-line tips are valuable.
 > - 📁 **Tested preset** → submit a PR adding a `.json` file to [`presets/`](presets/) — see [`presets/README.md`](presets/README.md) for the schema and [`presets/_examples/`](presets/_examples/) for working examples.
 > - 🛠️ **Built-in tuning improvement** → if you'd improve one of the 30 bundled presets, open a PR against [`src/presets/built-in.js`](src/presets/built-in.js) with the model id and the rationale.
 >
@@ -294,7 +297,7 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 2. Go to **Extensions** → **Install Extension**
 3. Paste the URL:
    ```
-   https://github.com/xenofei/SillyTavern-ScenePulse
+   https://github.com/l1kiru/SillyTavern-ScenePulseN
    ```
 4. Click Install
 5. Reload SillyTavern
@@ -302,7 +305,7 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 ### Method 2: Manual (Git Clone)
 ```bash
 cd SillyTavern/data/default-user/extensions/third-party
-git clone https://github.com/xenofei/SillyTavern-ScenePulse
+git clone https://github.com/l1kiru/SillyTavern-ScenePulseN
 ```
 Restart SillyTavern after cloning.
 
@@ -421,7 +424,7 @@ No bundler required — SillyTavern loads extensions as `<script type="module">`
 
 ## Compatibility
 
-- **SillyTavern** 1.12.0+ (tested up to 1.18.x)
+- **SillyTavern** 1.18.0+
 - **Tested models**: GLM-4/5/5.1, Claude, GPT-4o, Gemini, Llama 3, Mistral, Qwen
 - **API providers**: OpenAI-compatible, Anthropic, Google AI, any provider SillyTavern supports
 - **Browsers**: Chrome, Firefox, Safari (mobile & desktop)
@@ -495,13 +498,13 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.0.0** — Major fork release combining the custom-panel security hardening, settings lifecycle fixes, complete locale-key synchronization, translation coverage reporting, and scoped RTL support.
+**Latest: v7.0.1** — Corrects fork installation/update routing, derives the installed extension directory dynamically, raises the secure SillyTavern baseline to 1.18.0, and adds CI metadata checks.
 
 ## Contributing
 
 Found a bug? Have a feature idea? Contributions welcome!
 
-1. [Open an issue](https://github.com/xenofei/SillyTavern-ScenePulse/issues) to report bugs or suggest features
+1. [Open an issue](https://github.com/l1kiru/SillyTavern-ScenePulseN/issues) to report bugs or suggest features
 2. Fork the repo, create a branch, and submit a PR
 3. **Translations** — Edit the relevant JSON file in [`locales/`](locales/), run `npm run sync-locales`, then run `npm test`. Do not edit generated `locales/_source.json` or `locales/_coverage.json` directly.
 4. Join the discussion in the issues tab
@@ -525,7 +528,9 @@ GPL-3.0 License — see [LICENSE](LICENSE) for details.
 
 <div align="center">
 
-*Built by [xenofei](https://github.com/xenofei)*
+*Original ScenePulse built by [xenofei](https://github.com/xenofei)*
+
+*ScenePulseN fork maintained by [l1kiru](https://github.com/l1kiru)*
 
 *Every scene has a pulse. Now you can feel it.*
 
