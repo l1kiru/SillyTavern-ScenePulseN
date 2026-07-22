@@ -19,7 +19,8 @@ import { record as recordNetwork } from '../network-log.js';
 import {
     getSettings, getActiveSchema, getActivePrompt, getTrackerData,
     getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, saveSnapshot, getTrustedSnapshotFor, ensureChatSaved,
-    getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore, buildProfileView
+    getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore, buildProfileView,
+    canGenerateScene
 } from '../settings.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
 import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
@@ -143,6 +144,7 @@ export function cancelGeneration(){
 
 export async function generateTracker(mesIdx,partKey,opts){
     if(!getSettings().enabled){log('generateTracker: extension disabled, skipping');return null}
+    if(!canGenerateScene(SillyTavern.getContext(),mesIdx)){log('generateTracker: no selected chat/message to analyze, skipping');return null}
     if(generating){warn('Busy, nonce=',genNonce);return null}
     setGenerating(true);setCancelRequested(false);spSetGenerating(true);setBrandState('generating');
     const myNonce=genNonce+1;setGenNonce(myNonce);

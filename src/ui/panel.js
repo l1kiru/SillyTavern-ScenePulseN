@@ -3,7 +3,7 @@ import { log, warn } from '../logger.js';
 import { esc, str } from '../utils.js';
 import { t } from '../i18n.js';
 import { MASCOT_SVG, DEFAULTS, VERSION } from '../constants.js';
-import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView } from '../settings.js';
+import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView, canGenerateScene, getLastAssistantMessageIndex } from '../settings.js';
 import { BUILTIN_PANELS } from '../constants.js';
 import { buildDynamicSchema } from '../schema.js';
 import { customPanelSectionKey, getActiveProfile, validateCustomPanels } from '../profiles.js';
@@ -216,7 +216,9 @@ export function createPanel(){
         // v6.27.17: was a hard block + toast. Now offers cancel-and-restart
         // when busy — fixes the "stuck" feeling during long auto-fallbacks.
         if (!(await guardRegenIfBusy())) return;
-        const{chat}=SillyTavern.getContext();if(!chat.length)return;
+        const ctx=SillyTavern.getContext();
+        const mesIdx=getLastAssistantMessageIndex(ctx);
+        if(!canGenerateScene(ctx,mesIdx)){toastr.info(t('Open a chat and send a message before generating ScenePulse.'));renderEmptyState();return}
         const body=document.getElementById('sp-panel-body');
         showLoadingOverlay(body,t('Generating Scene'),t('Analyzing context'));
         setLastGenSource('manual:full');
@@ -233,7 +235,7 @@ export function createPanel(){
             showThoughtLoading(t('Generating Scene'),t('Analyzing context'));
         }
         const preNonce=genNonce;
-        const result=await generateTracker(chat.length-1);
+        const result=await generateTracker(mesIdx);
         // If nonce changed beyond our generation, cancel already handled UI -- bail
         if(genNonce>preNonce+1){log('Toolbar regen: stale caller, cancel handled UI');return}
         hideStopButton();stopElapsedTimer();

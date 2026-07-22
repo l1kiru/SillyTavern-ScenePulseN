@@ -2,7 +2,7 @@
 import { log, warn } from '../logger.js';
 import { esc } from '../utils.js';
 import { t } from '../i18n.js';
-import { getSettings, saveSettings } from '../settings.js';
+import { getSettings, saveSettings, canGenerateScene, getLastAssistantMessageIndex } from '../settings.js';
 import { charColor } from '../color.js';
 import { setLastGenSource } from '../state.js';
 import { showThoughtLoading, showStopButton, hideStopButton, clearThoughtLoading } from './loading.js';
@@ -91,14 +91,15 @@ export function createThoughtPanel(){
         const btn=e.currentTarget;
         if(btn.classList.contains('sp-spinning'))return;
         btn.classList.add('sp-spinning');
-        const{chat}=SillyTavern.getContext();
-        if(!chat.length){btn.classList.remove('sp-spinning');return}
+        const ctx=SillyTavern.getContext();
+        const mesIdx=getLastAssistantMessageIndex(ctx);
+        if(!canGenerateScene(ctx,mesIdx)){btn.classList.remove('sp-spinning');toastr.info(t('Open a chat and send a message before generating ScenePulse.'));return}
         // Show loading overlay inside thought body -- existing content visible behind
         showThoughtLoading(t('Regenerating thoughts'),t('Analyzing context'));
         showStopButton();
         log('Thought regen: starting...');
         setLastGenSource('manual:thoughts');
-        const result=await generateTracker(chat.length-1,'characters');
+        const result=await generateTracker(mesIdx,'characters');
         btn.classList.remove('sp-spinning');
         hideStopButton();
         clearThoughtLoading();
