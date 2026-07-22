@@ -38,14 +38,19 @@ eq('missing section field is an error',invalid.errors.some(item=>item.includes('
 const valid=validateExtraction({sceneSummary:'Complete',witnesses:[]},{schema:section.value});
 eq('valid section passes',valid.valid,true);
 const nearMiss={
-    time:'14:32:15',date:'03/17/2025 (Monday)',elapsed:'00:07:23',
+    environment:{time:'14:32:15',date:'03/17/2025 (Monday)',location:'Recovery room'},
+    elapsed:'00:07:23',
     sceneSummary:'Alex is alone in the recovery room.',
     charactersPresent:[],
     characters:[{name:'Mash Kyrielight',inventory:'Medical tablet'}],
+    questJournal:{northStar:'Recover safely',mainQuests:[],sideQuests:[]},
 };
-const nearMissSchema={type:'object',properties:{time:{type:'string'},date:{type:'string'},elapsed:{type:'string'},sceneSummary:{type:'string'},charactersPresent:{type:'array',items:{type:'string'}},witnesses:{type:'array',items:{type:'string'}},characters:{type:'array',items:{type:'object',properties:{name:{type:'string'},inventory:{type:'array',items:{type:'string'}}},required:['name','inventory']}}},required:['time','date','elapsed','sceneSummary','charactersPresent','witnesses','characters']};
+const nearMissSchema={type:'object',properties:{time:{type:'string'},date:{type:'string'},elapsed:{type:'string'},location:{type:'string'},sceneSummary:{type:'string'},charactersPresent:{type:'array',items:{type:'string'}},witnesses:{type:'array',items:{type:'string'}},northStar:{type:'string'},mainQuests:{type:'array'},sideQuests:{type:'array'},characters:{type:'array',items:{type:'object',properties:{name:{type:'string'},inventory:{type:'array',items:{type:'string'}}},required:['name','inventory']}}},required:['time','date','elapsed','location','sceneSummary','charactersPresent','witnesses','northStar','mainQuests','sideQuests','characters']};
 const nearMissValidation=validateExtraction(nearMiss,{schema:nearMissSchema});
-eq('full tracker defaults missing witnesses',nearMissValidation.valid,true);
+eq('full tracker hoists known wrappers',nearMissValidation.valid,true);
+eq('environment time becomes root field',nearMiss.time,'14:32:15');
+eq('questJournal northStar becomes root field',nearMiss.northStar,'Recover safely');
+eq('questJournal mainQuests becomes root field',nearMiss.mainQuests,[]);
 eq('missing witnesses becomes empty array',nearMiss.witnesses,[]);
 eq('string inventory becomes array',nearMiss.characters[0].inventory,['Medical tablet']);
 eq('JSON Schema integer accepts a JS integer',validateExtraction({score:42},{schema:{type:'object',properties:{score:{type:'integer'}},required:['score']}}).valid,true);
