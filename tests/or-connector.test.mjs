@@ -41,7 +41,7 @@ let _saveSettingsCalls = 0;
 globalThis.SillyTavern = {
     getContext: () => ({
         extensionSettings: { scenepulse: _settings },
-        chatCompletionSettings: {}, textGenerationSettings: {},
+        chatCompletionSettings: {}, textCompletionSettings: {},
         saveSettingsDebounced: () => {},
     }),
 };
@@ -105,7 +105,7 @@ globalThis.fetch = async (_url, opts = {}) => {
 // — so as long as that returns _settings, mutations are visible.
 globalThis.SillyTavern.getContext = () => ({
     extensionSettings: { scenepulse: _settings },
-    chatCompletionSettings: {}, textGenerationSettings: {},
+    chatCompletionSettings: {}, textCompletionSettings: {},
     saveSettingsDebounced: () => { _saveSettingsCalls++; },
 });
 

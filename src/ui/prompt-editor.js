@@ -219,7 +219,7 @@ export function openPromptEditor() {
         if (customCount === 0) { try { toastr.info(t('Nothing to revert — every slot is already on its default.')); } catch {} return; }
         const ok = await spConfirm(
             t('Revert all slots to defaults?'),
-            t(`This will clear ${customCount} customized ${customCount === 1 ? 'slot' : 'slots'} in this draft. Press Save afterwards to commit, or Cancel to discard the revert too.`),
+            t('Customized slots to clear in this draft: {count}. Press Save afterwards to commit, or Cancel to discard the revert too.', { count: customCount }),
             { okLabel: t('Revert all'), cancelLabel: t('Keep edits'), danger: true }
         );
         if (!ok) return;

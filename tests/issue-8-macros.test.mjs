@@ -57,10 +57,11 @@ function assertContains(name, haystack, needle) {
 
 // Inject a snapshot at id 0 so getLatestSnapshot() returns it.
 function setSnapshot(snap) {
-    _stCtx.chatMetadata.scenepulse.snapshots = { '0': snap };
+    settings.clearAllSnapshots();
+    settings.saveSnapshot(0, snap, 0);
 }
 function clearSnapshot() {
-    _stCtx.chatMetadata.scenepulse.snapshots = {};
+    settings.clearAllSnapshots();
 }
 function resetAll() {
     _stCtx.extensionSettings.scenepulse = {};

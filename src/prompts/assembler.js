@@ -22,6 +22,7 @@
 
 import { DEFAULTS } from '../constants.js';
 import { getLanguage, getActivePanels } from '../settings.js';
+import { isValidCustomFieldKey } from '../profiles.js';
 import { getSlotText } from './slots.js';
 
 const BRANCH_TYPES = ['dramatic', 'intense', 'comedic', 'twist', 'exploratory'];
@@ -125,18 +126,18 @@ function _storyIdeaFields(s) {
 }
 
 function _customPanelFields(s) {
-    const customPanels = getActivePanels(s).filter(cp => cp.enabled !== false && cp.fields?.length);
+    const customPanels = getActivePanels(s).filter(cp => cp && cp.enabled !== false && Array.isArray(cp.fields) && cp.fields.length);
     if (!customPanels.length) return '';
     let block = '\n### Custom Tracked Fields\n';
     for (const cp of customPanels) {
-        block += `\n#### ${cp.name}\n`;
+        block += `\n#### ${String(cp.name || 'Untitled')}\n`;
         for (const f of cp.fields) {
-            if (f.enabled === false) continue;
+            if (!f || f.enabled === false || !isValidCustomFieldKey(f.key)) continue;
             const typeHint =
                 f.type === 'meter' ? '(integer 0-100)' :
                 f.type === 'number' ? '(integer)' :
                 f.type === 'list' ? '(array of strings)' :
-                f.type === 'enum' ? `(one of: ${(f.options || []).join(', ')})` :
+                f.type === 'enum' ? `(one of: ${(Array.isArray(f.options) ? f.options : []).map(String).join(', ')})` :
                 '(string)';
             block += `- ${f.key}: ${f.desc || f.label} ${typeHint}\n`;
         }
@@ -215,7 +216,10 @@ export function assemblePrompt(s, profile, opts = {}) {
     // ── Closing section: delta mode (only if applicable) ───────────────
     if (isDelta) {
         prompt += `\n\n## DELTA MODE — RETURN ONLY CHANGES\n`;
-        prompt += getSlotText('deltaMode', profile);
+        const deltaText = getSlotText('deltaMode', profile);
+        prompt += panels.storyIdeas === false
+            ? deltaText.split('\n').filter(line => !/\bplotBranches\b/.test(line)).join('\n')
+            : deltaText;
         prompt += '\n';
     }
 

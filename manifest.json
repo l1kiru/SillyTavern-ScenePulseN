@@ -7,7 +7,8 @@
     "js": "index.js",
     "css": "style.css",
     "author": "xenofei",
-    "version": "6.27.20",
+    "version": "7.0.0",
+    "minimum_client_version": "1.12.0",
     "homePage": "https://github.com/xenofei/SillyTavern-ScenePulse",
     "auto_update": true,
     "generate_interceptor": "scenePulseInterceptor"

@@ -24,9 +24,11 @@ const state = {
     currentSnapshotMesIdx: -1,
     lastGenSource: '',
     lastRawResponse: '',
+    lastExtractionFailure: null,
     lastDeltaPayload: null,
     pendingInlineIdx: -1,
     inlineExtractionDone: false,
+    inlineGenerationContext: null,
 
     // ── Mobile ──
     _spMobileMinimized: false,
@@ -40,7 +42,6 @@ const state = {
     prevTimePeriod: '',
     _isTimelineScrub: false,
     _tlScrubDebounce: null,
-    _tlScrubRaf: null,
 
     // ── Weather + time tint ──
     currentWeatherType: '',
@@ -51,9 +52,6 @@ const state = {
     _inlineWaitTimerId: null,
     _tpLoadingTimerId: null,
     _tpBannerTimerId: null,
-
-    // ── Sampler backup ──
-    _savedSamplerValues: null,
 
     // ── Character colors ──
     _charColorMap: new Map(),
@@ -113,15 +111,21 @@ export function setLastRawResponse(v) { lastRawResponse = state.lastRawResponse 
 // getter at render time so it always reads the current value from state.
 export function getLastRawResponse() { return state.lastRawResponse; }
 
+export let lastExtractionFailure = state.lastExtractionFailure;
+export function setLastExtractionFailure(v) { lastExtractionFailure = state.lastExtractionFailure = v; }
+export function getLastExtractionFailure() { return state.lastExtractionFailure; }
+
 export let lastDeltaPayload = state.lastDeltaPayload;
 export function setLastDeltaPayload(v) { lastDeltaPayload = state.lastDeltaPayload = v; }
-export function getLastDeltaPayload() { return state.lastDeltaPayload; }
 
 export let pendingInlineIdx = state.pendingInlineIdx;
 export function setPendingInlineIdx(v) { pendingInlineIdx = state.pendingInlineIdx = v; }
 
 export let inlineExtractionDone = state.inlineExtractionDone;
 export function setInlineExtractionDone(v) { inlineExtractionDone = state.inlineExtractionDone = v; }
+
+export let inlineGenerationContext = state.inlineGenerationContext;
+export function setInlineGenerationContext(v) { inlineGenerationContext = state.inlineGenerationContext = v; }
 
 // ── Mobile state ──
 export let _spMobileMinimized = state._spMobileMinimized;
@@ -147,9 +151,6 @@ export function set_isTimelineScrub(v) { _isTimelineScrub = state._isTimelineScr
 export let _tlScrubDebounce = state._tlScrubDebounce;
 export function set_tlScrubDebounce(v) { _tlScrubDebounce = state._tlScrubDebounce = v; }
 
-export let _tlScrubRaf = state._tlScrubRaf;
-export function set_tlScrubRaf(v) { _tlScrubRaf = state._tlScrubRaf = v; }
-
 // ── Weather + time tint ──
 export let currentWeatherType = state.currentWeatherType;
 export function setCurrentWeatherType(v) { currentWeatherType = state.currentWeatherType = v; }
@@ -161,12 +162,8 @@ export function setCurrentTimePeriod(v) { currentTimePeriod = state.currentTimeP
 export let elapsedInterval = state.elapsedInterval;
 export function setElapsedInterval(v) { elapsedInterval = state.elapsedInterval = v; }
 
-export let _savedSamplerValues = state._savedSamplerValues;
-export function set_savedSamplerValues(v) { _savedSamplerValues = state._savedSamplerValues = v; }
-
 // ── Character colors ──
 export let _charColorMap = state._charColorMap;
-export function set_charColorMap(v) { _charColorMap = state._charColorMap = v; }
 
 export let _charColorNext = state._charColorNext;
 export function set_charColorNext(v) { _charColorNext = state._charColorNext = v; }

@@ -10,6 +10,7 @@ import { showPanel } from '../ui/panel.js';
 import { renderTimeline } from '../ui/timeline.js';
 import { spDetectMode } from '../ui/mobile.js';
 import { renderCustomPanelsMgr } from './custom-panels.js';
+import { t } from '../i18n.js';
 
 export function startGuidedTour(){
     const _s=(svg)=>`<svg viewBox="0 0 16 16" width="13" height="13" fill="none" style="vertical-align:-2px;display:inline">${svg}</svg>`;
@@ -65,10 +66,10 @@ export function startGuidedTour(){
     function createTourPanel(){
         const s=getSettings();
         if(!s.customPanels)s.customPanels=[];
-        s.customPanels.push({name:'RPG Stats (Tour Example)',fields:[
-            {key:'health',label:'Health',type:'meter',desc:"{{user}}'s health 0-100"},
-            {key:'mana',label:'Mana',type:'meter',desc:"Mana remaining after spellcasting"},
-            {key:'reputation',label:'Reputation',type:'text',desc:"Standing with the local guild"}
+        s.customPanels.push({name:t('RPG Stats (Tour Example)'),fields:[
+            {key:'health',label:t('Health'),type:'meter',desc:"{{user}}'s health 0-100"},
+            {key:'mana',label:t('Mana'),type:'meter',desc:"Mana remaining after spellcasting"},
+            {key:'reputation',label:t('Reputation'),type:'text',desc:"Standing with the local guild"}
         ]});
         _tourPanelCreated=true;
         saveSettings();
@@ -80,48 +81,46 @@ export function startGuidedTour(){
     function removeTourPanel(){
         if(!_tourPanelCreated)return;
         const s=getSettings();
-        const idx=(s.customPanels||[]).findIndex(p=>p.name==='RPG Stats (Tour Example)');
+        const idx=(s.customPanels||[]).findIndex(p=>p.name===t('RPG Stats (Tour Example)'));
         if(idx>=0){s.customPanels.splice(idx,1);saveSettings()}
         _tourPanelCreated=false;
     }
     let _ghostWasOn=false;
     const _isMobile=spDetectMode()==='mobile';
     let steps=[
-        {title:'Welcome to ScenePulse',desc:'ScenePulse is your AI-powered <strong>scene intelligence dashboard</strong>. It tracks characters, relationships, quests, and story state \u2014 all extracted automatically from AI responses.<br><br>This tour loads <strong>example data</strong> so you can see every feature.',sel:'.sp-toolbar',pos:'below'},
-        {title:'The Dashboard',desc:'Environment data \u2014 time, date, location, weather, temperature. Updates every message.<br><br>Toggle '+_i.edit+' edit mode to click and modify values manually.',sel:'.sp-env-permanent',pos:'below'},
-        {title:'Toolbar Controls',desc:_isMobile
-            ?'Left to right:<br><br>'+_i.regen+' <strong>Refresh</strong> \u2014 regenerate tracker<br>'+_i.panels+' <strong>Manager</strong> \u2014 toggle panels & fields<br>'+_i.toggle+' <strong>Expand/Collapse</strong> \u2014 all sections<br>'+_i.transition+' <strong>Transitions</strong> \u2014 scene change alerts<br>'+_i.edit+' <strong>Edit</strong> \u2014 manual value editing'
-            :'Left to right:<br><br>'+_i.regen+' <strong>Refresh</strong> \u2014 regenerate tracker<br>'+_i.panels+' <strong>Manager</strong> \u2014 toggle panels & fields<br>'+_i.toggle+' <strong>Expand/Collapse</strong> \u2014 all sections<br>'+_i.condense+' <strong>Condense</strong> \u2014 compact layout<br>'+_i.thoughts+' <strong>Thoughts</strong> \u2014 inner thoughts panel<br>'+_i.weather+' <strong>Weather</strong> \u2014 rain/snow overlay<br>'+_i.time+' <strong>Ambience</strong> \u2014 time-of-day tint<br>'+_i.transition+' <strong>Transitions</strong> \u2014 scene change alerts<br>'+_i.edit+' <strong>Edit</strong> \u2014 manual value editing',sel:'.sp-toolbar',pos:'below'},
-        {title:'Scene Details',desc:'Tracks <strong>mood, tension, topic, interaction, and sounds</strong>. Tension is uppercase (CALM \u2192 CRITICAL). Header badge = current mood.',sel:'[data-key="scene"]',pos:'below',open:'scene'},
-        {title:'Quest Journal',desc:_i.star+' <strong>North Star</strong> \u2014 life purpose<br>'+_i.main+' <strong>Main Quests</strong> \u2014 primary life arcs<br>'+_i.side+' <strong>Side Quests</strong> \u2014 optional parallel paths<br><br>Quests are persistent storylines that span multiple scenes \u2014 not scene-level actions. Tiers and quests collapse independently.',sel:'[data-key="quests"]',pos:_isMobile?'below':'left',open:'quests'},
-        {title:'Relationships',desc:_i.heart+' <strong>Affection</strong><br>'+_i.shield+' <strong>Trust</strong><br>'+_i.flame+' <strong>Desire</strong><br>'+_i.bolt+' <strong>Stress</strong> (neutral)<br>'+_i.compat+' <strong>Compatibility</strong><br><br>Deltas (\u25B2/\u25BC) with unique icons. White bar marker = previous value.',sel:'[data-key="relationships"]',pos:_isMobile?'below':'left',open:'relationships'},
-        {title:'Characters',desc:'Profiles: <strong>appearance, outfit, inventory, goals</strong>. Role badges match relationship style. First expanded, others collapse.',sel:'[data-key="characters"]',pos:_isMobile?'below':'left',open:'characters'},
-        {title:'Story Ideas',desc:'5 AI-generated plot directions per update. Click to expand. <strong>\uD83D\uDCCB Paste</strong> to edit, <strong>\u25B6 Inject</strong> to send immediately.',sel:'[data-key="branches"]',pos:_isMobile?'below':'left',open:'branches'},
+        {title:t('Welcome to ScenePulse'),desc:t('ScenePulse tracks characters, relationships, quests, and story state automatically. This tour loads <strong>example data</strong> so you can inspect every feature.'),sel:'.sp-toolbar',pos:'below'},
+        {title:t('The Dashboard'),desc:t('Shows time, date, location, weather, and temperature. Use edit mode to correct values manually.'),sel:'.sp-env-permanent',pos:'below'},
+        {title:t('Toolbar Controls'),desc:t('Toolbar buttons control regeneration, panels, section expansion, visual features, thoughts, and manual editing.'),sel:'.sp-toolbar',pos:'below'},
+        {title:t('Scene Details'),desc:t('Tracks mood, tension, topic, interaction, and sounds. The header badge shows the current mood.'),sel:'[data-key="scene"]',pos:'below',open:'scene'},
+        {title:t('Quest Journal'),desc:_i.star+' '+t('<strong>North Star</strong> — life purpose')+'<br>'+_i.main+' '+t('<strong>Main Quests</strong> — primary story arcs')+'<br>'+_i.side+' '+t('<strong>Side Quests</strong> — optional parallel paths')+'<br><br>'+t('Quests persist across scenes and can be collapsed independently.'),sel:'[data-key="quests"]',pos:_isMobile?'below':'left',open:'quests'},
+        {title:t('Relationships'),desc:_i.heart+' '+t('Affection')+'<br>'+_i.shield+' '+t('Trust')+'<br>'+_i.flame+' '+t('Desire')+'<br>'+_i.bolt+' '+t('Stress')+'<br>'+_i.compat+' '+t('Compatibility')+'<br><br>'+t('Arrows show changes; the white marker shows the previous value.'),sel:'[data-key="relationships"]',pos:_isMobile?'below':'left',open:'relationships'},
+        {title:t('Characters'),desc:t('Character profiles show appearance, outfit, inventory, goals, and current state.'),sel:'[data-key="characters"]',pos:_isMobile?'below':'left',open:'characters'},
+        {title:t('Story Ideas'),desc:t('Five AI-generated plot directions appear after each update. Expand, edit, or send one to the chat.'),sel:'[data-key="branches"]',pos:_isMobile?'below':'left',open:'branches'},
     ];
     // Desktop-only steps
     if(!_isMobile){
         steps.push(
-            {title:'Inner Thoughts',desc:'Floating panel with each character\u2019s <strong>literal inner monologue</strong>. Drag to reposition. Resize from the corner.',sel:'#sp-thought-panel',pos:'right',
+            {title:t('Inner Thoughts'),desc:t('A floating panel with each character’s inner monologue. Drag to move it and resize it from the corner.'),sel:'#sp-thought-panel',pos:'right',
                 before:()=>{const tp=document.getElementById('sp-thought-panel');if(tp){_ghostWasOn=tp.classList.contains('sp-tp-ghost');tp.classList.remove('sp-tp-ghost')}}},
-            {title:'Thoughts Controls',desc:_i.snap+' <strong>Snap Left</strong> \u2014 dock to chat edge<br>'+_i.ghost+' <strong>Ghost Mode</strong> \u2014 transparent frame<br>'+_i.regen+' <strong>Regenerate</strong> \u2014 refresh thoughts<br><strong>\u2715 Close</strong> \u2014 hide panel<br><br>All toggleable \u2014 click to switch on/off.',sel:'#sp-thought-panel .sp-tp-header',pos:'below',
+            {title:t('Thoughts Controls'),desc:t('Thought controls let you dock the panel, enable ghost mode, regenerate thoughts, or hide it.'),sel:'#sp-thought-panel .sp-tp-header',pos:'below',
                 after:()=>{if(_ghostWasOn){const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.add('sp-tp-ghost')}}}
         );
     }
     steps.push(
-        {title:'Timeline Scrubber',desc:'Every AI message creates a <strong>snapshot</strong>. The timeline bar at the bottom shows all snapshots as dots. Click any dot to load that moment. The green dot marks the current message.<br><br>Scrub through history and compare how relationships, quests, and characters evolved.',center:true},
-        {title:'Panel Manager',desc:'Toggle <strong>built-in panels</strong> on/off with checkboxes. Disabled panels are excluded from the AI prompt \u2014 saving tokens.<br><br>Sub-fields within each panel can also be toggled individually.',sel:'#sp-panel-mgr',pos:_isMobile?'below':'left',
+        {title:t('Timeline Scrubber'),desc:t('Every tracked AI message creates a snapshot. Select a timeline dot to restore that moment and compare how the scene evolved.'),center:true},
+        {title:t('Panel Manager'),desc:t('Enable or disable built-in panels and individual fields. Disabled data is excluded from the tracker prompt and saves tokens.'),sel:'#sp-panel-mgr',pos:_isMobile?'below':'left',
             before:()=>{openPanelMgr()},after:()=>{closePanelMgr()}},
-        {title:'Custom Panels',desc:'Create panels to track <strong>anything</strong> \u2014 health, mana, reputation, faction standings.<br><br>Each field gets a <strong>key</strong>, <strong>label</strong>, <strong>type</strong> (text/number/meter/list/enum), and an <strong>LLM hint</strong> telling the AI what to output.',sel:'#sp-panel-mgr-custom',pos:_isMobile?'below':'left',
+        {title:t('Custom Panels'),desc:t('Create panels for any state such as health, mana, reputation, or faction standing. Each field has a key, label, type, and instruction for the LLM.'),sel:'#sp-panel-mgr-custom',pos:_isMobile?'below':'left',
             before:()=>{
                 openPanelMgr();
                 createTourPanel();
                 setTimeout(()=>{const el=document.getElementById('sp-panel-mgr-custom');if(el)el.scrollIntoView({behavior:'smooth',block:'nearest'})},150);
             },
             after:()=>{removeTourPanel();closePanelMgr()}},
-        {title:'\u26A0 Performance Tip',desc:'More panels = more tokens = <strong>longer generation times</strong>.<br><br>If responses feel slow, try:<br>\u2022 Disable panels you don\u2019t need (Characters, Story Ideas are heaviest)<br>\u2022 Reduce custom panel fields<br>\u2022 Lower context messages in Separate mode',sel:'#sp-panel-mgr',pos:_isMobile?'below':'left',warn:true,
+        {title:t('⚠ Performance Tip'),desc:t('More panels require more tokens and increase generation time. Disable unused panels, reduce custom fields, or lower context messages in Separate mode.'),sel:'#sp-panel-mgr',pos:_isMobile?'below':'left',warn:true,
             before:()=>{openPanelMgr()},after:()=>{closePanelMgr()}},
-        {title:'Feedback & Issues',desc:'Found a bug? Have a suggestion?<br><br>Visit the GitHub page to report issues or share ideas:<br><br><a href="https://github.com/xenofei" target="_blank" rel="noopener" style="color:var(--sp-accent);text-decoration:underline;font-weight:600">github.com/xenofei</a><br><br>Your feedback helps make ScenePulse better for everyone.',center:true},
-        {title:'Thank You!',desc:'<div style="text-align:center"><span class="sp-tour-finale-pulse">'+MASCOT_SVG+'</span></div><div class="sp-tour-finale-glow">Every scene has a pulse. Now you can feel it.</div><br>Thank you for trying <strong>ScenePulse</strong>. I built this to make every moment in your story feel alive \u2014 tracked, remembered, meaningful.<br><br>Your story matters. Go make it unforgettable.',center:true}
+        {title:t('Feedback & Issues'),desc:t('Found a bug or have a suggestion? Report it on GitHub:')+'<br><br><a href="https://github.com/xenofei" target="_blank" rel="noopener" style="color:var(--sp-accent);text-decoration:underline;font-weight:600">github.com/xenofei</a>',center:true},
+        {title:t('Thank You!'),desc:'<div style="text-align:center"><span class="sp-tour-finale-pulse">'+MASCOT_SVG+'</span></div><div class="sp-tour-finale-glow">'+t('Every scene has a pulse. Now you can feel it.')+'</div><br>'+t('Thank you for trying <strong>ScenePulse</strong>. Your story matters — make it unforgettable.'),center:true}
     );
     let step=0;let _prevAfter=null;
     const spotlight=document.createElement('div');spotlight.className='sp-tour-spotlight';
@@ -138,6 +137,11 @@ export function startGuidedTour(){
         const isLast=step===steps.length-1;const isFirst=step===0;
         let pips='';for(let i=0;i<steps.length;i++)pips+=`<span class="sp-tour-pip${i===step?' sp-active':''}"></span>`;
         card.innerHTML=`<div class="sp-tour-step-label">Step ${step+1} of ${steps.length}</div><div class="sp-tour-title">${s.title}</div><div class="sp-tour-desc">${s.desc}</div><div class="sp-tour-nav">${isFirst?'':'<button class="sp-tour-btn" data-prev>\u2190 Back</button>'}<button class="sp-tour-btn sp-tour-btn-end" data-end>Skip</button><div class="sp-tour-progress">${pips}</div>${isLast?'<button class="sp-tour-btn sp-tour-btn-next" data-done>\u2713 Finish</button>':'<button class="sp-tour-btn sp-tour-btn-next" data-next>Next \u2192</button>'}</div>`;
+        card.querySelector('.sp-tour-step-label').textContent=t('Step {current} of {total}',{current:step+1,total:steps.length});
+        const prevBtn=card.querySelector('[data-prev]');if(prevBtn)prevBtn.textContent='← '+t('Back');
+        const endBtn=card.querySelector('[data-end]');if(endBtn)endBtn.textContent=t('Skip');
+        const doneBtn=card.querySelector('[data-done]');if(doneBtn)doneBtn.textContent='✓ '+t('Finish');
+        const nextBtn=card.querySelector('[data-next]');if(nextBtn)nextBtn.textContent=t('Next')+' →';
         // Delay positioning to allow DOM updates (panel mgr open, scroll, etc.)
         if(s.center){
             // No spotlight, center card on screen
@@ -194,6 +198,8 @@ export function startGuidedTour(){
             const body=document.getElementById('sp-panel-body');
             if(body)body.innerHTML='<div class="sp-empty-state"><div class="sp-empty-icon">\u2726</div><div class="sp-empty-title">Ready to Go</div><div class="sp-empty-text">Send your first message to start tracking.</div></div>';
         }
+        const emptyBody=document.getElementById('sp-panel-body');
+        if(emptyBody&&!_savedData){const title=emptyBody.querySelector('.sp-empty-title');const text=emptyBody.querySelector('.sp-empty-text');if(title)title.textContent=t('Ready to Go');if(text)text.textContent=t('Send your first message to start tracking.')}
         renderTimeline();
     }
     card.addEventListener('click',(e)=>{

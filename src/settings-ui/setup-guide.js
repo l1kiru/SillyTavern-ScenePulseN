@@ -8,6 +8,7 @@ import { spDetectMode } from '../ui/mobile.js';
 import { loadUI } from './bind-ui.js';
 import { _spSaveLS } from './bind-ui.js';
 import { startGuidedTour } from './guided-tour.js';
+import { t } from '../i18n.js';
 
 export function showSetupGuide(){
     // Remove any existing guide
@@ -24,96 +25,96 @@ export function showSetupGuide(){
     <div class="sp-setup-dialog">
         <div class="sp-setup-header">
             <div class="sp-setup-icon">${MASCOT_SVG}</div>
-            <div class="sp-setup-title">Scene<span style="color:var(--sp-accent)">Pulse</span> Setup</div>
-            <button class="sp-setup-close" title="Close">✕</button>
+            <div class="sp-setup-title">Scene<span style="color:var(--sp-accent)">Pulse</span> ${t('Setup')}</div>
+            <button class="sp-setup-close" title="${t('Close')}">✕</button>
         </div>
         <div class="sp-setup-body" id="sp-setup-body">
             <div class="sp-setup-step sp-setup-active" data-step="1">
                 <div class="sp-setup-step-num">1</div>
                 <div class="sp-setup-step-content">
-                    <div class="sp-setup-step-title">How ScenePulse Works</div>
-                    <p>ScenePulse uses <strong>Together mode</strong> by default — it instructs the AI to append scene tracking data (JSON) at the end of every response. This is fast, cheap, and accurate.</p>
-                    <p>However, some models occasionally skip the tracker payload. When this happens, ScenePulse can <strong>automatically fall back</strong> to a separate API call to generate the tracker data.</p>
-                    ${_setupMobile?'<p style="color:var(--sp-text-dim);font-size:12px"><em>Note: On mobile, some desktop features (weather overlay, time-of-day tint, inner thoughts panel, condense view) are hidden to optimize the experience. They\'ll be available when you switch to desktop.</em></p>':''}
-                    <p>This guide helps you configure the fallback so you never lose scene data.</p>
+                    <div class="sp-setup-step-title">${t('How ScenePulse Works')}</div>
+                    <p>${t('ScenePulse uses <strong>Together mode</strong> by default — the AI appends scene-tracking JSON to every response. This is fast, inexpensive, and accurate.')}</p>
+                    <p>${t('Some models occasionally omit tracker data. ScenePulse can then <strong>automatically recover</strong> it with a separate API call.')}</p>
+                    ${_setupMobile?`<p style="color:var(--sp-text-dim);font-size:12px"><em>${t('On mobile, desktop-only visual features are hidden and become available again on desktop.')}</em></p>`:''}
+                    <p>${t('This guide configures that recovery path so scene data is not lost.')}</p>
                     <div class="sp-setup-compat">
-                        <div class="sp-setup-compat-title">Model Compatibility (April 2026)</div>
-                        <div class="sp-setup-compat-tier"><span style="color:var(--sp-green)">Recommended:</span> Claude Opus 4.6 / Sonnet 4.6, GPT-5.4, Gemini 3.1 Pro / 3 Flash, Grok 4, GLM-5.1</div>
-                        <div class="sp-setup-compat-tier"><span style="color:var(--sp-amber)">Compatible:</span> DeepSeek V3.2, Mistral Large 3, Qwen 3 32B+, Llama 4 Maverick/Scout, Gemini 3.1 Flash-Lite, GPT-4.1 mini</div>
-                        <div class="sp-setup-compat-tier"><span style="color:var(--sp-red)">Not recommended:</span> Models under 14B parameters, heavily quantized (Q3/Q2)</div>
-                        <div class="sp-setup-compat-note">Local models: GLM-5.1 (MIT), Qwen 3 32B, DeepSeek V3.2, Mistral Large 3 are top picks. Use Q5_K_M+ quantization. Consider Separate mode for models under 32B.</div>
+                        <div class="sp-setup-compat-title">${t('Model Compatibility (April 2026)')}</div>
+                        <div class="sp-setup-compat-tier"><span style="color:var(--sp-green)">${t('Recommended:')}</span> Claude Opus 4.6 / Sonnet 4.6, GPT-5.4, Gemini 3.1 Pro / 3 Flash, Grok 4, GLM-5.1</div>
+                        <div class="sp-setup-compat-tier"><span style="color:var(--sp-amber)">${t('Compatible:')}</span> DeepSeek V3.2, Mistral Large 3, Qwen 3 32B+, Llama 4 Maverick/Scout, Gemini 3.1 Flash-Lite, GPT-4.1 mini</div>
+                        <div class="sp-setup-compat-tier"><span style="color:var(--sp-red)">${t('Not recommended:')}</span> ${t('Models under 14B parameters or heavily quantized (Q3/Q2)')}</div>
+                        <div class="sp-setup-compat-note">${t('For local models, prefer Q5_K_M+ quantization. Consider Separate mode for models under 32B.')}</div>
                     </div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn sp-setup-btn-primary" data-goto="2">Next →</button><button class="sp-setup-btn sp-setup-btn-skip" data-dismiss="true">Skip setup</button></div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn sp-setup-btn-primary" data-goto="2">${t('Next')} →</button><button class="sp-setup-btn sp-setup-btn-skip" data-dismiss="true">${t('Skip setup')}</button></div>
                 </div>
             </div>
             <div class="sp-setup-step" data-step="2">
                 <div class="sp-setup-step-num">2</div>
                 <div class="sp-setup-step-content">
-                    <div class="sp-setup-step-title">Create a Connection Profile</div>
-                    <p>The fallback uses a <strong>Connection Profile</strong> in SillyTavern to make a dedicated API call. If you already have profiles set up, you can use one of those.</p>
-                    <p>To create a new one:</p>
+                    <div class="sp-setup-step-title">${t('Create a Connection Profile')}</div>
+                    <p>${t('Recovery uses a SillyTavern <strong>Connection Profile</strong> for its separate API call. You can select an existing profile.')}</p>
+                    <p>${t('To create a new one:')}</p>
                     <div class="sp-setup-instructions">
-                        <div class="sp-setup-inst">1. Open SillyTavern's <strong>API Connections</strong> panel (top-left plug icon)</div>
-                        <div class="sp-setup-inst">2. Configure your API provider and model</div>
-                        <div class="sp-setup-inst">3. Click the <strong>connection profile</strong> dropdown → <strong>Create New</strong></div>
-                        <div class="sp-setup-inst">4. Name it something like <em>"ScenePulse Tracker"</em></div>
-                        <div class="sp-setup-inst">5. Save the profile</div>
+                        <div class="sp-setup-inst">${t("1. Open SillyTavern's <strong>API Connections</strong> panel (plug icon)")}</div>
+                        <div class="sp-setup-inst">${t('2. Configure your API provider and model')}</div>
+                        <div class="sp-setup-inst">${t('3. Open the <strong>connection profile</strong> list and choose <strong>Create New</strong>')}</div>
+                        <div class="sp-setup-inst">${t('4. Give it a name such as <em>ScenePulse Tracker</em>')}</div>
+                        <div class="sp-setup-inst">${t('5. Save the profile')}</div>
                     </div>
-                    ${hasProfiles?'<p style="color:var(--sp-green)">✓ You have <strong>'+profiles.length+'</strong> connection profile'+(profiles.length>1?'s':'')+'  available.</p>':'<p style="color:var(--sp-amber)">⚠ No connection profiles found. Create one in SillyTavern first, then click Refresh below.</p>'}
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="1">← Back</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="3">Next →</button></div>
+                    ${hasProfiles?`<p style="color:var(--sp-green)">✓ ${t('Available connection profiles: {count}',{count:profiles.length})}</p>`:`<p style="color:var(--sp-amber)">⚠ ${t('No connection profiles found. Create one in SillyTavern first.')}</p>`}
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="1">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="3">${t('Next')} →</button></div>
                 </div>
             </div>
             <div class="sp-setup-step" data-step="3">
                 <div class="sp-setup-step-num">3</div>
                 <div class="sp-setup-step-content">
-                    <div class="sp-setup-step-title">Select Your Fallback Profile</div>
-                    <p>Choose which connection profile ScenePulse should use when the AI omits tracker data:</p>
+                    <div class="sp-setup-step-title">${t('Select Your Recovery Profile')}</div>
+                    <p>${t('Choose the connection profile ScenePulse should use when tracker data is missing:')}</p>
                     <div class="sp-setup-select-wrap">
                         <select id="sp-setup-fb-profile" class="sp-setup-select">
-                            <option value="">(Same as current — no dedicated profile)</option>
+                            <option value="">${t('(Same as current — no dedicated profile)')}</option>
                             ${profiles.map(p=>`<option value="${esc(p.id)}"${p.id===s.fallbackProfile?' selected':''}>${esc(p.name)}</option>`).join('')}
                         </select>
                     </div>
-                    <p>Optionally pick a different preset for tracker generation. <strong>(Same as current)</strong> uses your active preset unchanged — recommended unless you have a JSON-tuned preset saved.</p>
+                    <p>${t('Optionally select a different preset for tracker generation. <strong>(Same as current)</strong> keeps the active preset unchanged.')}</p>
                     <div class="sp-setup-select-wrap">
                         <select id="sp-setup-fb-preset" class="sp-setup-select">
-                            <option value="">(Same as current)</option>
+                            <option value="">${t('(Same as current)')}</option>
                             ${presets.map(p=>`<option value="${esc(p.id)}"${p.id===s.fallbackPreset?' selected':''}>${esc(p.name)}</option>`).join('')}
                         </select>
                     </div>
-                    <div class="sp-setup-note">Picking a different preset will visibly switch SillyTavern's preset dropdown during tracker generation, then restore. Pick "(Same as current)" to avoid the switch.</div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="2">← Back</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="4">Next →</button></div>
+                    <div class="sp-setup-note">${t('A different preset is selected temporarily during tracker generation and restored afterwards.')}</div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="2">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="4">${t('Next')} →</button></div>
                 </div>
             </div>
             <div class="sp-setup-step" data-step="4">
                 <div class="sp-setup-step-num">4</div>
                 <div class="sp-setup-step-content">
-                    <div class="sp-setup-step-title">Fallback Preference</div>
-                    <p>When the AI skips the tracker, should ScenePulse automatically run a separate API call?</p>
-                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-fb-enable" value="yes" ${s.fallbackEnabled!==false?'checked':''}> <strong>Yes</strong> — automatically recover missing tracker data <span style="color:var(--sp-text-dim)">(recommended)</span></label>
-                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-fb-enable" value="no" ${s.fallbackEnabled===false?'checked':''}> <strong>No</strong> — skip it, I'll regenerate manually if needed</label>
-                    <div class="sp-setup-note" id="sp-setup-no-warn" style="display:${s.fallbackEnabled===false?'block':'none'};color:var(--sp-amber)">With fallback disabled, you may occasionally see empty scene data when the AI omits the tracker. Use the ⟳ button in the panel to regenerate manually.</div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="3">← Back</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="5">Next →</button></div>
+                    <div class="sp-setup-step-title">${t('Recovery Preference')}</div>
+                    <p>${t('When tracker data is missing, should ScenePulse run a separate API call automatically?')}</p>
+                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-fb-enable" value="yes" ${s.fallbackEnabled!==false?'checked':''}> <strong>${t('Yes')}</strong> — ${t('recover missing tracker data automatically')} <span style="color:var(--sp-text-dim)">${t('(recommended)')}</span></label>
+                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-fb-enable" value="no" ${s.fallbackEnabled===false?'checked':''}> <strong>${t('No')}</strong> — ${t('regenerate manually when needed')}</label>
+                    <div class="sp-setup-note" id="sp-setup-no-warn" style="display:${s.fallbackEnabled===false?'block':'none'};color:var(--sp-amber)">${t('With automatic recovery disabled, use the ⟳ button to regenerate missing scene data manually.')}</div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="3">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="5">${t('Next')} →</button></div>
                 </div>
             </div>
             <div class="sp-setup-step" data-step="5">
                 <div class="sp-setup-step-num">5</div>
                 <div class="sp-setup-step-content">
-                    <div class="sp-setup-step-title">Model discovery overlay <span style="color:var(--sp-text-dim);font-size:11px;font-weight:normal">(optional)</span></div>
-                    <p>When you browse the preset templates, ScenePulse can surface live OpenRouter pricing, context windows, and roleplay popularity beside each model — so you spot alternatives at a glance. It's read-only: nothing about your prompts, samplers, or generation behavior changes.</p>
-                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-or-enable" value="yes" ${s.orConnectorEnabled?'checked':''}> <strong>Yes</strong> — show live model data while I browse templates <span style="color:var(--sp-text-dim)">(~30 KB, cached 24 h)</span></label>
-                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-or-enable" value="no" ${!s.orConnectorEnabled?'checked':''}> <strong>No</strong> — keep the static baseline only <span style="color:var(--sp-text-dim)">(default)</span></label>
-                    <div class="sp-setup-note" style="margin-top:6px;color:var(--sp-text-dim)">Public endpoint (<code>openrouter.ai/api/v1/models</code>). No auth, no telemetry. Bundled prompt presets work the same either way. Change this later under Settings → Generation.</div>
+                    <div class="sp-setup-step-title">${t('Model discovery overlay')} <span style="color:var(--sp-text-dim);font-size:11px;font-weight:normal">${t('(optional)')}</span></div>
+                    <p>${t('Show current OpenRouter pricing, context windows, and roleplay popularity while browsing templates. This is read-only and does not change prompts, samplers, or generation.')}</p>
+                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-or-enable" value="yes" ${s.orConnectorEnabled?'checked':''}> <strong>${t('Yes')}</strong> — ${t('show live model data while browsing templates')} <span style="color:var(--sp-text-dim)">${t('(~30 KB, cached 24 h)')}</span></label>
+                    <label class="sp-setup-radio"><input type="radio" name="sp-setup-or-enable" value="no" ${!s.orConnectorEnabled?'checked':''}> <strong>${t('No')}</strong> — ${t('keep the static baseline only')} <span style="color:var(--sp-text-dim)">${t('(default)')}</span></label>
+                    <div class="sp-setup-note" style="margin-top:6px;color:var(--sp-text-dim)">${t('Public endpoint, no authorization, no telemetry. You can change this later under Settings → Generation.')}</div>
                     <div class="sp-setup-tips">
-                        <div class="sp-setup-tips-title">Tips & Hidden Features</div>
-                        <div class="sp-setup-tip">Type <strong>/sp help</strong> for all slash commands (/sp regen, /sp refresh, /sp export, /sp debug)</div>
-                        <div class="sp-setup-tip">Click the <strong>book icon</strong> in the toolbar to browse the <strong>Character Wiki</strong> — every character who ever appeared</div>
-                        <div class="sp-setup-tip">Click the <strong>pencil icon</strong> to enable <strong>Edit mode</strong> — click any field to manually correct it</div>
-                        <div class="sp-setup-tip">Open the <strong>Character Wiki</strong> (book icon) and click the <strong>web graph button</strong> to see the <strong>Relationship Web</strong> — force-directed NPC graph</div>
-                        <div class="sp-setup-tip">Use <strong>Custom Panels</strong> (Panel Manager → +) to track anything: health, mana, reputation, inventory</div>
+                        <div class="sp-setup-tips-title">${t('Tips & Hidden Features')}</div>
+                        <div class="sp-setup-tip">${t('Type <strong>/sp help</strong> to list every slash command.')}</div>
+                        <div class="sp-setup-tip">${t('Use the <strong>book icon</strong> to open the Character Wiki with every character who has appeared.')}</div>
+                        <div class="sp-setup-tip">${t('Use the <strong>pencil icon</strong> to edit tracker fields manually.')}</div>
+                        <div class="sp-setup-tip">${t('Open the Character Wiki and its graph button to view the Relationship Web.')}</div>
+                        <div class="sp-setup-tip">${t('Use <strong>Custom Panels</strong> to track health, mana, reputation, inventory, or any other state.')}</div>
                     </div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="4">← Back</button><button class="sp-setup-btn sp-setup-btn-primary sp-setup-btn-finish" data-finish="true">✓ Finish Setup</button></div>
-                    <div style="text-align:center;margin-top:8px"><button class="sp-setup-btn sp-setup-btn-tour" data-tour="true">✦ Take a Guided Tour</button></div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="4">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary sp-setup-btn-finish" data-finish="true">✓ ${t('Finish Setup')}</button></div>
+                    <div style="text-align:center;margin-top:8px"><button class="sp-setup-btn sp-setup-btn-tour" data-tour="true">✦ ${t('Take a Guided Tour')}</button></div>
                 </div>
             </div>
         </div>
@@ -147,9 +148,9 @@ export function showSetupGuide(){
             s.orConnectorEnabled=orEnabled;s._spOrConnectorPromptShown=true;
             saveSettings();_spSaveLS();loadUI();
             ov.remove();
-            if(enabled&&prof)toastr.success('Fallback configured with profile: '+prof,'ScenePulse Setup');
-            else if(enabled)toastr.info('Fallback enabled (using current profile)','ScenePulse Setup');
-            else toastr.info('Fallback disabled — use ⟳ for manual recovery','ScenePulse Setup');
+            if(enabled&&prof)toastr.success(t('Recovery configured with profile: {profile}',{profile:prof}),t('ScenePulse Setup'));
+            else if(enabled)toastr.info(t('Automatic recovery enabled with the current profile'),t('ScenePulse Setup'));
+            else toastr.info(t('Automatic recovery disabled — use ⟳ manually'),t('ScenePulse Setup'));
         }
         const dot=e.target.closest('.sp-setup-dot');
         if(dot)goToStep(+dot.dataset.dot);

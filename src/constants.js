@@ -6,29 +6,8 @@ export const MODULE_NAME='scenepulse';
 // v6.12.3 — every release bumped manifest.json but missed this. Activity
 // log + diagnostic version field were misreporting. Keep in sync with
 // manifest.json on every version bump going forward.
-export const VERSION = '6.27.20';
+export const VERSION = '7.0.0';
 
-// v6.8.19: canonical list of character archetype enum values.
-// Shared between schema validation, normalize, prompt builder, UI filter,
-// and CSS class naming so there's exactly one source of truth.
-//
-// v6.8.26 overhaul: dropped `protagonist` (unused), renamed `love` → `lover`
-// and `incidental` → `background`, added `friend` / `authority` / `lust` /
-// `pet`. The normalizer back-compat-maps the old names so existing
-// snapshots still render without a migration pass.
-export const CHARACTER_ARCHETYPES = Object.freeze([
-    'ally',
-    'friend',
-    'rival',
-    'mentor',
-    'authority',
-    'antagonist',
-    'family',
-    'lover',
-    'lust',
-    'pet',
-    'background',
-]);
 export const LOG='[ScenePulse]';
 export const EXTENSION_NAME='SillyTavern-ScenePulse';
 export const SP_LS_KEY='scenepulse_config';
@@ -40,7 +19,8 @@ export const MES_ICON_SVG=`<svg viewBox="0 0 18 18" fill="none" width="16" heigh
 // turns, force one full-state generation to re-establish ground truth
 // and flush stale scalars, phantom entities, and fossilized meters.
 // Set to 0 to disable periodic refresh entirely.
-export const DEFAULTS=Object.freeze({enabled:true,autoGenerate:true,maxRetries:2,contextMessages:8,promptMode:'json',embedSnapshots:1,embedRole:'system',injectionMethod:'inline',deltaMode:true,deltaRefreshInterval:15,functionToolEnabled:false,maxSnapshots:0,connectionProfile:'',chatPreset:'',fallbackProfile:'',fallbackPreset:'',fallbackEnabled:true,setupDismissed:false,lorebookMode:'character_attached',lorebookAllowlist:[],openSections:{scene:true,quests:true,relationships:true,characters:true,branches:false},schema:null,systemPrompt:null,showThoughts:true,thoughtPanelTruncate:false,thoughtPanelFit:false,showEmptyFields:false,thoughtPos:{x:10,y:80},devButtons:false,fontScale:1,language:'',theme:'default',sceneTransitions:true,reduceVisualEffects:false,panels:{dashboard:true,scene:true,quests:true,relationships:true,characters:true,storyIdeas:true},dashCards:{date:true,time:true,weather:true,temperature:true,location:true},fieldToggles:{},customPanels:[],charPortraits:{},npcRelationshipGraph:false,profiles:[],activeProfileId:'',orConnectorEnabled:false,_spOrConnectorPromptShown:false});
+export const DEFAULTS=Object.freeze({enabled:true,autoGenerate:true,maxRetries:2,contextMessages:8,promptMode:'json',embedSnapshots:1,embedRole:'system',injectionMethod:'inline',deltaMode:true,deltaRefreshInterval:15,maxSnapshots:0,connectionProfile:'',chatPreset:'',fallbackProfile:'',fallbackPreset:'',fallbackEnabled:true,setupDismissed:false,openSections:{scene:true,quests:true,relationships:true,characters:true,branches:false},schema:null,systemPrompt:null,showThoughts:true,thoughtPanelTruncate:false,thoughtPanelFit:false,showEmptyFields:false,thoughtPos:{x:10,y:80},devButtons:false,fontScale:1,language:'',theme:'default',sceneTransitions:true,reduceVisualEffects:false,panels:{dashboard:true,scene:true,quests:true,relationships:true,characters:true,storyIdeas:true},dashCards:{date:true,time:true,weather:true,temperature:true,location:true},fieldToggles:{},customPanels:[],charPortraits:{},npcRelationshipGraph:false,profiles:[],activeProfileId:'',orConnectorEnabled:false,_spOrConnectorPromptShown:false});
+export function normalizePromptMode(value){return value==='native'?'native':'json'}
 
 // Mobile/Tablet detection
 export const SP_MOBILE_MAX=600;  // phones: width <= 600
@@ -119,19 +99,6 @@ export const BUILTIN_PANELS={
         ]
     }
 };
-
-// Built-in GLM-5 optimized preset settings (applied when chatPreset is empty or 'builtin')
-export const BUILTIN_PRESET={
-    name:'ScenePulse-GLM5',
-    temperature:0.6,    // Lower than default 1.0 -- structured JSON needs consistency
-    top_p:0.95,         // GLM-5 default
-    max_tokens:4096,    // Scene tracker JSON rarely exceeds 3k tokens
-    frequency_penalty:0.15, // Mild dedup to avoid repetitive field values
-    presence_penalty:0,  // Don't penalize covering all required fields
-    // Note: These are applied when using 'separate' injection with no custom preset selected.
-    // For 'inline' injection, the user's default preset is used.
-};
-
 
 // v6.27.11: BUILTIN_SCHEMA + BUILTIN_PROMPT extracted to src/builtins/.
 // Re-exported here for backward compatibility — every existing call site

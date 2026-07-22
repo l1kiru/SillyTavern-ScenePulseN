@@ -1,19 +1,18 @@
 // ScenePulse — Bind UI Module
 // Extracted from index.js lines 5132-5368
 
-import { MODULE_NAME, DEFAULTS, SP_LS_KEY } from '../constants.js';
-import { log, warn, debugLog } from '../logger.js';
+import { MODULE_NAME, DEFAULTS, SP_LS_KEY, VERSION, normalizePromptMode } from '../constants.js';
+import { log, warn } from '../logger.js';
 import { esc, clamp, spConfirm } from '../utils.js';
-import { buildDynamicSchema, buildDynamicPrompt } from '../schema.js';
+import { buildDynamicSchema } from '../schema.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     getSettings, saveSettings,
-    getConnectionProfiles, getChatPresets, getLorebooks,
-    getLatestSnapshot, getTrackerData,
-    refreshLorebookDisplay, updateLorebookRec
+    getConnectionProfiles, getChatPresets,
+    getLatestSnapshot, clearAllSnapshots, buildProfileView
 } from '../settings.js';
 import { genNonce, genMeta, setLastGenSource } from '../state.js';
-import { getActiveProfile, updateActiveProfile, createProfile, duplicateProfile, renameProfile, deleteProfile, setActiveProfile, validateImportedProfile, importProfile, exportProfile, makeProfile, migrateLegacySettingsToProfile } from '../profiles.js';
+import { customPanelSectionKey, getActiveProfile, updateActiveProfile, createProfile, duplicateProfile, renameProfile, deleteProfile, setActiveProfile, validateImportedProfile, validateImportedConfigSettings, importProfile, exportProfile, migrateLegacySettingsToProfile } from '../profiles.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { hidePanel, _applyFontScale as _applyFontScaleFromUI, updateFeatBadge } from '../ui/panel.js';
 import { updateThoughts } from '../ui/thoughts.js';
@@ -32,11 +31,80 @@ import { showSetupGuide } from './setup-guide.js';
 import { startGuidedTour } from './guided-tour.js';
 import { t, resetI18nCache, initI18n } from '../i18n.js';
 import { createSettings } from './create-settings.js';
+import { renderEmptyState } from '../ui/empty-state.js';
+
+let _globalDebugShortcutBound=false;
+let _crashLogModulePromise=null;
+let _crashLogUnsubscribe=null;
+
+function _refreshCrashLogBadge(crashLog,{isNew=false}={}){
+    const badge=document.getElementById('sp-crash-log-count');
+    const btn=document.getElementById('sp-btn-debug-inspector');
+    const count=crashLog.entryCount();
+    if(badge)badge.textContent=count?`(${count})`:'';
+    if(!btn)return;
+    const unseen=crashLog.unseenCount();
+    if(unseen>0){
+        btn.classList.add('sp-di-has-unseen');
+        btn.setAttribute('title',t('New issues since last opened: {count}. Click to inspect.',{count:unseen}));
+    }else{
+        btn.classList.remove('sp-di-has-unseen');
+        btn.removeAttribute('title');
+    }
+    if(isNew){
+        btn.classList.remove('sp-di-flash');
+        const flash=()=>btn.isConnected&&btn.classList.add('sp-di-flash');
+        if(typeof requestAnimationFrame==='function')requestAnimationFrame(flash);else flash();
+    }
+}
+
+function _openDebugInspector(){
+    import('../ui/debug-inspector.js').then(m=>m.openDebugInspector()).catch(()=>{});
+}
+
+function _onGlobalDebugShortcut(e){
+    if(!(e.ctrlKey&&e.shiftKey&&(e.key==='D'||e.key==='d')))return;
+    const tgt=e.target;
+    if(tgt&&(tgt.tagName==='INPUT'||tgt.tagName==='TEXTAREA'||tgt.isContentEditable))return;
+    e.preventDefault();
+    _openDebugInspector();
+}
+
+function _ensureGlobalBindings(){
+    if(!_globalDebugShortcutBound){
+        document.addEventListener('keydown',_onGlobalDebugShortcut);
+        _globalDebugShortcutBound=true;
+    }
+    if(!_crashLogModulePromise){
+        _crashLogModulePromise=import('../crash-log.js').then(m=>{
+            _crashLogUnsubscribe=m.addChangeListener(payload=>_refreshCrashLogBadge(m,payload));
+            return m;
+        }).catch(e=>{
+            _crashLogModulePromise=null;
+            warn('Crash log badge:',e?.message);
+            return null;
+        });
+    }
+    _crashLogModulePromise.then(m=>{if(m)_refreshCrashLogBadge(m)});
+}
+
+export function disposeGlobalBindings(){
+    if(_globalDebugShortcutBound){
+        document.removeEventListener('keydown',_onGlobalDebugShortcut);
+        _globalDebugShortcutBound=false;
+    }
+    if(_crashLogUnsubscribe){
+        _crashLogUnsubscribe();
+        _crashLogUnsubscribe=null;
+    }
+    _crashLogModulePromise=null;
+}
 
 export function updateBadge(){const on=getSettings().enabled;const b=document.getElementById('sp-badge');if(b){b.className='sp-drawer-badge '+(on?'sp-on':'sp-off');b.innerHTML=`<span class="sp-drawer-badge-dot"></span>${on?t('Active'):t('Off')}`}}
 
 function _syncFeatBadge(){try{updateFeatBadge()}catch(_){}}
-export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s.enabled);$('#sp-auto-gen').prop('checked',s.autoGenerate);$('#sp-show-thoughts').prop('checked',s.showThoughts!==false);$('#sp-show-weather').prop('checked',s.weatherOverlay!==false);$('#sp-show-timetint').prop('checked',s.timeTint!==false);$('#sp-show-devbtns').prop('checked',s.devButtons===true);$('#sp-reduce-effects').prop('checked',s.reduceVisualEffects===true);if(s.reduceVisualEffects===true)document.body.classList.add('sp-reduce-effects');else document.body.classList.remove('sp-reduce-effects');$('#sp-function-tool').prop('checked',s.functionToolEnabled===true);$('#sp-font-scale').val(s.fontScale||1);$('#sp-font-scale-val').text((s.fontScale||1).toFixed(1)+'x');$('#sp-language').val(s.language||'');$('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);$('#sp-mode').val(s.promptMode||'json');$('#sp-embed-n').val(s.embedSnapshots);$('#sp-embed-role').val(s.embedRole);$('#sp-lore-mode').val(s.lorebookMode||'character_attached');$('#sp-max-snapshots').val(s.maxSnapshots||0);
+export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s.enabled);$('#sp-auto-gen').prop('checked',s.autoGenerate);$('#sp-show-thoughts').prop('checked',s.showThoughts!==false);$('#sp-show-weather').prop('checked',s.weatherOverlay!==false);$('#sp-show-timetint').prop('checked',s.timeTint!==false);$('#sp-show-devbtns').prop('checked',s.devButtons===true);$('#sp-reduce-effects').prop('checked',s.reduceVisualEffects===true);if(s.reduceVisualEffects===true)document.body.classList.add('sp-reduce-effects');else document.body.classList.remove('sp-reduce-effects');$('#sp-font-scale').val(s.fontScale||1);$('#sp-font-scale-val').text((s.fontScale||1).toFixed(1)+'x');$('#sp-language').val(s.language||'');$('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);$('#sp-mode').val(s.promptMode||'json');$('#sp-embed-n').val(s.embedSnapshots);$('#sp-embed-role').val(s.embedRole);$('#sp-max-snapshots').val(s.maxSnapshots||0);
+    $('#sp-story-ideas').prop('checked',buildProfileView(s,getActiveProfile(s)).panels?.storyIdeas!==false);
     // Rebuild profile/preset dropdowns from current DOM (ST may load them late)
     const profiles=getConnectionProfiles();const presets=getChatPresets();
     // ── localStorage is the source of truth for config persistence ──
@@ -54,7 +122,7 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     // On first run or upgrade, seed from extensionSettings if localStorage is empty
     const _seed=(key)=>{if(ls[key]===undefined&&s[key]!==undefined&&s[key]!=='')ls[key]=s[key]};
     _seed('connectionProfile');_seed('chatPreset');_seed('fallbackProfile');_seed('fallbackPreset');
-    _seed('fallbackEnabled');_seed('injectionMethod');_seed('lorebookMode');
+    _seed('fallbackEnabled');_seed('injectionMethod');
     _seed('contextMessages');_seed('maxRetries');_seed('promptMode');
     _seed('embedSnapshots');_seed('embedRole');_seed('showThoughts');
     _seed('weatherOverlay');_seed('timeTint');
@@ -65,10 +133,9 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     if(ls.fallbackPreset!==undefined)s.fallbackPreset=ls.fallbackPreset;
     if(ls.fallbackEnabled!==undefined)s.fallbackEnabled=ls.fallbackEnabled;
     if(ls.injectionMethod!==undefined)s.injectionMethod=ls.injectionMethod;
-    if(ls.lorebookMode!==undefined)s.lorebookMode=ls.lorebookMode;
     if(ls.contextMessages!==undefined)s.contextMessages=ls.contextMessages;
     if(ls.maxRetries!==undefined)s.maxRetries=ls.maxRetries;
-    if(ls.promptMode!==undefined)s.promptMode=ls.promptMode;
+    if(ls.promptMode!==undefined){s.promptMode=normalizePromptMode(ls.promptMode);if(ls.promptMode!==s.promptMode){ls.promptMode=s.promptMode;try{localStorage.setItem(SP_LS_KEY,JSON.stringify(ls))}catch{}}}
     if(ls.embedSnapshots!==undefined)s.embedSnapshots=ls.embedSnapshots;
     if(ls.embedRole!==undefined)s.embedRole=ls.embedRole;
     if(ls.showThoughts!==undefined)s.showThoughts=ls.showThoughts;
@@ -83,7 +150,6 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     $('#sp-show-timetint').prop('checked',s.timeTint!==false);
     $('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);
     $('#sp-mode').val(s.promptMode||'json');$('#sp-embed-n').val(s.embedSnapshots);$('#sp-embed-role').val(s.embedRole);
-    $('#sp-lore-mode').val(s.lorebookMode||'character_attached');
     // Smart val: resolve saved value (may be UUID or legacy name) to an option value
     const _smartVal=(sel,val,list,label)=>{
         const $el=$(sel);
@@ -129,9 +195,6 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     $('#sp-method-separate').toggle(s.injectionMethod!=='inline');
     $('#sp-embed-section').toggle(s.injectionMethod!=='inline');
     $('#sp-separate-settings').toggle(s.injectionMethod!=='inline');
-    // Display active lorebooks
-    refreshLorebookDisplay();
-    updateLorebookRec();
     // v6.13.0 (issue #15): editor reads/writes go through the active
     // profile, not s.schema / s.systemPrompt directly.
     // v6.22.0: legacy #sp-sysprompt textarea was removed from the UI.
@@ -140,7 +203,7 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     const _activeProfile=getActiveProfile(s);
     const schemaStr=_activeProfile.schema||JSON.stringify(buildDynamicSchema(s),null,2);
     $('#sp-schema').val(schemaStr);
-    updateBadge();$('#sp-lore-section').toggle(s.lorebookMode==='allowlist');$('#scenepulse-settings .inline-drawer-content').toggleClass('sp-disabled',!s.enabled);
+    updateBadge();$('#scenepulse-settings .inline-drawer-content').toggleClass('sp-disabled',!s.enabled);
     // Save resolved UUIDs back to localStorage (synchronous, immune to ST race conditions)
     _spSaveLS();
 }
@@ -154,7 +217,6 @@ export function _spSaveLS(){
         fallbackProfile:s.fallbackProfile||'',fallbackPreset:s.fallbackPreset||'',
         fallbackEnabled:s.fallbackEnabled!==false,
         injectionMethod:s.injectionMethod||'inline',
-        lorebookMode:s.lorebookMode||'character_attached',
         contextMessages:s.contextMessages||8,maxRetries:s.maxRetries??2,
         promptMode:s.promptMode||'json',
         embedSnapshots:s.embedSnapshots??1,embedRole:s.embedRole||'system',
@@ -177,15 +239,20 @@ export function bindUI(){const s=getSettings();
     });
     $('#sp-enabled').on('change',function(){s.enabled=this.checked;saveSettings();updateBadge();$('#scenepulse-settings .inline-drawer-content').toggleClass('sp-disabled',!this.checked);if(!this.checked){hidePanel();const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.remove('sp-tp-visible')}else{renderExisting()}});
     $('#sp-auto-gen').on('change',function(){s.autoGenerate=this.checked;saveSettings()});
+    $('#sp-story-ideas').on('change',function(){
+        const view=buildProfileView(s,getActiveProfile(s));
+        const panels={...DEFAULTS.panels,...view.panels,storyIdeas:this.checked};
+        if(!updateActiveProfile(s,{panels}))s.panels=panels;
+        saveSettings();
+        const snap=getLatestSnapshot();if(snap)updatePanel(normalizeTracker(snap),true);
+        const schemaEl=document.getElementById('sp-schema');if(schemaEl)schemaEl.value=JSON.stringify(buildDynamicSchema(buildProfileView(s,getActiveProfile(s))),null,2);
+    });
     // v6.9.2: delta mode toggle removed from UI — delta is now always
     // on (DEFAULTS.deltaMode: true since v6.9.0). The setting key still
     // exists in the settings object for backward compat (users who
     // explicitly set it to false before v6.9.0 keep their preference),
     // but it's no longer user-facing.
-    $('#sp-function-tool').on('change',function(){s.functionToolEnabled=this.checked;saveSettings();log('Function tool:',this.checked);
-        import('../generation/function-tool.js').then(m=>m.refreshFunctionTool()).catch(e=>warn('Function tool refresh:',e));
-    });
-    $('#sp-injection-method').on('change',function(){s.injectionMethod=this.value;saveSettings();_spSaveLS();$('#sp-method-inline').toggle(this.value==='inline');$('#sp-method-separate').toggle(this.value!=='inline');$('#sp-embed-section').toggle(this.value!=='inline');$('#sp-separate-settings').toggle(this.value!=='inline');updateLorebookRec()});
+    $('#sp-injection-method').on('change',function(){s.injectionMethod=this.value;saveSettings();_spSaveLS();$('#sp-method-inline').toggle(this.value==='inline');$('#sp-method-separate').toggle(this.value!=='inline');$('#sp-embed-section').toggle(this.value!=='inline');$('#sp-separate-settings').toggle(this.value!=='inline')});
     $('#sp-show-thoughts').on('change',function(){s.showThoughts=this.checked;saveSettings();_spSaveLS();const tp=document.getElementById('sp-thought-panel');if(tp){if(this.checked){const snap=getLatestSnapshot();if(snap)updateThoughts(normalizeTracker(snap))}else tp.classList.remove('sp-tp-visible')}});
     // v6.8.23: toggle thought panel truncation. Off by default (full
     // thought rendered). When on, sentences are sliced to a hash-stable
@@ -238,7 +305,7 @@ export function bindUI(){const s=getSettings();
         for(const[id,tip]of Object.entries(_tips)){const el=document.getElementById(id);if(el)el.title=tip}
         // Re-create settings panel with new language
         const old=document.getElementById('scenepulse-settings');if(old)old.remove();
-        createSettings();loadUI();
+        createSettings();
     });
     // Theme selector
     $('#sp-theme').val(s.theme||'default');
@@ -269,7 +336,6 @@ export function bindUI(){const s=getSettings();
     $('#sp-btn-tour').on('click',()=>startGuidedTour());
     $('#sp-embed-n').on('change',function(){s.embedSnapshots=clamp(+this.value,0,5);saveSettings();_spSaveLS()});
     $('#sp-embed-role').on('change',function(){s.embedRole=this.value;saveSettings();_spSaveLS()});
-    $('#sp-lore-mode').on('change',function(){s.lorebookMode=this.value;saveSettings();_spSaveLS();$('#sp-lore-section').toggle(this.value==='allowlist');refreshLorebookDisplay();updateLorebookRec()});
     // v6.22.0: #sp-sysprompt textarea + Reset/Copy handlers removed
     // (the legacy "full prompt override" UI was deleted from the prompts
     // tab). The prompt editor and preset browser cover every editable
@@ -333,23 +399,17 @@ export function bindUI(){const s=getSettings();
     $('#sp-schema-copy').on('click',()=>{navigator.clipboard.writeText($('#sp-schema').val());toastr.success(t('Schema copied'))});
     $('#sp-btn-refresh').on('click',()=>{
         const _rp=getConnectionProfiles(),_rpr=getChatPresets();
-        let h='<option value="">(Current)</option>';for(const p of _rp)h+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-profile').html(h).val(s.connectionProfile||'');
-        let pr='<option value="">(Same as current)</option>';for(const p of _rpr)pr+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-preset').html(pr).val(s.chatPreset||'');
+        let h='<option value="">'+t('(Current)')+'</option>';for(const p of _rp)h+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-profile').html(h).val(s.connectionProfile||'');
+        let pr='<option value="">'+t('(Same as current)')+'</option>';for(const p of _rpr)pr+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-preset').html(pr).val(s.chatPreset||'');
         toastr.info(t('Profiles refreshed'));
     });
     $('#sp-btn-refresh-fb').on('click',()=>{
         const _rp=getConnectionProfiles(),_rpr=getChatPresets();
-        let fh='<option value="">(Same as current)</option>';for(const p of _rp)fh+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-fallback-profile').html(fh).val(s.fallbackProfile||'');
-        let fp='<option value="">(Same as current)</option>';for(const p of _rpr)fp+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-fallback-preset').html(fp).val(s.fallbackPreset||'');
+        let fh='<option value="">'+t('(Same as current)')+'</option>';for(const p of _rp)fh+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-fallback-profile').html(fh).val(s.fallbackProfile||'');
+        let fp='<option value="">'+t('(Same as current)')+'</option>';for(const p of _rpr)fp+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-fallback-preset').html(fp).val(s.fallbackPreset||'');
         toastr.info(t('Fallback profiles refreshed'));
     });
-    $('#sp-btn-refresh-lore').on('click',()=>{
-        let lo='<option value="">(Select)</option>';for(const p of getLorebooks())lo+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-lore-sel').html(lo);
-        refreshLorebookDisplay();updateLorebookRec();
-        toastr.info(t('Lorebooks refreshed'));
-    });
-    $('#sp-lore-add').on('click',()=>{const sel=document.getElementById('sp-lore-sel');if(!sel?.value)return;const name=sel.selectedOptions[0]?.textContent?.trim();if(!name)return;if(!s.lorebookAllowlist)s.lorebookAllowlist=[];if(!s.lorebookAllowlist.includes(name)){s.lorebookAllowlist.push(name);saveSettings();renderLoreTags()}sel.value=''});
-    $('#sp-btn-gen').on('click',async()=>{const{chat}=SillyTavern.getContext();if(!chat.length)return;toastr.info('Generating\u2026');
+    $('#sp-btn-gen').on('click',async()=>{const{chat}=SillyTavern.getContext();if(!chat.length)return;toastr.info(t('Generating…'));
         const body=document.getElementById('sp-panel-body');
         showLoadingOverlay(body,t('Generating Scene'),t('From settings'));
         setLastGenSource('manual:settings');
@@ -364,7 +424,7 @@ export function bindUI(){const s=getSettings();
         else{toastr.error(t('Failed'));const snap=getLatestSnapshot();if(snap){const norm=normalizeTracker(snap);updatePanel(norm)}}});
     $('#sp-btn-clear').on('click',async()=>{
         if(!await spConfirm(t('Clear Data'),t('Remove all tracker snapshots from this chat? Your settings are preserved.')))return;
-        getTrackerData().snapshots={};SillyTavern.getContext().saveMetadata();document.querySelectorAll('.sp-thoughts').forEach(e=>e.remove());const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.remove('sp-tp-visible');const body=document.getElementById('sp-panel-body');if(body)body.innerHTML='<div class="sp-empty-state"><div class="sp-empty-icon">\uD83D\uDCE1</div><div class="sp-empty-title">'+t('Data cleared')+'</div><div class="sp-empty-sub">Send a message or click <strong>\u27F3</strong> to generate.</div></div>';genMeta.promptTokens=0;genMeta.completionTokens=0;genMeta.elapsed=0;toastr.info(t('Cleared'));
+        clearAllSnapshots();SillyTavern.getContext().saveMetadata();document.querySelectorAll('.sp-thoughts').forEach(e=>e.remove());const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.remove('sp-tp-visible');renderEmptyState({title:t('Data cleared')});genMeta.promptTokens=0;genMeta.completionTokens=0;genMeta.elapsed=0;toastr.info(t('Cleared'));
     });
     $('#sp-btn-reset').on('click',async()=>{
         if(!await spConfirm(t('Reset Settings'),t('Reset all ScenePulse settings to defaults? Tracker data is preserved.')))return;
@@ -373,40 +433,44 @@ export function bindUI(){const s=getSettings();
     // Config export/import
     $('#sp-btn-export-config').on('click',()=>{
         const s=getSettings();
+        const sView=buildProfileView(s,getActiveProfile(s));
         // Clean openSections: remove keys for deleted custom panels
         const _validSections=['scene','quests','relationships','characters','branches','env','plots'];
-        const _cpNames=(s.customPanels||[]).map(cp=>'custom_'+cp.name?.replace(/\s+/g,'_').toLowerCase()).filter(Boolean);
+        const _cpNames=(sView.customPanels||[]).filter(cp=>cp?.name).map(cp=>customPanelSectionKey(cp.name));
         const _cleanOpen={};
         for(const[k,v]of Object.entries(s.openSections||{})){if(_validSections.includes(k)||_cpNames.includes(k))_cleanOpen[k]=v}
-        const exportData={extension:'ScenePulse',version:'6.0.0',exportedAt:new Date().toISOString(),
+        const exportData={extension:'ScenePulse',version:VERSION,exportedAt:new Date().toISOString(),
             settings:{injectionMethod:s.injectionMethod,deltaMode:s.deltaMode,language:s.language,theme:s.theme,
                 fontScale:s.fontScale,contextMessages:s.contextMessages,maxRetries:s.maxRetries,promptMode:s.promptMode,
-                embedSnapshots:s.embedSnapshots,embedRole:s.embedRole,lorebookMode:s.lorebookMode,autoGenerate:s.autoGenerate,
+                embedSnapshots:s.embedSnapshots,embedRole:s.embedRole,autoGenerate:s.autoGenerate,
                 showThoughts:s.showThoughts,showEmptyFields:s.showEmptyFields,sceneTransitions:s.sceneTransitions,
-                panels:{...DEFAULTS.panels,...s.panels},dashCards:{...DEFAULTS.dashCards,...s.dashCards},
-                fieldToggles:s.fieldToggles,customPanels:s.customPanels||[],
+                panels:{...DEFAULTS.panels,...sView.panels},dashCards:{...DEFAULTS.dashCards,...sView.dashCards},
+                fieldToggles:sView.fieldToggles,customPanels:sView.customPanels||[],
                 openSections:_cleanOpen}};
         const json=JSON.stringify(exportData,null,2);
         const blob=new Blob([json],{type:'application/json'});
         const url=URL.createObjectURL(blob);const a=document.createElement('a');
         a.href=url;a.download=`scenepulse-config-${Date.now()}.json`;
         document.body.appendChild(a);a.click();document.body.removeChild(a);URL.revokeObjectURL(url);
-        toastr.success('Config exported');
+        toastr.success(t('Config exported'));
     });
     $('#sp-btn-import-config').on('click',()=>document.getElementById('sp-import-file')?.click());
     $('#sp-import-file').on('change',async function(){
         const file=this.files?.[0];if(!file)return;this.value='';
         try{
             const text=await file.text();const data=JSON.parse(text);
-            if(data.extension!=='ScenePulse'||!data.settings){toastr.error('Invalid ScenePulse config file');return}
+            if(data.extension!=='ScenePulse'||!data.settings){toastr.error(t('Invalid ScenePulse config file'));return}
+            const validation=validateImportedConfigSettings(data.settings);
+            if(!validation.ok){toastr.error(t('Failed to import: {error}',{error:validation.errors.join('; ')}));return}
             if(!await spConfirm('Import Config','Apply settings from this file? Your current settings will be overwritten.')){return}
             const s=getSettings();const imported=data.settings;
-            for(const[k,v]of Object.entries(imported)){if(v!==undefined&&k in DEFAULTS)s[k]=v}
+            Object.assign(s,validation.settingsPatch);
+            if(Object.keys(validation.profilePatch).length&&!updateActiveProfile(s,validation.profilePatch))Object.assign(s,validation.profilePatch);
             saveSettings();loadUI();
             // Apply theme if changed
-            if(imported.theme)import('../themes.js').then(m=>m.applyTheme(imported.theme)).catch(()=>{});
-            toastr.success('Config imported from '+file.name);log('Config imported:',Object.keys(imported).join(', '));
-        }catch(e){toastr.error('Failed to import: '+e?.message);warn('Import config:',e)}
+            if(validation.settingsPatch.theme)import('../themes.js').then(m=>m.applyTheme(validation.settingsPatch.theme)).catch(()=>{});
+            toastr.success(t('Config imported from {file}',{file:file.name}));log('Config imported:',Object.keys(imported).join(', '));
+        }catch(e){toastr.error(t('Failed to import: {error}',{error:e?.message}));warn('Import config:',e)}
     });
     // v6.12.8 (issue #13 follow-up): single Debug Inspector button replaces
     // SP Log / View Log / Last Response / Crash Log. Module is lazy-imported
@@ -452,11 +516,11 @@ export function bindUI(){const s=getSettings();
     // hot path light when nobody touches them.
     $('#sp-dev-trigger-setup').on('click',async()=>{
         try { (await import('./setup-guide.js')).showSetupGuide(); }
-        catch (e) { warn('Dev: setup guide:', e?.message); try { toastr.error('Setup guide trigger failed: '+(e?.message||e)); } catch {} }
+        catch (e) { warn('Dev: setup guide:', e?.message); try { toastr.error(t('Setup guide trigger failed: {error}',{error:e?.message||e})); } catch {} }
     });
     $('#sp-dev-trigger-or').on('click',async()=>{
         try { await (await import('../ui/or-connector-prompt.js')).showOrConnectorPrompt(); }
-        catch (e) { warn('Dev: OR prompt:', e?.message); try { toastr.error('OR connector prompt trigger failed: '+(e?.message||e)); } catch {} }
+        catch (e) { warn('Dev: OR prompt:', e?.message); try { toastr.error(t('OR connector prompt trigger failed: {error}',{error:e?.message||e})); } catch {} }
     });
     $('#sp-dev-trigger-preset').on('click',async()=>{
         try {
@@ -468,25 +532,25 @@ export function bindUI(){const s=getSettings();
             const result = await m.forceShowPresetSuggestion();
             // Surface a toast for non-popup outcomes so the user sees
             // why nothing rendered.
-            if (result === 'no-model') try { toastr.info('No active model detected — connect to an API first.'); } catch {}
+            if (result === 'no-model') try { toastr.info(t('No active model detected — connect to an API first.')); } catch {}
             else if (result === 'no-match') {
                 const { findMatchingPreset, getActiveModelId } = await import('../presets/registry.js');
                 const modelId = getActiveModelId();
                 try { toastr.info(`No bundled preset matches "${modelId}".`); } catch {}
             }
-            else if (result === 'no-profile') try { toastr.warning('No active profile — open the Profile manager first.'); } catch {}
-        } catch (e) { warn('Dev: preset suggestion:', e?.message); try { toastr.error('Preset suggestion trigger failed: '+(e?.message||e)); } catch {} }
+            else if (result === 'no-profile') try { toastr.warning(t('No active profile — open the Profile manager first.')); } catch {}
+        } catch (e) { warn('Dev: preset suggestion:', e?.message); try { toastr.error(t('Preset suggestion trigger failed: {error}',{error:e?.message||e})); } catch {} }
     });
     $('#sp-dev-trigger-update').on('click',async()=>{
         try { (await import('../update-check.js')).showUpdateBanner(); }
-        catch (e) { warn('Dev: update banner:', e?.message); try { toastr.error('Update banner trigger failed: '+(e?.message||e)); } catch {} }
+        catch (e) { warn('Dev: update banner:', e?.message); try { toastr.error(t('Update banner trigger failed: {error}',{error:e?.message||e})); } catch {} }
     });
     $('#sp-dev-reset-popups').on('click',async()=>{
         const { spConfirm } = await import('../utils.js');
         const ok = await spConfirm(
-            'Reset one-time popup state?',
-            'This clears every "already shown" flag so the Setup Guide, OpenRouter Connector prompt, and per-preset suggestion toasts behave as if you were a fresh install on next reload.\n\nYour settings, profiles, snapshots, and tracker data are NOT touched.',
-            { okLabel: 'Reset popups', cancelLabel: 'Cancel', danger: true }
+            t('Reset one-time popup state?'),
+            t('Clear every "already shown" flag? Setup and suggestion dialogs will appear again after reload. Settings, profiles, snapshots, and tracker data are preserved.'),
+            { okLabel: t('Reset popups'), cancelLabel: t('Cancel'), danger: true }
         );
         if (!ok) return;
         const sNow=getSettings();
@@ -494,52 +558,11 @@ export function bindUI(){const s=getSettings();
         sNow._spOrConnectorPromptShown=false;
         try { (await import('../ui/preset-suggestion.js'))._resetSuggestionState?.(); } catch {}
         try { saveSettings(); } catch {}
-        try { toastr.success('Popup state reset. Reload the page to see them re-fire.'); } catch {}
+        try { toastr.success(t('Popup state reset. Reload the page to show the one-time dialogs again.')); } catch {}
     });
-    // Initial crash count badge on the inspector button + v6.15.4 auto-open
-    // signal: subscribe to crash-log changes so the badge updates live, AND
-    // briefly flash the inspector button when a NEW error fires. v6.16.1
-    // (Panel B audit): persistent dot until inspector opens (no timeout) +
-    // tooltip showing unseen count.
-    try {
-        import('../crash-log.js').then(m => {
-            const badge = document.getElementById('sp-crash-log-count');
-            const btn = document.getElementById('sp-btn-debug-inspector');
-            const _updateBadge = () => {
-                const n = m.entryCount();
-                if (badge) badge.textContent = n ? `(${n})` : '';
-                if (btn) {
-                    const unseen = m.unseenCount();
-                    if (unseen > 0) {
-                        btn.classList.add('sp-di-has-unseen');
-                        btn.setAttribute('title', `${unseen} new ${unseen === 1 ? 'issue' : 'issues'} since last opened — click to inspect`);
-                    } else {
-                        btn.classList.remove('sp-di-has-unseen');
-                        btn.removeAttribute('title');
-                    }
-                }
-            };
-            _updateBadge();
-            m.addChangeListener(({ isNew }) => {
-                _updateBadge();
-                if (isNew && btn) {
-                    btn.classList.remove('sp-di-flash');
-                    requestAnimationFrame(() => btn.classList.add('sp-di-flash'));
-                }
-            });
-        });
-    } catch {}
-
-    // v6.16.1: Ctrl+Shift+D opens the Debug Inspector from anywhere in ST.
-    // Skip when typing in inputs/textareas so the shortcut doesn't hijack
-    // text editing. Esc-to-close already works via the inspector's own handler.
-    document.addEventListener('keydown', (e) => {
-        if (!(e.ctrlKey && e.shiftKey && (e.key === 'D' || e.key === 'd'))) return;
-        const tgt = e.target;
-        if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
-        e.preventDefault();
-        import('../ui/debug-inspector.js').then(m => m.openDebugInspector()).catch(() => {});
-    });
+    // Global listeners are module-lifetime bindings. Rebuilding the localized
+    // settings DOM only refreshes their current element targets.
+    _ensureGlobalBindings();
 
     // ── v6.13.0 (issue #15): Profile manager UI wiring ──
     bindProfileUI(s);
@@ -675,5 +698,3 @@ function bindProfileUI(s){
         } catch(e) { warn('Profile manager:', e?.message); }
     });
 }
-
-function renderLoreTags(){const s=getSettings();const c=document.getElementById('sp-lore-tags');if(!c)return;c.innerHTML='';for(const n of(s.lorebookAllowlist||[])){const tag=document.createElement('span');tag.className='sp-lore-tag';tag.innerHTML=`${esc(n)} <span class="sp-lore-tag-x" data-n="${esc(n)}">✕</span>`;tag.querySelector('.sp-lore-tag-x').addEventListener('click',function(){s.lorebookAllowlist=s.lorebookAllowlist.filter(x=>x!==this.dataset.n);saveSettings();renderLoreTags()});c.appendChild(tag)}}

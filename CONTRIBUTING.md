@@ -27,12 +27,17 @@ Open an issue using the feature request template describing:
 
 ## Translation Contributions
 
-ScenePulse supports 29 languages. To improve or add translations:
+ScenePulse exposes 29 selectable languages. Locale structure is enforced independently from translation completeness: every locale contains the full active key set, while untranslated values deliberately fall back to the English source text.
 
-1. Edit `src/i18n.js`
-2. Each language is a simple key-value object (344 keys)
-3. Use the English keys as reference
-4. Submit a PR with your changes
+To improve or add translations:
+
+1. Edit the relevant `locales/<language>.json` file.
+2. Preserve every `{placeholder}` and HTML tag exactly.
+3. Run `npm run sync-locales` to refresh the generated source catalog and coverage report.
+4. Review `locales/_coverage.json`; a value equal to its key is counted as an English fallback.
+5. Run `npm test` and submit the locale changes together with the generated metadata.
+
+Do not edit `locales/_source.json` or `locales/_coverage.json` by hand.
 
 ## Code Style
 

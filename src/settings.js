@@ -1,7 +1,7 @@
 // ScenePulse — Settings & Data Access Module
 // Extracted from index.js lines 413-453, 786-895
 
-import { MODULE_NAME, DEFAULTS } from './constants.js';
+import { MODULE_NAME, DEFAULTS, normalizePromptMode } from './constants.js';
 import { log, warn } from './logger.js';
 import { esc } from './utils.js';
 import { buildDynamicSchema, buildDynamicPrompt } from './schema.js';
@@ -9,6 +9,7 @@ import { assemblePrompt } from './prompts/assembler.js';
 import { t } from './i18n.js';
 import { consolidateQuests } from './generation/delta-merge.js';
 import { getActiveProfile, migrateLegacySettingsToProfile, migrateOrphanRootData } from './profiles.js';
+import { currentChatFingerprint, buildActiveFingerprintIndex, FINGERPRINT_VERSION } from './message-fingerprint.js';
 
 // Minimal inline user-name check for the one-shot migration below.
 // Duplicates the logic in normalize.isUserName to avoid a circular import
@@ -32,6 +33,9 @@ let _settingsCache = null;
 export function getSettings(){
 if(_settingsCache) return _settingsCache;
 const{extensionSettings}=SillyTavern.getContext();if(!extensionSettings[MODULE_NAME])extensionSettings[MODULE_NAME]=structuredClone(DEFAULTS);const s=extensionSettings[MODULE_NAME];for(const k of Object.keys(DEFAULTS))if(!Object.hasOwn(s,k))s[k]=DEFAULTS[k];// v6.9.10: relaxed custom panel filter. Previously stripped panels
+    if(Object.hasOwn(s,'functionToolEnabled')){delete s.functionToolEnabled;try{SillyTavern.getContext().saveSettingsDebounced()}catch{}}
+    const oldPromptMode=s.promptMode;s.promptMode=normalizePromptMode(s.promptMode);
+    if(oldPromptMode!==s.promptMode){try{SillyTavern.getContext().saveSettingsDebounced()}catch{}}
 // where both name AND all keys were empty, which deleted panels mid-
 // edit when the user changed a field type before filling in the key.
 // Now only strips panels with zero fields (truly abandoned stubs).
@@ -159,7 +163,7 @@ export function saveChatPanels() {
 // v6.23.4 BUGFIX: was reading `s.panels` (root) which the v6.16.2+ orphan
 // migration drains — so post-migration this returned false even when the
 // active profile had panels. v6.22.1's one-shot guard then PERSISTED the
-// drained root to disk, breaking interceptor + function-tool + slash
+// drained root to disk, breaking interceptor + slash
 // commands on every load (Together-mode generation silently skipped).
 // Fix: read from the profile-projected view, matching getActivePrompt /
 // getActiveSchema's pattern. Profile is the source of truth; root is
@@ -182,6 +186,8 @@ export function anyPanelsActive(){
 export function getTrackerData(){
     const m=SillyTavern.getContext().chatMetadata;if(!m)return{snapshots:{}};
     if(!m.scenepulse)m.scenepulse={snapshots:{}};
+    if(!m.scenepulse.snapshots||typeof m.scenepulse.snapshots!=='object')m.scenepulse.snapshots={};
+    if(!m.scenepulse.swipeSnapshots||typeof m.scenepulse.swipeSnapshots!=='object')m.scenepulse.swipeSnapshots={};
     // ── v6.8.9 migration: strip legacy activeTasks tier from all snapshots ──
     // The activeTasks quest tier was removed in v6.8.9. Old chats may still
     // have the field persisted in their saved metadata. This migration runs
@@ -396,7 +402,7 @@ export function getTrackerData(){
         // looks alias-like (short, no sentence punctuation, capitalized
         // parts). Returns { base, aliases } where base is the canonical
         // name and aliases is the split list (empty if no strip happened).
-        function _splitParenAliases(rawName){
+        const _splitParenAliases=(rawName)=>{
             if(typeof rawName!=='string')return{base:rawName,aliases:[]};
             const mm=rawName.match(/^(.*?)\s*\(([^)]*)\)\s*$/);
             if(!mm)return{base:rawName,aliases:[]};
@@ -405,12 +411,12 @@ export function getTrackerData(){
             if(!base||inside.length>60||/[.!?]/.test(inside)||/'s\s/.test(inside)||/\bof the\b/i.test(inside)){
                 return{base:rawName,aliases:[]};
             }
-            const parts=inside.split(/[\/,;]/).map(s=>s.trim()).filter(Boolean);
+            const parts=inside.split(/[/,;]/).map(s=>s.trim()).filter(Boolean);
             if(parts.length===0)return{base:rawName,aliases:[]};
             const looksLikeNames=parts.every(p=>/^[A-Z]/.test(p)||p.length<=15);
             if(!looksLikeNames)return{base:rawName,aliases:[]};
             return{base,aliases:parts};
-        }
+        };
         for(const k of Object.keys(snaps)){
             const snap=snaps[k];
             if(!snap)continue;
@@ -453,7 +459,7 @@ export function getTrackerData(){
                 }
             }
             // Step 3: canonicalize a raw name against the alias map
-            function _canonicalizeName(raw){
+            const _canonicalizeName=(raw)=>{
                 if(!raw||typeof raw!=='string')return raw;
                 const low=raw.toLowerCase().trim();
                 if(!low)return raw;
@@ -462,14 +468,14 @@ export function getTrackerData(){
                 if(mm){
                     const base=mm[1].trim();
                     if(base&&aliasMap.has(base.toLowerCase()))return aliasMap.get(base.toLowerCase());
-                    const parts=mm[2].split(/[\/,;]/).map(s=>s.trim()).filter(Boolean);
+                    const parts=mm[2].split(/[/,;]/).map(s=>s.trim()).filter(Boolean);
                     for(const p of parts){
                         const pl=p.toLowerCase();
                         if(aliasMap.has(pl))return aliasMap.get(pl);
                     }
                 }
                 return raw;
-            }
+            };
             // Step 4: rewrite relationships[] and dedup
             if(Array.isArray(snap.relationships)){
                 const byCanon=new Map();
@@ -527,7 +533,95 @@ export function getTrackerData(){
             try{SillyTavern.getContext().saveMetadata()}catch(e){warn('Migration save failed:',e?.message)}
         }
     }
+    // v6.27.22: migrate each legacy per-message snapshot into the swipe
+    // currently selected for that message. We cannot infer which sibling an
+    // old snapshot belonged to, so we deliberately assign it to only one
+    // swipe instead of copying potentially wrong thoughts to every sibling.
+    if(!m.scenepulse._spSwipeSnapshotsMigrated){
+        const ctx=SillyTavern.getContext();
+        for(const[id,snap]of Object.entries(m.scenepulse.snapshots)){
+            if(!snap)continue;
+            const swipeId=String(Math.max(0,Number(ctx.chat?.[Number(id)]?.swipe_id??0)||0));
+            if(!m.scenepulse.swipeSnapshots[id])m.scenepulse.swipeSnapshots[id]={};
+            if(!m.scenepulse.swipeSnapshots[id][swipeId])m.scenepulse.swipeSnapshots[id][swipeId]=snap;
+        }
+        m.scenepulse._spSwipeSnapshotsMigrated=true;
+        try{ctx.saveMetadata()}catch(e){warn('Swipe snapshot migration save failed:',e?.message)}
+    }
+    // v6.28.0: establish a provenance baseline for the active branch of
+    // existing chats. Inactive legacy swipes remain explicitly "legacy"
+    // because their historical ancestor branch cannot be inferred safely.
+    if(m.scenepulse._spFingerprintBaselineVersion!==FINGERPRINT_VERSION){
+        const ctx=SillyTavern.getContext();let touched=0;
+        for(const[id,bucket]of Object.entries(m.scenepulse.swipeSnapshots||{})){
+            const swipeId=String(_activeSwipeIdForContext(ctx,id));const snap=bucket?.[swipeId];
+            if(!snap||snap._spMeta?.fingerprintVersion===FINGERPRINT_VERSION)continue;
+            if(!snap._spMeta||typeof snap._spMeta!=='object')snap._spMeta={};
+            snap._spMeta.sourceFingerprint=currentChatFingerprint(Number(id),Number(swipeId));
+            snap._spMeta.parentFingerprint=currentChatFingerprint(Number(id)-1);
+            snap._spMeta.fingerprintVersion=FINGERPRINT_VERSION;touched++;
+        }
+        m.scenepulse._spFingerprintBaselineDone=true;
+        m.scenepulse._spFingerprintBaselineVersion=FINGERPRINT_VERSION;
+        if(touched){try{ctx.saveMetadata()}catch(e){warn('Fingerprint baseline save failed:',e?.message)}}
+    }
+    _syncActiveSnapshotMirrors(m.scenepulse);
     return m.scenepulse;
+}
+
+function _activeSwipeIdForContext(ctx,id){
+    return Math.max(0,Number(ctx?.chat?.[Number(id)]?.swipe_id??0)||0);
+}
+
+function _snapshotFor(data,id,swipeId){
+    const key=String(id);
+    const bucket=data.swipeSnapshots?.[key];
+    if(bucket&&typeof bucket==='object')return bucket[String(swipeId)]??null;
+    return data.snapshots?.[key]??null;
+}
+
+function _syncActiveSnapshotMirrors(data){
+    const ctx=SillyTavern.getContext();
+    data.snapshots={};
+    for(const[id,bucket]of Object.entries(data.swipeSnapshots||{})){
+        if(!bucket||typeof bucket!=='object')continue;
+        const active=String(_activeSwipeIdForContext(ctx,id));
+        if(bucket[active])data.snapshots[id]=bucket[active];
+    }
+}
+
+export function getActiveSwipeId(id){
+    return _activeSwipeIdForContext(SillyTavern.getContext(),id);
+}
+
+export function getSnapshotEntryForMessage(id){
+    const messageId=Number(id);const data=getTrackerData();const ctx=SillyTavern.getContext();
+    if(!Number.isFinite(messageId)||!ctx.chat?.[messageId])return null;
+    const swipeId=_activeSwipeIdForContext(ctx,messageId);
+    const snapshot=_snapshotFor(data,messageId,swipeId);
+    return{id:messageId,swipeId,snapshot,status:getSnapshotStatus(messageId,swipeId,snapshot)};
+}
+
+export function getLatestSnapshotEntry(){
+    const data=getTrackerData();
+    const ctx=SillyTavern.getContext();
+    if(Array.isArray(ctx.chat)){
+        for(let id=ctx.chat.length-1;id>=0;id--){
+            const message=ctx.chat[id];
+            if(!message||message.is_user||message.is_system)continue;
+            const swipeId=_activeSwipeIdForContext(ctx,id);
+            const snapshot=_snapshotFor(data,id,swipeId);
+            if(!snapshot)continue;
+            return{id,swipeId,snapshot,status:getSnapshotStatus(id,swipeId,snapshot)};
+        }
+        return null;
+    }
+    const ids=Object.keys(data.snapshots||{}).map(Number).filter(Number.isFinite).sort((a,b)=>b-a);
+    if(!ids.length)return null;
+    const id=ids[0];
+    const swipeId=_activeSwipeIdForContext(ctx,id);
+    const snapshot=_snapshotFor(data,id,swipeId);
+    return{id,swipeId,snapshot,status:getSnapshotStatus(id,swipeId,snapshot)};
 }
 
 // ── v6.8.18: manual character merge across all snapshots ───────────────────
@@ -547,11 +641,21 @@ export function mergeCharactersAcrossSnapshots(srcName, tgtName) {
     if (srcLow === tgtLow) return { ok: false, reason: 'same name' };
 
     const data = getTrackerData();
-    const snaps = data.snapshots || {};
+    const snaps = [];
+    const seen = new Set();
+    for (const bucket of Object.values(data.swipeSnapshots || {})) {
+        if (!bucket || typeof bucket !== 'object') continue;
+        for (const snap of Object.values(bucket)) {
+            if (snap && !seen.has(snap)) { seen.add(snap); snaps.push(snap); }
+        }
+    }
+    // Legacy/corrupt metadata may still contain an unbucketed mirror.
+    for (const snap of Object.values(data.snapshots || {})) {
+        if (snap && !seen.has(snap)) { seen.add(snap); snaps.push(snap); }
+    }
     let snapsTouched = 0, charsMerged = 0, relsMerged = 0, presentFixed = 0;
 
-    for (const k of Object.keys(snaps)) {
-        const snap = snaps[k];
+    for (const snap of snaps) {
         if (!snap) continue;
         let changed = false;
 
@@ -660,7 +764,7 @@ export function mergeCharactersAcrossSnapshots(srcName, tgtName) {
     return { ok: true, snapsTouched, charsMerged, relsMerged, presentFixed };
 }
 
-export function getLatestSnapshot(){const d=getTrackerData();const k=Object.keys(d.snapshots).sort((a,b)=>Number(b)-Number(a));return k.length?d.snapshots[k[0]]:null}
+export function getLatestSnapshot(){const e=getLatestSnapshotEntry();return e?.status==='stale'?null:(e?.snapshot??null)}
 
 /**
  * v6.8.50: determine whether THIS turn should use delta mode or force
@@ -682,15 +786,14 @@ export function getLatestSnapshot(){const d=getTrackerData();const k=Object.keys
  */
 let _forceFullNextTurn = false;
 
-export function shouldUseDelta() {
+export function shouldUseDelta(snapshot = getLatestSnapshot()) {
     const s = getSettings();
     if (!s.deltaMode) return false;
     if (_forceFullNextTurn) return false;
-    const snap = getLatestSnapshot();
-    if (!snap) return false;
+    if (!snapshot) return false;
     const interval = typeof s.deltaRefreshInterval === 'number' ? s.deltaRefreshInterval : 15;
     if (interval <= 0) return true; // periodic refresh disabled
-    const turnsSinceFull = (snap._spMeta?.deltaTurnsSinceFull ?? 0);
+    const turnsSinceFull = (snapshot._spMeta?.deltaTurnsSinceFull ?? 0);
     return turnsSinceFull < interval;
 }
 
@@ -726,10 +829,12 @@ export function clearForceFullState() {
 // (snapshots) misses. See src/ui/character-wiki.js.
 function _ensureArchive(data){
     if(!data._spArchive || typeof data._spArchive !== 'object'){
-        data._spArchive = { characters: {}, relationships: {}, builtAt: new Date().toISOString() };
+        data._spArchive = { characters: {}, relationships: {}, aliasOwners: {}, ambiguousAliases: {}, builtAt: new Date().toISOString() };
     }
     if(!data._spArchive.characters || typeof data._spArchive.characters !== 'object') data._spArchive.characters = {};
     if(!data._spArchive.relationships || typeof data._spArchive.relationships !== 'object') data._spArchive.relationships = {};
+    if(!data._spArchive.aliasOwners || typeof data._spArchive.aliasOwners !== 'object') data._spArchive.aliasOwners = {};
+    if(!data._spArchive.ambiguousAliases || typeof data._spArchive.ambiguousAliases !== 'object') data._spArchive.ambiguousAliases = {};
     return data._spArchive;
 }
 function _updateWikiArchive(data, snap){
@@ -747,9 +852,19 @@ function _updateWikiArchive(data, snap){
             // the alias key should resolve to the Karen entry, not whatever
             // earlier record happened to be saved under "stranger".
             if(Array.isArray(ch.aliases)){
+                const currentAliases = new Set(ch.aliases.map(a => String(a||'').toLowerCase().trim()).filter(Boolean));
                 for(const a of ch.aliases){
                     const al = String(a||'').toLowerCase().trim();
-                    if(al) arc.characters[al] = arc.characters[nm];
+                    if(!al || arc.ambiguousAliases[al]) continue;
+                    const owner = arc.aliasOwners[al];
+                    if(owner && owner !== nm && !currentAliases.has(owner)){
+                        arc.ambiguousAliases[al] = true;
+                        delete arc.aliasOwners[al];
+                        delete arc.characters[al];
+                        continue;
+                    }
+                    arc.aliasOwners[al] = nm;
+                    arc.characters[al] = arc.characters[nm];
                 }
             }
         }
@@ -793,7 +908,7 @@ export function getWikiArchive(){
     return _ensureArchive(data);
 }
 
-export function saveSnapshot(id,j){
+export function saveSnapshot(id,j,swipeId=getActiveSwipeId(id)){
     const data=getTrackerData();
     // v6.16.2: stamp savedAt on every snapshot at write time so the inspector's
     // sparkline can correlate crash-log timestamps to turn IDs (Panel B
@@ -802,28 +917,141 @@ export function saveSnapshot(id,j){
     if(j && typeof j === 'object'){
         if(!j._spMeta || typeof j._spMeta !== 'object') j._spMeta = {};
         j._spMeta.savedAt = new Date().toISOString();
+        j._spMeta.sourceFingerprint = currentChatFingerprint(id, swipeId);
+        j._spMeta.parentFingerprint = currentChatFingerprint(Number(id)-1);
+        j._spMeta.fingerprintVersion = FINGERPRINT_VERSION;
     }
-    data.snapshots[String(id)]=j;
+    const key=String(id);const swipeKey=String(Math.max(0,Number(swipeId)||0));
+    if(!data.swipeSnapshots[key]||typeof data.swipeSnapshots[key]!=='object')data.swipeSnapshots[key]={};
+    data.swipeSnapshots[key][swipeKey]=j;
+    // Backward-compatible mirror. Only the active swipe may occupy the old
+    // numeric slot, preventing a delayed result from replacing visible data.
+    if(getActiveSwipeId(id)===Number(swipeKey))data.snapshots[key]=j;
     // v6.22.1: update the wiki archive BEFORE pruning, so even if this
     // save triggers a prune of the oldest snapshot, every character it
     // contained is still in the archive forever.
     try { _updateWikiArchive(data, j); } catch(e) { warn('Wiki archive update failed:', e?.message); }
     // Prune: user-configurable max snapshots (0 = unlimited)
-    const keys=Object.keys(data.snapshots).map(Number).sort((a,b)=>a-b);
+    const keys=Object.keys(data.swipeSnapshots||{}).map(Number).sort((a,b)=>a-b);
     const s=getSettings();
     const MAX_STORED=s.maxSnapshots||0;
     if(MAX_STORED>0&&keys.length>MAX_STORED){
         const toRemove=keys.slice(0,keys.length-MAX_STORED);
-        for(const k of toRemove)delete data.snapshots[String(k)];
+        for(const k of toRemove){delete data.snapshots[String(k)];delete data.swipeSnapshots[String(k)]}
         log('Pruned',toRemove.length,'old snapshots, keeping',MAX_STORED,
             '(wiki archive preserves all characters)');
     }
     SillyTavern.getContext().saveMetadata();
 }
 
-export function getSnapshotFor(id){return getTrackerData().snapshots?.[String(id)]??null}
+export function getSnapshotFor(id,swipeId=getActiveSwipeId(id)){const data=getTrackerData();return _snapshotFor(data,id,Math.max(0,Number(swipeId)||0))}
 
-export function getPrevSnapshot(id){const sorted=Object.keys(getTrackerData().snapshots).map(Number).sort((a,b)=>a-b);const p=sorted.filter(k=>k<id).pop();return p!=null?getTrackerData().snapshots[String(p)]:null}
+export function getSnapshotStatus(id,swipeId=getActiveSwipeId(id),snapshot,currentFingerprint){
+    const snap=snapshot===undefined?getSnapshotFor(id,swipeId):snapshot;
+    if(!snap)return'missing';
+    const stored=snap._spMeta?.sourceFingerprint;
+    if(!stored||snap._spMeta?.fingerprintVersion!==FINGERPRINT_VERSION)return'legacy';
+    const current=currentFingerprint??currentChatFingerprint(id,swipeId);
+    return current&&current===stored?'current':'stale';
+}
+
+export function getTrustedSnapshotFor(id,swipeId=getActiveSwipeId(id)){
+    const snap=getSnapshotFor(id,swipeId);
+    return getSnapshotStatus(id,swipeId,snap)==='stale'?null:snap;
+}
+
+export function getSnapshotProvenance(){
+    const data=getTrackerData();const ctx=SillyTavern.getContext();const index=buildActiveFingerprintIndex(ctx.chat);const out=[];
+    for(const id of Object.keys(data.swipeSnapshots||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)){
+        const swipeId=getActiveSwipeId(id);const snapshot=_snapshotFor(data,id,swipeId);if(!snapshot)continue;
+        const current=index.get(id)||'';const status=getSnapshotStatus(id,swipeId,snapshot,current);
+        let reason='';
+        if(status==='stale')reason=snapshot._spMeta?.parentFingerprint!==(index.get(id-1)||'')?'ANCESTOR_CHANGED':'SOURCE_CHANGED';
+        out.push({id,swipeId,status,reason,storedFingerprint:snapshot._spMeta?.sourceFingerprint||'',currentFingerprint:current,snapshot});
+    }
+    return out;
+}
+
+export function hasStaleSnapshotBefore(id){
+    const data=getTrackerData();const limit=Number(id);const ctx=SillyTavern.getContext();const index=buildActiveFingerprintIndex(ctx.chat);
+    for(const k of Object.keys(data.swipeSnapshots||{}).map(Number)){
+        if(!Number.isFinite(k)||k>=limit)continue;
+        const swipeId=getActiveSwipeId(k);const snap=_snapshotFor(data,k,swipeId);
+        if(snap&&getSnapshotStatus(k,swipeId,snap,index.get(k)||'')==='stale')return true;
+    }
+    return false;
+}
+
+export function getPrevSnapshot(id){const data=getTrackerData();const ctx=SillyTavern.getContext();const index=buildActiveFingerprintIndex(ctx.chat);const sorted=Object.keys(data.swipeSnapshots||{}).map(Number).filter(Number.isFinite).sort((a,b)=>b-a);for(const k of sorted){if(k>=Number(id))continue;const swipeId=getActiveSwipeId(k);const snap=_snapshotFor(data,k,swipeId);if(snap&&getSnapshotStatus(k,swipeId,snap,index.get(k)||'')!=='stale')return snap}return null}
+
+/**
+ * Reconcile stored snapshots after SillyTavern mutates the chat.
+ * MESSAGE_DELETED passes the new chat length, not the deleted message id, so
+ * message deletion is resolved from provenance instead of that event value.
+ */
+export function reconcileSnapshotsAfterChatMutation({type='message-delete',messageId,swipeId,activeChanged=false}={}){
+    const data=getTrackerData();const ctx=SillyTavern.getContext();const chat=Array.isArray(ctx.chat)?ctx.chat:[];
+    let removed=0,restamped=0,cutoff=chat.length;
+
+    if(type==='swipe-delete'){
+        const id=Number(messageId);const deleted=Number(swipeId);const key=String(id);
+        const bucket=data.swipeSnapshots?.[key];
+        if(bucket&&Number.isInteger(deleted)&&deleted>=0){
+            const shifted={};
+            for(const[oldKey,snap]of Object.entries(bucket)){
+                const oldId=Number(oldKey);
+                if(oldId===deleted){removed++;continue}
+                shifted[String(oldId>deleted?oldId-1:oldId)]=snap;
+            }
+            if(Object.keys(shifted).length)data.swipeSnapshots[key]=shifted;
+            else delete data.swipeSnapshots[key];
+        }
+        if(activeChanged){
+            for(const oldId of Object.keys(data.swipeSnapshots||{}).map(Number)){
+                if(oldId>id){delete data.swipeSnapshots[String(oldId)];removed++}
+            }
+        }
+        // A removed swipe renumbers siblings. If the visible text did not
+        // change, descendants remain valid but their numeric swipe component
+        // changed; otherwise only sibling snapshots on this message survive.
+        const restampThrough=activeChanged?id:Infinity;
+        for(const[rawId,swipes]of Object.entries(data.swipeSnapshots||{})){
+            const snapshotId=Number(rawId);
+            if(snapshotId<id||snapshotId>restampThrough||!chat[snapshotId])continue;
+            for(const[rawSwipe,snap]of Object.entries(swipes||{})){
+                if(!snap||typeof snap!=='object')continue;
+                if(!snap._spMeta||typeof snap._spMeta!=='object')snap._spMeta={};
+                snap._spMeta.sourceFingerprint=currentChatFingerprint(snapshotId,Number(rawSwipe));
+                snap._spMeta.parentFingerprint=currentChatFingerprint(snapshotId-1);
+                snap._spMeta.fingerprintVersion=FINGERPRINT_VERSION;restamped++;
+            }
+        }
+    }else{
+        // The first active snapshot whose cumulative fingerprint no longer
+        // matches marks the earliest affected point. Everything after it was
+        // generated with deleted context and must not be shifted or reused.
+        const index=buildActiveFingerprintIndex(chat);
+        for(const rawId of Object.keys(data.swipeSnapshots||{})){
+            const id=Number(rawId);
+            if(!Number.isFinite(id)){delete data.swipeSnapshots[rawId];removed++;continue}
+            if(id>=chat.length)continue;
+            const active=_activeSwipeIdForContext(ctx,id);const snap=_snapshotFor(data,id,active);
+            if(snap&&getSnapshotStatus(id,active,snap,index.get(id)||'')==='stale')cutoff=Math.min(cutoff,id);
+        }
+        for(const rawId of Object.keys(data.swipeSnapshots||{})){
+            const id=Number(rawId);
+            if(!Number.isFinite(id)||id>=cutoff){delete data.swipeSnapshots[rawId];removed++}
+        }
+    }
+
+    _syncActiveSnapshotMirrors(data);
+    return{data,removed,restamped,cutoff:type==='message-delete'?cutoff:null};
+}
+
+export function clearAllSnapshots(){
+    const data=getTrackerData();data.snapshots={};data.swipeSnapshots={};
+    return data;
+}
 
 // v6.13.0 (issue #15): schema/prompt now resolved through the active
 // profile rather than directly off `s`. Existing legacy settings were
@@ -841,7 +1069,14 @@ export function getActiveSchema(){
     // sources panels/fieldToggles/dashCards/customPanels from the profile.
     const sView = buildProfileView(s, profile);
     if (profile.schema) {
-        try { return { name: profile.name || 'Custom', description: profile.description || '', strict: false, value: JSON.parse(profile.schema) }; }
+        try {
+            const value=JSON.parse(profile.schema);
+            if(sView.panels?.storyIdeas===false){
+                delete value.properties?.plotBranches;
+                if(Array.isArray(value.required))value.required=value.required.filter(key=>key!=='plotBranches');
+            }
+            return { name: profile.name || 'Custom', description: profile.description || '', strict: false, value };
+        }
         catch (e) {
             // v6.27.13: a corrupt profile.schema used to fall through silently
             // to the dynamic build, which produced a tracker-mostly-empty
@@ -851,7 +1086,7 @@ export function getActiveSchema(){
             try {
                 if (!profile._schemaWarnShown) {
                     profile._schemaWarnShown = true;
-                    toastr.warning('Custom schema in profile "' + (profile.name || 'Untitled') + '" is invalid JSON — falling back to the dynamic schema. Open the prompt editor and re-paste/fix to restore your custom schema.', 'ScenePulse', { timeOut: 12000 });
+                    toastr.warning(t('Custom schema in profile "{profile}" is invalid JSON. The dynamic schema is being used until you fix it in the prompt editor.', { profile: profile.name || t('Untitled') }), 'ScenePulse', { timeOut: 12000 });
                 }
             } catch {}
         }
@@ -915,95 +1150,6 @@ export function getConnectionProfiles(){try{const o=document.querySelectorAll('#
 
 export function getChatPresets(){try{for(const sel of['#settings_preset_openai','#preset_openai_select','#settings_preset_chat']){const o=document.querySelectorAll(`${sel} option`);if(o.length>1)return Array.from(o).filter(x=>x.value).map(x=>({id:x.value,name:x.textContent.trim()}))}}catch(e){warn('Presets:',e)}return[]}
 
-export function getLorebooks(){try{const o=document.querySelectorAll('#world_info option');if(o.length)return Array.from(o).filter(x=>x.value).map(x=>({id:x.value,name:x.textContent.trim()}))}catch(e){warn('Lore:',e)}return[]}
-
-export function getActiveLorebookInfo(){
-    const info={global:[],char:[],attached:[]};
-    try{
-        // Global world info: currently selected in #world_info
-        const globalSel=document.querySelector('#world_info');
-        if(globalSel){
-            const selected=Array.from(globalSel.selectedOptions||[]).filter(o=>o.value);
-            info.global=selected.map(o=>o.textContent.trim());
-        }
-        // Character lorebooks: #world_info_character_list or similar
-        const charWi=document.querySelectorAll('#world_info_character_list .tag, [id*="character_world"] option:checked, #character_world option:checked');
-        charWi.forEach(el=>{const t=el.textContent?.trim()||el.value;if(t)info.char.push(t)});
-        // Also check for world info entries that are active via checkmarks
-        const activeEntries=document.querySelectorAll('.world_entry:not(.disabled)');
-        info.entryCount=activeEntries.length;
-        // Try to get all attached books via ST context
-        try{
-            const ctx=SillyTavern.getContext();
-            if(ctx.worldInfo){info.attached.push(...(Array.isArray(ctx.worldInfo)?ctx.worldInfo:[ctx.worldInfo]).map(w=>w?.name||w).filter(Boolean))}
-            if(ctx.chatMetadata?.world_info){info.attached.push(ctx.chatMetadata.world_info)}
-            if(ctx.characters?.[ctx.characterId]?.data?.extensions?.world){info.char.push(ctx.characters[ctx.characterId].data.extensions.world)}
-        }catch{}
-    }catch(e){warn('getActiveLorebookInfo:',e)}
-    // Deduplicate
-    info.global=[...new Set(info.global)];
-    info.char=[...new Set(info.char)];
-    info.attached=[...new Set(info.attached)];
-    return info;
-}
-
-export function refreshLorebookDisplay(){
-    const el=document.getElementById('sp-lore-display');
-    if(!el)return;
-    const info=getActiveLorebookInfo();
-    const s=getSettings();
-    const mode=s.lorebookMode||'character_attached';
-    let html='';
-    const allBooks=[...info.global,...info.char,...info.attached].filter((v,i,a)=>a.indexOf(v)===i).filter(b=>b&&b!=='--- None ---');
-    if(!allBooks.length){
-        html='<div class="sp-lore-none">'+t('No lorebooks detected')+'</div>';
-    } else {
-        const filtered=mode==='exclude_all'?[]:
-            mode==='character_only'?allBooks.filter(b=>info.char.includes(b)):
-            mode==='allowlist'?(s.lorebookAllowlist||[]).filter(b=>allBooks.includes(b)):
-            allBooks.filter(b=>info.char.includes(b)||info.global.includes(b)||info.attached.includes(b)); // character_attached (default)
-        for(const b of allBooks){
-            const included=filtered.includes(b);
-            const isChar=info.char.includes(b);
-            const isGlobal=info.global.includes(b);
-            const src=isChar?'char':isGlobal?'global':'chat';
-            html+=`<div class="sp-lore-item ${included?'sp-lore-included':'sp-lore-excluded'}"><span class="sp-lore-dot"></span><span class="sp-lore-name">${esc(b)}</span><span class="sp-lore-src">${src}</span></div>`;
-        }
-    }
-    el.innerHTML=html;
-    log('Lorebook display: mode='+mode+', books='+allBooks.join(', '));
-}
-
-export function updateLorebookRec(){
-    const el=document.getElementById('sp-lore-rec');
-    if(!el)return;
-    const s=getSettings();
-    const method=s.injectionMethod||'inline';
-    const current=s.lorebookMode||'character_attached';
-    let rec,reason;
-    if(method==='separate'){
-        rec='character_attached';
-        reason=t('Separate generation runs an isolated API call — it needs lorebook context injected since ST won\'t provide it automatically.');
-    } else {
-        rec='exclude_all';
-        reason=t('Together mode uses the normal generation — ST already injects lorebooks into context, so including them here would be redundant.');
-    }
-    const recLabel={'character_attached':'Attached','character_only':'Character only','exclude_all':'Disabled','allowlist':'Allowlist'}[rec]||rec;
-    if(current===rec){
-        el.innerHTML=`<span class="sp-lore-rec-ok">\u2713 ${t('Using recommended:')} <strong>${esc(recLabel)}</strong></span><span class="sp-lore-rec-why">${reason}</span>`;
-    } else {
-        el.innerHTML=`<span class="sp-lore-rec-suggest">${t('Recommended:')} <strong>${esc(recLabel)}</strong> <a href="#" id="sp-lore-apply-rec">${t('Apply')}</a></span><span class="sp-lore-rec-why">${reason}</span>`;
-        document.getElementById('sp-lore-apply-rec')?.addEventListener('click',(e)=>{
-            e.preventDefault();
-            s.lorebookMode=rec;saveSettings();
-            $('#sp-lore-mode').val(rec);
-            $('#sp-lore-section').toggle(rec==='allowlist');
-            refreshLorebookDisplay();
-            updateLorebookRec();
-        });
-    }
-}
-
 // Save chat to disk -- prevents message loss when profile switches trigger CHAT_CHANGED reload.
 // Coalescing: if called rapidly (e.g. by extraction + GENERATION_ENDED + other extensions like
 // MemoryBooks all saving metadata concurrently), concurrent callers share a single save promise.
@@ -1014,13 +1160,7 @@ export async function ensureChatSaved(){
         try{
             const ctx=SillyTavern.getContext();
             if(typeof ctx.saveChat==='function'){await ctx.saveChat();return}
-            if(typeof ctx.saveChatConditional==='function'){await ctx.saveChatConditional();return}
-            try{
-                const chatModule=await import('/scripts/chat.js');
-                if(chatModule.saveChat){await chatModule.saveChat();return}
-                if(chatModule.saveChatConditional){await chatModule.saveChatConditional();return}
-                if(chatModule.saveChatDebounced){chatModule.saveChatDebounced()}
-            }catch{}
+            warn('ensureChatSaved: SillyTavern context does not expose saveChat');
         }catch(e){warn('ensureChatSaved:',e?.message)}
         finally{_savePending=null}
     })();

@@ -38,6 +38,7 @@ import {
     setInlineGenStartMs,
     setInlineExtractionDone,
     setPendingInlineIdx,
+    setInlineGenerationContext,
     setCancelRequested,
 } from '../state.js';
 import { spSetGenerating } from '../ui/mobile.js';
@@ -96,6 +97,7 @@ function _check() {
         setInlineGenStartMs(0);
         setInlineExtractionDone(false);
         setPendingInlineIdx(-1);
+        setInlineGenerationContext(null);
         setCancelRequested(false);
         try { cleanupGenUI(); } catch {}
         try {

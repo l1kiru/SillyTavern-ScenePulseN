@@ -19,7 +19,10 @@
 // folder" path is not writable from browser-side code; per-user
 // `data/<user>/user/files/` is the closest durable location.
 
+import { currentChatFingerprint, currentChatKey } from './message-fingerprint.js';
+
 const VERSION = 1;
+export const SESSION_STARTED_AT = Date.now();
 const FILE_NAME = 'scenepulse-crash-log.json';
 const SERVER_PATH = '/user/files/' + FILE_NAME;
 const LS_KEY = 'scenepulse_crash_log_v1';
@@ -66,12 +69,9 @@ function _normalizeMessage(msg) {
     catch { return _truncate(String(msg), 800); }
 }
 
-function _stVersionFromContext() {
+function _readStVersion() {
     try {
-        const ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext)
-            ? SillyTavern.getContext() : null;
-        if (!ctx) return '';
-        return ctx.version || (typeof ctx.getVersion === 'function' ? ctx.getVersion() : '') || '';
+        return document.getElementById('version_display')?.textContent?.trim() || '';
     } catch { return ''; }
 }
 
@@ -102,7 +102,7 @@ function _readActiveModel(ctx) {
             if (k.endsWith('_model') && typeof v === 'string' && v.trim()) return v.trim();
         }
         // textgen webui / KoboldCpp / Ollama / etc.
-        const tg = ctx?.textGenerationSettings || {};
+        const tg = ctx?.textCompletionSettings || {};
         if (typeof tg.online_status_model === 'string' && tg.online_status_model.trim()) return tg.online_status_model.trim();
         if (typeof tg.model === 'string' && tg.model.trim()) return tg.model.trim();
         // DOM fallback — visible model dropdown picks up unsaved changes
@@ -128,8 +128,22 @@ function _autoContext() {
         const ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext)
             ? SillyTavern.getContext() : null;
         if (ctx) {
+            try {
+                const chatKey = currentChatKey();
+                if (chatKey) out.chatKey = chatKey;
+            } catch {}
             try { if (ctx.chatId) out.chatId = String(ctx.chatId).slice(-12); } catch {}
-            try { if (Array.isArray(ctx.chat)) out.mesIdx = ctx.chat.length - 1; } catch {}
+            try {
+                if (Array.isArray(ctx.chat) && ctx.chat.length) {
+                    const mesIdx = ctx.chat.length - 1;
+                    const message = ctx.chat[mesIdx];
+                    const swipeId = Math.max(0, Number(message?.swipe_id ?? 0) || 0);
+                    out.mesIdx = mesIdx;
+                    out.swipeId = swipeId;
+                    out.messageFingerprint = currentChatFingerprint(mesIdx, swipeId);
+                    out.messageRole = message?.is_user ? 'user' : (message?.is_system ? 'system' : 'assistant');
+                }
+            } catch {}
             try { if (ctx.name2) out.character = String(ctx.name2).slice(0, 60); } catch {}
             try {
                 const model = _readActiveModel(ctx);
@@ -165,22 +179,25 @@ export function captureError(opts) {
     const severity = SEVERITIES.includes(opts.severity) ? opts.severity : 'error';
     let stack = opts.stack;
     if (!stack && opts.message instanceof Error) stack = opts.message.stack;
+    const context = { ..._autoContext(), ...(opts.context && typeof opts.context === 'object' ? opts.context : {}) };
     const entry = {
         ts: _now(),
         source,
         severity,
         message: _normalizeMessage(opts.message),
         stack: _normalizeStack(stack),
-        context: opts.context && typeof opts.context === 'object'
-            ? _truncateContext(opts.context) : null,
+        context: Object.keys(context).length ? _truncateContext(context) : null,
         spVersion: _spVersion,
-        stVersion: _stVersion || _stVersionFromContext(),
+        stVersion: _stVersion || _readStVersion(),
     };
     // De-dupe consecutive identical entries — common when an error fires
     // both from console.error and from the global onerror handler.
     const last = _entries[_entries.length - 1];
+    const sameAddress = (last?.context?.chatKey || '') === (entry.context?.chatKey || '')
+        && Number(last?.context?.mesIdx ?? -1) === Number(entry.context?.mesIdx ?? -1)
+        && Number(last?.context?.swipeId ?? -1) === Number(entry.context?.swipeId ?? -1);
     if (last && last.message === entry.message && last.stack === entry.stack
-        && last.source === entry.source && last.severity === entry.severity) {
+        && last.source === entry.source && last.severity === entry.severity && sameAddress) {
         last.repeat = (last.repeat || 1) + 1;
         last.ts = entry.ts;
         _unseenCount++;
@@ -200,7 +217,7 @@ function _truncateContext(ctx) {
     const out = {};
     let keys = 0;
     for (const k of Object.keys(ctx)) {
-        if (keys++ >= 12) break;
+        if (keys++ >= 16) break;
         const v = ctx[k];
         if (v == null) { out[k] = v; continue; }
         if (typeof v === 'string') out[k] = _truncate(v, 200);
@@ -261,7 +278,7 @@ export async function installCrashLog(opts = {}) {
     if (_initialized) return;
     _initialized = true;
     _spVersion = opts.spVersion || '';
-    _stVersion = _stVersionFromContext();
+    _stVersion = _readStVersion();
 
     // 1. Load prior entries — server first (authoritative), localStorage fallback
     try {

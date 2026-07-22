@@ -16,7 +16,43 @@
 // `s.activeProfileId`. Used by the dropdown switcher when "this chat
 // only" is selected.
 
-import { log, warn } from './logger.js';
+import { DEFAULTS } from './constants.js';
+import { log } from './logger.js';
+
+const CUSTOM_PANEL_LIMITS = Object.freeze({
+    panels: 32,
+    fieldsPerPanel: 64,
+    enumOptions: 32,
+    id: 96,
+    name: 100,
+    key: 64,
+    label: 100,
+    description: 1000,
+    option: 100,
+});
+const CUSTOM_FIELD_TYPES = new Set(['text', 'number', 'meter', 'list', 'enum']);
+const RESERVED_FIELD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const FIELD_KEY_RE = /^[a-z_][a-z0-9_]*$/;
+const PANEL_ID_RE = /^cp_[a-z0-9_-]+$/i;
+const SAFE_MAP_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const CONFIG_SCALAR_KEYS = new Set([
+    'injectionMethod', 'deltaMode', 'language', 'theme', 'fontScale',
+    'contextMessages', 'maxRetries', 'promptMode', 'embedSnapshots',
+    'embedRole', 'autoGenerate', 'showThoughts', 'showEmptyFields',
+    'sceneTransitions', 'openSections',
+]);
+const PROFILE_CONFIG_KEYS = new Set(['panels', 'fieldToggles', 'dashCards', 'customPanels']);
+
+export function customPanelSectionKey(name) {
+    return 'custom_' + String(name || 'untitled').replace(/\s+/g, '_').toLowerCase();
+}
+
+export function isValidCustomFieldKey(value) {
+    return typeof value === 'string'
+        && value.length <= CUSTOM_PANEL_LIMITS.key
+        && FIELD_KEY_RE.test(value)
+        && !RESERVED_FIELD_KEYS.has(value);
+}
 
 // v6.18.0: promptOverrides (per-slot overrides) added.
 // v6.19.0: systemPromptRole (issue #16 — choose system/user/assistant for the
@@ -39,6 +75,276 @@ function _uuid() {
 }
 
 function _nowIso() { return new Date().toISOString(); }
+
+function _isPlainObject(value) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    const proto = Object.getPrototypeOf(value);
+    return proto === Object.prototype || proto === null;
+}
+
+function _cleanString(value, label, maxLength, errors, { required = false } = {}) {
+    if (typeof value !== 'string') {
+        errors.push(`${label} must be a string`);
+        return '';
+    }
+    const cleaned = value.trim();
+    if (required && !cleaned) errors.push(`${label} must not be empty`);
+    if (cleaned.length > maxLength) errors.push(`${label} must be at most ${maxLength} characters`);
+    return cleaned.slice(0, maxLength);
+}
+
+function _newPanelId(rawId) {
+    if (typeof rawId === 'string') {
+        const id = rawId.trim();
+        if (id.length <= CUSTOM_PANEL_LIMITS.id && PANEL_ID_RE.test(id)) return id;
+    }
+    return 'cp_' + _uuid();
+}
+
+/**
+ * Validate and normalize custom panels from an untrusted JSON payload.
+ * Returns fresh plain objects containing only supported properties.
+ */
+export function validateCustomPanels(raw) {
+    const errors = [];
+    if (!Array.isArray(raw)) {
+        return { ok: false, panels: null, errors: ['"customPanels" must be an array'] };
+    }
+    if (raw.length > CUSTOM_PANEL_LIMITS.panels) {
+        errors.push(`"customPanels" must contain at most ${CUSTOM_PANEL_LIMITS.panels} panels`);
+    }
+
+    const cleanPanels = [];
+    const panelKeys = new Set();
+    const fieldKeys = new Set();
+
+    for (let panelIndex = 0; panelIndex < Math.min(raw.length, CUSTOM_PANEL_LIMITS.panels); panelIndex++) {
+        const rawPanel = raw[panelIndex];
+        const panelLabel = `customPanels[${panelIndex}]`;
+        if (!_isPlainObject(rawPanel)) {
+            errors.push(`${panelLabel} must be an object`);
+            continue;
+        }
+
+        const name = _cleanString(rawPanel.name, `${panelLabel}.name`, CUSTOM_PANEL_LIMITS.name, errors, { required: true });
+        const sectionKey = customPanelSectionKey(name);
+        if (name && panelKeys.has(sectionKey)) errors.push(`${panelLabel}.name duplicates another panel name`);
+        if (name) panelKeys.add(sectionKey);
+
+        if (!Array.isArray(rawPanel.fields)) {
+            errors.push(`${panelLabel}.fields must be an array`);
+            continue;
+        }
+        if (rawPanel.fields.length > CUSTOM_PANEL_LIMITS.fieldsPerPanel) {
+            errors.push(`${panelLabel}.fields must contain at most ${CUSTOM_PANEL_LIMITS.fieldsPerPanel} fields`);
+        }
+        if (Object.hasOwn(rawPanel, 'enabled') && typeof rawPanel.enabled !== 'boolean') {
+            errors.push(`${panelLabel}.enabled must be a boolean`);
+        }
+
+        const fields = [];
+        for (let fieldIndex = 0; fieldIndex < Math.min(rawPanel.fields.length, CUSTOM_PANEL_LIMITS.fieldsPerPanel); fieldIndex++) {
+            const rawField = rawPanel.fields[fieldIndex];
+            const fieldLabel = `${panelLabel}.fields[${fieldIndex}]`;
+            if (!_isPlainObject(rawField)) {
+                errors.push(`${fieldLabel} must be an object`);
+                continue;
+            }
+
+            const key = _cleanString(rawField.key, `${fieldLabel}.key`, CUSTOM_PANEL_LIMITS.key, errors, { required: true }).toLowerCase();
+            if (key && !FIELD_KEY_RE.test(key)) errors.push(`${fieldLabel}.key must match ${FIELD_KEY_RE}`);
+            if (RESERVED_FIELD_KEYS.has(key)) errors.push(`${fieldLabel}.key is reserved`);
+            if (key && fieldKeys.has(key)) errors.push(`${fieldLabel}.key duplicates another custom field key`);
+            if (key) fieldKeys.add(key);
+
+            const label = _cleanString(Object.hasOwn(rawField, 'label') ? rawField.label : '', `${fieldLabel}.label`, CUSTOM_PANEL_LIMITS.label, errors);
+            const desc = _cleanString(Object.hasOwn(rawField, 'desc') ? rawField.desc : '', `${fieldLabel}.desc`, CUSTOM_PANEL_LIMITS.description, errors);
+            const type = typeof rawField.type === 'string' ? rawField.type.trim().toLowerCase() : '';
+            if (!CUSTOM_FIELD_TYPES.has(type)) errors.push(`${fieldLabel}.type must be one of ${[...CUSTOM_FIELD_TYPES].join(', ')}`);
+            if (Object.hasOwn(rawField, 'enabled') && typeof rawField.enabled !== 'boolean') {
+                errors.push(`${fieldLabel}.enabled must be a boolean`);
+            }
+            if (Object.hasOwn(rawField, 'invert') && typeof rawField.invert !== 'boolean') {
+                errors.push(`${fieldLabel}.invert must be a boolean`);
+            }
+
+            const field = { key, label, type, desc };
+            if (rawField.enabled === false) field.enabled = false;
+            if (type === 'meter' && rawField.invert === true) field.invert = true;
+
+            if (type === 'enum') {
+                if (!Array.isArray(rawField.options)) {
+                    errors.push(`${fieldLabel}.options must be an array for enum fields`);
+                } else {
+                    if (rawField.options.length === 0) errors.push(`${fieldLabel}.options must not be empty for enum fields`);
+                    if (rawField.options.length > CUSTOM_PANEL_LIMITS.enumOptions) {
+                        errors.push(`${fieldLabel}.options must contain at most ${CUSTOM_PANEL_LIMITS.enumOptions} values`);
+                    }
+                    const options = [];
+                    const optionSet = new Set();
+                    for (let optionIndex = 0; optionIndex < Math.min(rawField.options.length, CUSTOM_PANEL_LIMITS.enumOptions); optionIndex++) {
+                        const option = _cleanString(rawField.options[optionIndex], `${fieldLabel}.options[${optionIndex}]`, CUSTOM_PANEL_LIMITS.option, errors, { required: true });
+                        const normalized = option.toLowerCase();
+                        if (option && optionSet.has(normalized)) errors.push(`${fieldLabel}.options contains a duplicate value`);
+                        if (option) optionSet.add(normalized);
+                        options.push(option);
+                    }
+                    field.options = options;
+                }
+            }
+            fields.push(field);
+        }
+
+        const panel = { id: _newPanelId(rawPanel.id), name, fields };
+        if (rawPanel.enabled === false) panel.enabled = false;
+        cleanPanels.push(panel);
+    }
+
+    return errors.length
+        ? { ok: false, panels: null, errors }
+        : { ok: true, panels: cleanPanels, errors: [] };
+}
+
+function _cleanBooleanMap(raw, allowedKeys, label, errors) {
+    if (!_isPlainObject(raw)) {
+        errors.push(`${label} must be an object`);
+        return {};
+    }
+    const clean = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (!allowedKeys.has(key)) continue;
+        if (typeof value !== 'boolean') {
+            errors.push(`${label}.${key} must be a boolean`);
+            continue;
+        }
+        clean[key] = value;
+    }
+    return clean;
+}
+
+function _cleanFieldToggleMap(raw, errors) {
+    if (!_isPlainObject(raw)) {
+        errors.push('fieldToggles must be an object');
+        return {};
+    }
+    const clean = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (!SAFE_MAP_KEY_RE.test(key) || RESERVED_FIELD_KEYS.has(key) || key.length > 100) {
+            errors.push(`fieldToggles contains an invalid key: ${key}`);
+            continue;
+        }
+        if (typeof value !== 'boolean') {
+            errors.push(`fieldToggles.${key} must be a boolean`);
+            continue;
+        }
+        clean[key] = value;
+    }
+    return clean;
+}
+
+function _cleanOpenSections(raw, customPanels, errors) {
+    if (!_isPlainObject(raw)) {
+        errors.push('openSections must be an object');
+        return {};
+    }
+    const allowed = new Set(['scene', 'quests', 'relationships', 'characters', 'branches', 'env', 'plots']);
+    for (const panel of customPanels) {
+        allowed.add(customPanelSectionKey(panel.name));
+    }
+    const clean = {};
+    for (const [key, value] of Object.entries(raw)) {
+        if (!allowed.has(key)) continue;
+        if (typeof value !== 'boolean') {
+            errors.push(`openSections.${key} must be a boolean`);
+            continue;
+        }
+        clean[key] = value;
+    }
+    return clean;
+}
+
+/**
+ * Validate a ScenePulse configuration import without mutating live settings.
+ * Unknown keys are ignored; supported values are normalized into clean patches.
+ */
+export function validateImportedConfigSettings(raw) {
+    const errors = [];
+    if (!_isPlainObject(raw)) {
+        return { ok: false, settingsPatch: null, profilePatch: null, errors: ['settings must be a JSON object'] };
+    }
+
+    const settingsPatch = {};
+    const profilePatch = {};
+    let customPanels = [];
+
+    if (Object.hasOwn(raw, 'customPanels')) {
+        const result = validateCustomPanels(raw.customPanels);
+        if (!result.ok) errors.push(...result.errors);
+        else {
+            customPanels = result.panels;
+            profilePatch.customPanels = customPanels;
+        }
+    }
+    if (Object.hasOwn(raw, 'panels')) {
+        profilePatch.panels = _cleanBooleanMap(raw.panels, new Set(Object.keys(DEFAULTS.panels)), 'panels', errors);
+    }
+    if (Object.hasOwn(raw, 'dashCards')) {
+        profilePatch.dashCards = _cleanBooleanMap(raw.dashCards, new Set(Object.keys(DEFAULTS.dashCards)), 'dashCards', errors);
+    }
+    if (Object.hasOwn(raw, 'fieldToggles')) {
+        profilePatch.fieldToggles = _cleanFieldToggleMap(raw.fieldToggles, errors);
+    }
+
+    for (const [key, value] of Object.entries(raw)) {
+        if (!CONFIG_SCALAR_KEYS.has(key) || PROFILE_CONFIG_KEYS.has(key)) continue;
+        if (!Object.hasOwn(DEFAULTS, key)) continue;
+        switch (key) {
+            case 'injectionMethod':
+                if (!['inline', 'separate'].includes(value)) errors.push('injectionMethod must be "inline" or "separate"');
+                else settingsPatch[key] = value;
+                break;
+            case 'promptMode':
+                if (!['json', 'native'].includes(value)) errors.push('promptMode must be "json" or "native"');
+                else settingsPatch[key] = value;
+                break;
+            case 'embedRole':
+                if (!['system', 'user', 'assistant'].includes(value)) errors.push('embedRole must be system, user, or assistant');
+                else settingsPatch[key] = value;
+                break;
+            case 'language':
+            case 'theme':
+                if (typeof value !== 'string' || value.length > 100) errors.push(`${key} must be a string up to 100 characters`);
+                else settingsPatch[key] = value;
+                break;
+            case 'fontScale':
+                if (!Number.isFinite(value) || value < 0.7 || value > 1.5) errors.push('fontScale must be between 0.7 and 1.5');
+                else settingsPatch[key] = value;
+                break;
+            case 'contextMessages':
+                if (!Number.isInteger(value) || value < 1 || value > 30) errors.push('contextMessages must be an integer between 1 and 30');
+                else settingsPatch[key] = value;
+                break;
+            case 'maxRetries':
+                if (!Number.isInteger(value) || value < 0 || value > 5) errors.push('maxRetries must be an integer between 0 and 5');
+                else settingsPatch[key] = value;
+                break;
+            case 'embedSnapshots':
+                if (!Number.isInteger(value) || value < 0 || value > 5) errors.push('embedSnapshots must be an integer between 0 and 5');
+                else settingsPatch[key] = value;
+                break;
+            case 'openSections':
+                settingsPatch[key] = _cleanOpenSections(value, customPanels, errors);
+                break;
+            default:
+                if (typeof value !== 'boolean') errors.push(`${key} must be a boolean`);
+                else settingsPatch[key] = value;
+        }
+    }
+
+    return errors.length
+        ? { ok: false, settingsPatch: null, profilePatch: null, errors }
+        : { ok: true, settingsPatch, profilePatch, errors: [] };
+}
 
 /**
  * Build a fresh profile object from a partial template.
@@ -381,7 +687,7 @@ export function updateActiveProfile(s, patch) {
     const live = s.profiles.find(x => x.id === p.id);
     if (!live) return false;
     for (const k of PROFILE_FIELDS) {
-        if (k in patch) live[k] = patch[k];
+        if (Object.hasOwn(patch, k)) live[k] = patch[k];
     }
     live.updatedAt = _nowIso();
     return true;
@@ -394,11 +700,18 @@ export function updateActiveProfile(s, patch) {
  */
 export function validateImportedProfile(raw) {
     const errors = [];
-    if (!raw || typeof raw !== 'object') {
+    if (!_isPlainObject(raw)) {
         return { ok: false, profile: null, errors: ['Not a JSON object'] };
     }
     if (typeof raw.name !== 'string' || !raw.name.trim()) {
         errors.push('Missing or empty "name"');
+    } else if (raw.name.trim().length > 100) {
+        errors.push('"name" must be at most 100 characters');
+    }
+    if (raw.description != null && typeof raw.description !== 'string') {
+        errors.push('"description" must be a string');
+    } else if (typeof raw.description === 'string' && raw.description.length > 1000) {
+        errors.push('"description" must be at most 1000 characters');
     }
     if (raw.schema != null && typeof raw.schema !== 'string') {
         errors.push('"schema" must be a string (JSON-encoded) or null');
@@ -418,8 +731,24 @@ export function validateImportedProfile(raw) {
     if (raw.systemPrompt != null && typeof raw.systemPrompt !== 'string') {
         errors.push('"systemPrompt" must be a string or null');
     }
-    if (raw.customPanels != null && !Array.isArray(raw.customPanels)) {
-        errors.push('"customPanels" must be an array');
+    const customPanelsResult = validateCustomPanels(Object.hasOwn(raw, 'customPanels') ? raw.customPanels : []);
+    if (!customPanelsResult.ok) errors.push(...customPanelsResult.errors);
+    const panels = _cleanBooleanMap(Object.hasOwn(raw, 'panels') ? raw.panels : {}, new Set(Object.keys(DEFAULTS.panels)), 'panels', errors);
+    const dashCards = _cleanBooleanMap(Object.hasOwn(raw, 'dashCards') ? raw.dashCards : {}, new Set(Object.keys(DEFAULTS.dashCards)), 'dashCards', errors);
+    const fieldToggles = _cleanFieldToggleMap(Object.hasOwn(raw, 'fieldToggles') ? raw.fieldToggles : {}, errors);
+    const promptOverrides = {};
+    if (raw.promptOverrides != null && !_isPlainObject(raw.promptOverrides)) {
+        errors.push('"promptOverrides" must be an object');
+    } else if (_isPlainObject(raw.promptOverrides)) {
+        for (const [key, value] of Object.entries(raw.promptOverrides)) {
+            if (!SAFE_MAP_KEY_RE.test(key) || RESERVED_FIELD_KEYS.has(key) || key.length > 100) {
+                errors.push(`promptOverrides contains an invalid key: ${key}`);
+            } else if (typeof value !== 'string') {
+                errors.push(`promptOverrides.${key} must be a string`);
+            } else {
+                promptOverrides[key] = value;
+            }
+        }
     }
     if (errors.length > 0) {
         return { ok: false, profile: null, errors };
@@ -428,20 +757,19 @@ export function validateImportedProfile(raw) {
     // top-level keys. Always assigns a fresh id to avoid collisions with
     // existing profiles on import.
     const profile = makeProfile({
-        name: raw.name,
-        description: raw.description || '',
+        name: raw.name.trim(),
+        description: raw.description?.trim() || '',
         schema: raw.schema || null,
         systemPrompt: raw.systemPrompt || null,
         // v6.18.0: per-slot prompt overrides survive export/import so users
         // can share customized prompts via the existing profile JSON file.
-        promptOverrides: raw.promptOverrides && typeof raw.promptOverrides === 'object'
-            ? raw.promptOverrides : {},
+        promptOverrides,
         // v6.19.0: role selector also survives export/import.
         systemPromptRole: raw.systemPromptRole,
-        panels: raw.panels || {},
-        fieldToggles: raw.fieldToggles || {},
-        dashCards: raw.dashCards || {},
-        customPanels: raw.customPanels || [],
+        panels,
+        fieldToggles,
+        dashCards,
+        customPanels: customPanelsResult.panels,
     });
     return { ok: true, profile, errors: [] };
 }

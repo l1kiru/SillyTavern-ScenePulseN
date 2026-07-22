@@ -4,13 +4,12 @@
 import { log, warn } from './logger.js';
 import { auditFields } from './utils.js';
 import { _isTimelineScrub } from './state.js';
-import { getLatestSnapshot } from './settings.js';
-import { charColor } from './color.js';
 import { coerceRelPhase } from './rel-phase.js';
+import { buildCharacterNameMap } from './character-identity.js';
 
-// ── Normalization cache (WeakMap — auto-clears when snapshot objects are GC'd) ──
-const _normCache = new WeakMap();
-export function clearNormCache() { /* WeakMap auto-clears when objects are GC'd */ }
+// Normalization intentionally has no object-identity cache. Stored snapshots
+// are edited in place by the UI, so a WeakMap would return stale values.
+export function clearNormCache() {}
 
 // ── Group chat detection ────────────────────────────────────────────────
 // SillyTavern supports group chats where multiple characters participate
@@ -98,7 +97,6 @@ export function isUserName(name) {
 // ── Normalization ──
 export function normalizeTracker(d){
     if(!d||typeof d!=='object')return d;
-    if(_normCache.has(d)) return _normCache.get(d);
     const _verbose=!_isTimelineScrub; // Suppress verbose logging during rapid scrubbing
 
     // ── GLM-5 Unwrapper: flatten nested object structures ──
@@ -223,31 +221,8 @@ export function normalizeTracker(d){
     // explicit empty array (same pattern as charactersPresent), and
     // carrying forward stale suggestions from prior turns defeats
     // the "fresh each turn" contract.
-    // Carry forward: smart quest completion detection
-    {try{const prev=getLatestSnapshot();if(prev){
-        for(const _qk of['mainQuests','sideQuests']){
-            const currQuests=o[_qk]||[];
-            const prevQuests=prev[_qk]||[];
-            if(!currQuests.length&&prevQuests.length){
-                // Empty array — carry forward all non-resolved previous quests
-                o[_qk]=prevQuests.filter(q=>q.urgency!=='resolved');
-                log(_qk,'empty — carrying forward',o[_qk].length,'non-resolved quests from previous');
-            } else if(currQuests.length&&prevQuests.length){
-                // LLM returned quests — detect missing ones and mark as resolved
-                const currNames=new Set(currQuests.map(q=>(q.name||'').toLowerCase().trim()));
-                for(const pq of prevQuests){
-                    if(pq.urgency==='resolved')continue; // already resolved, don't carry forward again
-                    const pn=(pq.name||'').toLowerCase().trim();
-                    if(pn&&!currNames.has(pn)){
-                        // Quest was in previous but not in current — mark resolved
-                        o[_qk].push({name:pq.name,urgency:'resolved',detail:pq.detail||''});
-                        log(_qk,'quest completed:',pq.name,'— marked resolved');
-                    }
-                }
-            }
-        }
-        if(!o.northStar&&prev.northStar)o.northStar=prev.northStar;
-    }}catch{}}
+    // Carry-forward belongs to the explicit delta/full merge layer. Keeping
+    // it here would contaminate historical snapshots with the latest turn.
     // v6.8.49: hard quest cap enforcement. The prompt says MAX 3 main /
     // MAX 4 side, but the LLM routinely exceeds the cap and the delta-
     // merge / carry-forward pipeline never truncated. This meant the
@@ -371,17 +346,6 @@ export function normalizeTracker(d){
         }
     }
     if(_verbose&&o.relationships.length)log('Rel[0]:',JSON.stringify(o.relationships[0]).substring(0,300));
-    // Carry forward: fill empty relationship fields from previous snapshot's matching relationship
-    try{const prev=getLatestSnapshot();if(prev?.relationships?.length){
-        for(const rel of o.relationships){
-            const prevRel=prev.relationships.find(pr=>pr.name===rel.name);
-            if(!prevRel)continue;
-            for(const fk of['relType','relPhase','timeTogether']){
-                if(!rel[fk]&&prevRel[fk]){rel[fk]=prevRel[fk];log('Rel carry-forward:',rel.name,fk,'\u2190',prevRel[fk])}
-            }
-        }
-    }}catch{}
-
     // Characters -- with comprehensive debugging
     const rawChars=d.characters;
     if(_verbose)log('Char debug: d.characters=',Array.isArray(rawChars)?'array('+rawChars.length+')':typeof rawChars,
@@ -455,17 +419,11 @@ export function normalizeTracker(d){
         if(o.characters.length<before)log('normalize: stripped',before-o.characters.length,'user-as-character entry from characters');
     }
     // ── Group chat support (v6.8.15) ──────────────────────────────────────
-    // In group chats, the model often only emits character data for the
-    // currently-speaking participant, silently dropping the other members.
-    // Previous versions of ScenePulse then lost those characters because
-    // filterForView's intersection with charactersPresent would strip them.
+    // Derive _isPrimary per character without treating the static group
+    // roster as scene presence. charactersPresent remains authoritative so
+    // a group member can actually leave the current scene.
     //
-    // Here we carry forward any missing group-member characters from the
-    // previous snapshot so the model's omission doesn't destroy state.
-    // The group roster comes from SillyTavern's group context, not from
-    // the model's output, so it's authoritative.
-    //
-    // We also derive _isPrimary per character:
+    // Primary rules:
     //   - single-chat: the character matching ctx.name2 (the bot) is primary
     //   - group chat: every group-member character is primary (they all get
     //     the "main" styling in the UI, which uses _isPrimary for sorting
@@ -476,28 +434,6 @@ export function normalizeTracker(d){
         const _groupMembers=getGroupMemberNames();
         const _isGroup=_groupMembers.length>1;
         const _memberSet=new Set(_groupMembers.map(n=>(n||'').toLowerCase().trim()));
-        // Carry forward group members missing from the model's output
-        if(_isGroup&&Array.isArray(o.characters)){
-            try{
-                const prev=getLatestSnapshot();
-                if(prev?.characters?.length){
-                    const currNames=new Set(o.characters.map(c=>(c.name||'').toLowerCase().trim()));
-                    for(const memberName of _groupMembers){
-                        const memberLow=(memberName||'').toLowerCase().trim();
-                        if(!memberLow)continue;
-                        if(currNames.has(memberLow))continue;
-                        // Look for this member in the previous snapshot
-                        const prevCh=prev.characters.find(pc=>(pc.name||'').toLowerCase().trim()===memberLow);
-                        if(prevCh){
-                            // Deep-clone the prev entry so carry-forward doesn't mutate history
-                            o.characters.push(structuredClone(prevCh));
-                            currNames.add(memberLow);
-                            if(_verbose)log('Group carry-forward: restored missing group member',memberName);
-                        }
-                    }
-                }
-            }catch(e){if(_verbose)log('Group carry-forward failed:',e?.message)}
-        }
         // Derive _isPrimary for every character
         const _botName=((typeof SillyTavern!=='undefined'&&SillyTavern.getContext?.().name2)||'').toLowerCase().trim();
         if(Array.isArray(o.characters)){
@@ -638,19 +574,7 @@ export function normalizeTracker(d){
     // get deduped because multiple paren-variants may collapse to the same
     // canonical name.
     {
-        const aliasMap=new Map();
-        for(const ch of(o.characters||[])){
-            const canon=(ch?.name||'').trim();
-            const canonLow=canon.toLowerCase();
-            if(!canonLow)continue;
-            aliasMap.set(canonLow,canon);
-            if(Array.isArray(ch.aliases)){
-                for(const a of ch.aliases){
-                    const al=(a||'').toString().toLowerCase().trim();
-                    if(al&&al!==canonLow&&!aliasMap.has(al))aliasMap.set(al,canon);
-                }
-            }
-        }
+        const aliasMap=buildCharacterNameMap(o.characters);
         // Resolve any raw name string to its canonical form. Handles:
         //   - Direct canonical match
         //   - Direct alias match
@@ -671,7 +595,7 @@ export function normalizeTracker(d){
                     const baseLow=base.toLowerCase();
                     if(aliasMap.has(baseLow))return aliasMap.get(baseLow);
                 }
-                const parts=inside.split(/[\/,;]/).map(s=>s.trim()).filter(Boolean);
+                const parts=inside.split(/[/,;]/).map(s=>s.trim()).filter(Boolean);
                 for(const part of parts){
                     const pl=part.toLowerCase();
                     if(aliasMap.has(pl))return aliasMap.get(pl);
@@ -738,69 +662,9 @@ export function normalizeTracker(d){
             }
         }
     }
-    // ── Comprehensive carry-forward: fill ALL empty fields from previous snapshot ──
-    try{const _prev=getLatestSnapshot();if(_prev){
-        // Scalar fields: carry forward if current is empty string
-        for(const _ck of['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary']){
-            if(!o[_ck]&&_prev[_ck]){o[_ck]=_prev[_ck];if(_verbose)log('Carry-forward:',_ck)}
-        }
-        // v6.8.45: REMOVED "carry forward charactersPresent if empty".
-        // Solo scenes MUST stay empty — carrying forward the previous
-        // beat's roster was the bug that left 9 characters marked "In
-        // Scene" when {{user}} was alone in a train yard. The delta-
-        // merge fix in src/generation/delta-merge.js now sets an empty
-        // array whenever the LLM omits the field in delta mode, and the
-        // prompt explicitly requires an empty array for solitude beats.
-        // Characters: fill empty sub-fields from matching previous character
-        if(o.characters?.length&&_prev.characters?.length){
-            for(const _ch of o.characters){
-                const _pch=_prev.characters.find(pc=>pc.name&&_ch.name&&pc.name.toLowerCase()===_ch.name.toLowerCase());
-                if(!_pch)continue;
-                for(const _fk of['role','archetype','innerThought','immediateNeed','shortTermGoal','longTermGoal','hair','face','outfit','posture','proximity','notableDetails','fertStatus','fertNotes']){
-                    if(!_ch[_fk]&&_pch[_fk]){_ch[_fk]=_pch[_fk];if(_verbose)log('Char carry-forward:',_ch.name,_fk)}
-                }
-                if((!_ch.inventory||!_ch.inventory.length)&&_pch.inventory?.length){_ch.inventory=_pch.inventory;if(_verbose)log('Char carry-forward:',_ch.name,'inventory')}
-                // v6.8.15: carry forward _isPrimary so a character that was
-                // marked primary in a previous turn doesn't lose the flag if
-                // the group roster couldn't be detected this turn.
-                if(_ch._isPrimary==null&&_pch._isPrimary!=null)_ch._isPrimary=_pch._isPrimary;
-                // v6.8.18: carry forward aliases. If the model omits the
-                // aliases list on a turn where nothing changed about the
-                // character's identity, we still want the historical alias
-                // record to survive so future alias-based matching still
-                // works. Union with any aliases the current entry already
-                // has and dedupe case-insensitively. Canonical name is
-                // excluded so we never self-alias.
-                if(Array.isArray(_pch.aliases)&&_pch.aliases.length){
-                    const merged=Array.isArray(_ch.aliases)?[..._ch.aliases]:[];
-                    const seen=new Set(merged.map(a=>(a||'').toLowerCase().trim()));
-                    const canonLow=(_ch.name||'').toLowerCase().trim();
-                    for(const a of _pch.aliases){
-                        const s=String(a||'').trim();
-                        if(!s)continue;
-                        const sl=s.toLowerCase();
-                        if(sl===canonLow)continue;
-                        if(seen.has(sl))continue;
-                        seen.add(sl);
-                        merged.push(s);
-                    }
-                    _ch.aliases=merged;
-                }
-            }
-        }
-        // Relationship milestone: extend existing carry-forward
-        if(o.relationships?.length&&_prev.relationships?.length){
-            for(const _rel of o.relationships){
-                const _prel=_prev.relationships.find(pr=>pr.name===_rel.name);
-                if(_prel&&!_rel.milestone&&_prel.milestone){_rel.milestone=_prel.milestone;if(_verbose)log('Rel carry-forward:',_rel.name,'milestone')}
-            }
-        }
-        // Custom panel fields: carry forward any non-metadata key that is empty in o but populated in prev
-        for(const _pk of Object.keys(_prev)){
-            if(_pk.startsWith('_sp'))continue;
-            if(o[_pk]===''&&_prev[_pk]!==''){o[_pk]=_prev[_pk];if(_verbose)log('Custom carry-forward:',_pk)}
-        }
-    }}catch(e){/* carry-forward is best-effort */}
+    // No implicit latest-snapshot carry-forward here. Delta/full merging is
+    // explicit upstream; normalization must be a pure function of `d` so
+    // timeline snapshots cannot acquire future thoughts or scene state.
     // v6.15.0: coerce every relPhase to the closed enum (REL_PHASE_ENUM in
     // src/rel-phase.js). Runs AFTER all carry-forward and merge logic so we
     // coerce the final value, not an intermediate one. Empty/missing phase
@@ -815,7 +679,6 @@ export function normalizeTracker(d){
     }
     if(_verbose)auditFields('normalizeTracker',o,['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','mainQuests','sideQuests','plotBranches','northStar','relationships','characters']);
     if(d._spMeta)o._spMeta=d._spMeta;
-    _normCache.set(d, o);
     return o;
 }
 
@@ -853,7 +716,7 @@ export function normalizeChar(ch){
             const base=m[1].trim();
             const inside=m[2].trim();
             if(base&&inside.length<=60&&!/[.!?]/.test(inside)&&!/'s\s/.test(inside)&&!/\bof the\b/i.test(inside)){
-                const parts=inside.split(/[\/,;]/).map(s=>s.trim()).filter(Boolean);
+                const parts=inside.split(/[/,;]/).map(s=>s.trim()).filter(Boolean);
                 // Require at least one part and all parts to look name-like
                 // (start with capital letter or be short enough to be a title).
                 const looksLikeNames=parts.length>0&&parts.every(p=>/^[A-Z]/.test(p)||p.length<=15);
@@ -1110,21 +973,7 @@ export function filterForView(snap){
     // The merged entry preserves the first-seen relType/relPhase/milestone/
     // etc. from the earliest entry so user-visible labels stay stable.
     if (Array.isArray(out.relationships) && out.relationships.length > 1) {
-        const aliasMap = new Map();
-        if (Array.isArray(out.characters)) {
-            for (const ch of out.characters) {
-                const canon = (ch?.name || '').trim();
-                const canonLow = canon.toLowerCase();
-                if (!canonLow) continue;
-                aliasMap.set(canonLow, canon);
-                if (Array.isArray(ch.aliases)) {
-                    for (const a of ch.aliases) {
-                        const al = (a || '').toString().toLowerCase().trim();
-                        if (al && al !== canonLow && !aliasMap.has(al)) aliasMap.set(al, canon);
-                    }
-                }
-            }
-        }
+        const aliasMap = buildCharacterNameMap(out.characters);
         const _resolveName = (raw) => {
             if (!raw || typeof raw !== 'string') return raw;
             const low = raw.toLowerCase().trim();
@@ -1134,7 +983,7 @@ export function filterForView(snap){
             if (mm) {
                 const baseLow = mm[1].trim().toLowerCase();
                 if (baseLow && aliasMap.has(baseLow)) return aliasMap.get(baseLow);
-                const parts = mm[2].split(/[\/,;]/).map(s => s.trim()).filter(Boolean);
+                const parts = mm[2].split(/[/,;]/).map(s => s.trim()).filter(Boolean);
                 for (const p of parts) {
                     const pl = p.toLowerCase();
                     if (aliasMap.has(pl)) return aliasMap.get(pl);
@@ -1186,38 +1035,16 @@ export function filterForView(snap){
     // into this pass. If a legacy snapshot had {{user}} in charactersPresent,
     // this ensures the user is excluded from presentSet here too.
     const cp=out.charactersPresent;
-    // v6.8.15: group chat awareness — in a group chat, every group-member
-    // character should survive even if the model forgot to list them in
-    // charactersPresent this turn. Union the member roster into the
-    // present-set so filtering never drops them silently.
-    const _gmNames=getGroupMemberNames();
-    const _isGroupChat=_gmNames.length>1;
-    // v6.8.45: when charactersPresent is empty, an empty roster IS the
-    // correct answer for a solo scene — not "skip filter and show
-    // everyone." The old behavior left every tracked character visible
-    // during solitude beats (the "user alone in the train yard" bug).
-    // Group chats still get the member-roster union below so the chat
-    // participants survive even when the model forgot to list them.
+    // charactersPresent is the scene-level source of truth, including in
+    // group chats. The static group roster cannot tell whether a member left
+    // the room, so unioning it here would resurrect absent characters.
     if(!Array.isArray(cp)||!cp.length){
-        if(!_isGroupChat){
-            // Solo beat or genuinely no-one-present scene.
-            out.characters=[];
-            out.relationships=[];
-            out._spViewFiltered=true;
-            return out;
-        }
-        // Group chat fall-through: treat the chat member roster as the
-        // present set so chat participants remain visible.
+        out.characters=[];
+        out.relationships=[];
+        out._spViewFiltered=true;
+        return out;
     }
-    // v6.8.45: cp may be an empty / non-array value here in the group-chat
-    // fall-through branch above, so normalize to [] before mapping.
-    const presentSet=new Set((Array.isArray(cp)?cp:[]).map(n=>(n||'').toLowerCase().trim()).filter(Boolean));
-    if(_isGroupChat){
-        for(const gm of _gmNames){
-            const gmLow=(gm||'').toLowerCase().trim();
-            if(gmLow)presentSet.add(gmLow);
-        }
-    }
+    const presentSet=new Set(cp.map(n=>(n||'').toLowerCase().trim()).filter(Boolean));
     // Filter both arrays to only present names. Use the already-stripped
     // out.characters/out.relationships (not the raw snap arrays) so any
     // user entry that slipped in from legacy storage is filtered twice —

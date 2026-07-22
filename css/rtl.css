@@ -1,0 +1,36 @@
+/* ScenePulse — scoped right-to-left support for Arabic and Hebrew. */
+.sp-locale-rtl #sp-panel,
+.sp-locale-rtl #scenepulse-settings,
+.sp-locale-rtl #sp-thought-panel,
+.sp-locale-rtl .sp-dialog-overlay,
+.sp-locale-rtl .sp-overlay {
+    direction: rtl;
+    text-align: right;
+}
+
+.sp-locale-rtl #sp-panel input,
+.sp-locale-rtl #sp-panel textarea,
+.sp-locale-rtl #scenepulse-settings input,
+.sp-locale-rtl #scenepulse-settings textarea,
+.sp-locale-rtl .sp-dialog-overlay input,
+.sp-locale-rtl .sp-dialog-overlay textarea {
+    text-align: right;
+}
+
+/* Keep code, JSON, hashes, numbers, and mixed technical identifiers readable. */
+.sp-locale-rtl code,
+.sp-locale-rtl pre,
+.sp-locale-rtl .sp-json,
+.sp-locale-rtl .sp-mono,
+.sp-locale-rtl [data-sp-ltr] {
+    direction: ltr;
+    text-align: left;
+    unicode-bidi: isolate;
+}
+
+/* Flexbox order already follows DOM order; mirror directional affordances only. */
+.sp-locale-rtl .sp-section-chevron,
+.sp-locale-rtl .sp-back-btn,
+.sp-locale-rtl .sp-next-arrow {
+    transform: scaleX(-1);
+}

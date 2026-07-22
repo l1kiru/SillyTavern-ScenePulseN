@@ -11,17 +11,19 @@ import {
     generating, genNonce, genMeta,
     inlineGenStartMs,
     inlineExtractionDone,
+    inlineGenerationContext,
     setGenerating, setGenNonce, setCancelRequested,
     setInlineGenStartMs,
-    setPendingInlineIdx, setInlineExtractionDone,
+    setPendingInlineIdx, setInlineExtractionDone, setInlineGenerationContext,
+    set_cachedNormData,
     setPrevLocation, setPrevTimePeriod,
     resetSessionTokens,
     _inlineWaitTimerId, set_inlineWaitTimerId
 } from './src/state.js';
 import {
     getSettings, anyPanelsActive,
-    getLatestSnapshot,
-    ensureChatSaved, invalidateSettingsCache
+    getLatestSnapshot, getActiveSwipeId, getTrustedSnapshotFor,
+    ensureChatSaved, invalidateSettingsCache, forceFullStateRefresh
 } from './src/settings.js';
 import { normalizeTracker, clearNormCache } from './src/normalize.js';
 import { resetColorMap } from './src/color.js';
@@ -29,7 +31,7 @@ import { initI18n } from './src/i18n.js';
 
 // ── Generation ──
 import { extractInlineTracker } from './src/generation/extraction.js';
-import { stopStreamingHider } from './src/generation/streaming.js';
+import { noteStreamingText, stopStreamingHider } from './src/generation/streaming.js';
 import { cancelGeneration } from './src/generation/engine.js';
 import { scenePulseInterceptor, noteStreamProgress, clearStallWatchdog } from './src/generation/interceptor.js';
 import { processExtraction } from './src/generation/pipeline.js';
@@ -37,11 +39,14 @@ import { processExtraction } from './src/generation/pipeline.js';
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
 import { createPanel } from './src/ui/panel.js';
+import { renderEmptyState } from './src/ui/empty-state.js';
 import { updatePanel } from './src/ui/update-panel.js';
 import { clearWeatherOverlay } from './src/ui/weather.js';
 import { clearTimeTint } from './src/ui/time-tint.js';
-import { onCharMsg, renderExisting, spOnMessageDeleted } from './src/ui/message.js';
+import { onCharMsg, renderExisting, spOnMessageDeleted, spOnSwipeDeleted } from './src/ui/message.js';
 import { cleanupGenUI, clearThoughtLoading } from './src/ui/loading.js';
+import { updateThoughts } from './src/ui/thoughts.js';
+import { invalidateCharacterHistory } from './src/ui/character-history.js';
 
 // ── Settings UI ──
 import { createSettings } from './src/settings-ui/create-settings.js';
@@ -53,17 +58,19 @@ import { checkForUpdate, showUpdateBadge, showUpdateBanner } from './src/update-
 import { registerSlashCommands } from './src/slash-commands.js';
 import { registerMacros } from './src/macros.js';
 
-// ── Function Tool Calling ──
-import { registerFunctionTool } from './src/generation/function-tool.js';
-
 // ── Register interceptor on globalThis (required by manifest.json "generate_interceptor") ──
 globalThis.scenePulseInterceptor = scenePulseInterceptor;
 
 // ── Wire SillyTavern Events ──
 const { eventSource, event_types } = SillyTavern.getContext();
-
-// Create panel immediately — DOM is ready when ST loads extensions
-try { createPanel(); log('Panel created at load'); } catch (e) { warn('Early panel:', e); }
+const _knownSwipeIds=new Map();
+function _rememberSwipeIds(){
+    _knownSwipeIds.clear();
+    const chat=SillyTavern.getContext().chat||[];
+    for(let i=0;i<chat.length;i++)if(!chat[i]?.is_user)_knownSwipeIds.set(i,Math.max(0,Number(chat[i]?.swipe_id??0)||0));
+}
+_rememberSwipeIds();
+let _pendingActiveSwipeDeletion=null;
 
 eventSource.on(event_types.APP_READY, async () => { try {
     log('APP_READY: start');
@@ -81,7 +88,6 @@ eventSource.on(event_types.APP_READY, async () => { try {
     // Register slash commands & macros
     try { registerSlashCommands(); log('APP_READY: slash commands ok'); } catch (e) { warn('Slash commands:', e); }
     try { registerMacros(); log('APP_READY: macros ok'); } catch (e) { warn('Macros:', e); }
-    try { registerFunctionTool(); log('APP_READY: function tool ok'); } catch (e) { warn('Function tool:', e); }
     // Delayed retry: ST may populate profile dropdowns after our init
     setTimeout(() => { try { loadUI(); log('APP_READY: delayed profile refresh'); } catch (e) {} }, 2000);
     renderExisting(); log('APP_READY: render ok');
@@ -125,23 +131,6 @@ eventSource.on(event_types.APP_READY, async () => { try {
             import('./src/themes.js').then(m => m.applyTheme(_ts.theme)).catch(() => {});
         }
     } catch {}
-    // ST version compatibility check
-    try {
-        const _ctx = SillyTavern.getContext();
-        const _stVer = _ctx.version || _ctx.getVersion?.() || '';
-        if (_stVer) {
-            log('SillyTavern version:', _stVer);
-            // Known minimum: 1.12.0 required, tested up to 1.16.x
-            const _verMatch = String(_stVer).match(/(\d+)\.(\d+)/);
-            if (_verMatch) {
-                const _major = Number(_verMatch[1]);
-                const _minor = Number(_verMatch[2]);
-                if (_major < 1 || (_major === 1 && _minor < 12)) {
-                    toastr.warning('ScenePulse requires SillyTavern 1.12.0 or newer. Some features may not work.', 'ScenePulse', { timeOut: 10000 });
-                }
-            }
-        }
-    } catch {}
     // Register regex script to hide tracker JSON from DOM display.
     // markdownOnly:true = only runs during markdown rendering (display), NOT on raw msg.mes.
     // This is the same approach used by RPG Companion and Dooms Enhancement Suite.
@@ -181,7 +170,11 @@ eventSource.on(event_types.APP_READY, async () => { try {
     }, 3000);
 } catch (e) { err('APP_READY:', e); } });
 
-eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, idx => onCharMsg(idx));
+eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, idx => {
+    const id=Number(idx);const message=SillyTavern.getContext().chat?.[id];
+    if(message)_knownSwipeIds.set(id,Math.max(0,Number(message.swipe_id??0)||0));
+    onCharMsg(idx);
+});
 
 // v6.27.16: stream-stall detector. Each token received refreshes the
 // stall watchdog (see src/generation/interceptor.js). When the stream
@@ -189,8 +182,11 @@ eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, idx => onCharMsg(idx));
 // watchdog force-resets state — much faster than the v6.27.14 blanket
 // 180s timeout. Only fires for inline/together-mode generations
 // because the watchdog is keyed on inlineGenStartMs.
-eventSource.on(event_types.STREAM_TOKEN_RECEIVED, () => {
+eventSource.on(event_types.STREAM_TOKEN_RECEIVED, text => {
     try { noteStreamProgress(); } catch {}
+    // ST emits cumulative stream text before painting it. Lock the message at
+    // its last safe height as soon as the tracker marker begins.
+    try { noteStreamingText(text); } catch {}
 });
 
 // CRITICAL: Save chat the INSTANT generation ends, BEFORE other extensions
@@ -213,6 +209,12 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             if (!chat[i].is_user) { targetIdx = i; break; }
         }
         if (targetIdx >= 0) {
+            const _inlineCtx=inlineGenerationContext;
+            if(_inlineCtx&&(_inlineCtx.mesIdx!==targetIdx||getActiveSwipeId(targetIdx)!==_inlineCtx.swipeId)){
+                warn('GENERATION_ENDED: target swipe changed; discarding inline tracker for',targetIdx);
+                setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
+                return;
+            }
             log('GENERATION_ENDED: primary extraction attempt for message', targetIdx);
             const fullMsgLen = (chat[targetIdx]?.mes || '').length;
             let extracted = extractInlineTracker(targetIdx);
@@ -227,8 +229,14 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 genMeta.elapsed = _elapsed;
                 await processExtraction(targetIdx, extracted, 'auto:together', {
                     promptTokens: 0, completionTokens: _compTokens, elapsed: _elapsed,
-                    stopHider: true, unlockGen: true
+                    stopHider: true, unlockGen: true,
+                    swipeId:_inlineCtx?.swipeId,expectedSwipeId:_inlineCtx?.swipeId,
+                    baseSnapshot:_inlineCtx?.baseSnapshot??null,
+                    expectedChatKey:_inlineCtx?.chatKey,
+                    expectedParentFingerprint:_inlineCtx?.parentFingerprint,
+                    owner:_inlineCtx?.owner
                 });
+                setInlineGenerationContext(null);
                 log('GENERATION_ENDED: pipeline complete');
                 return;
             } else {
@@ -279,13 +287,13 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
         // Defensive: clear inline generation ownership state so a subsequent
         // message from another extension (e.g. MemoryBooks) does not get
         // misattributed to our cancelled generation.
-        setInlineGenStartMs(0); setInlineExtractionDone(false); setPendingInlineIdx(-1);
+        setInlineGenStartMs(0); setInlineExtractionDone(false); setPendingInlineIdx(-1); setInlineGenerationContext(null);
         log('CANCEL (ST stop): nonce', oldNonce, '→', genNonce);
         cleanupGenUI();
         const snap = getLatestSnapshot();
         const body = document.getElementById('sp-panel-body');
         if (snap) { const norm = normalizeTracker(snap); updatePanel(norm); }
-        else if (body) body.innerHTML = '<div class="sp-empty-state"><div class="sp-empty-icon">📡</div><div class="sp-empty-title">No scene data yet</div><div class="sp-empty-sub">Generation was stopped. Click <strong>⟳</strong> to try again.</div></div>';
+        else if (body) renderEmptyState();
     }
 });
 
@@ -297,9 +305,14 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
     clearWeatherOverlay();
     clearTimeTint();
     clearNormCache();
+    invalidateCharacterHistory();
+    set_cachedNormData(null);
     resetColorMap();
     invalidateSettingsCache();
     resetSessionTokens();
+    if(_pendingActiveSwipeDeletion?.timer)clearTimeout(_pendingActiveSwipeDeletion.timer);
+    _pendingActiveSwipeDeletion=null;
+    _rememberSwipeIds();
     setPrevLocation(''); setPrevTimePeriod('');
     // v6.9.13: close the Panel Manager on chat switch so it doesn't
     // show stale toggle states from the previous chat's per-chat
@@ -324,13 +337,50 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
 // Message deleted — remove associated snapshot and refresh timeline
 if (event_types.MESSAGE_DELETED) {
     eventSource.on(event_types.MESSAGE_DELETED, (idx) => {
-        log('MESSAGE_DELETED event, idx=', idx);
-        spOnMessageDeleted(Number(idx));
+        log('MESSAGE_DELETED event, new chat length=', idx);
+        _rememberSwipeIds();
+        forceFullStateRefresh();
+        void spOnMessageDeleted();
+    });
+}
+if(event_types.MESSAGE_SWIPE_DELETED){
+    eventSource.on(event_types.MESSAGE_SWIPE_DELETED,payload=>{
+        const id=Number(payload?.messageId);const deleted=Number(payload?.swipeId);
+        const oldActive=_knownSwipeIds.get(id);
+        const activeChanged=oldActive==null||oldActive===deleted;
+        _knownSwipeIds.set(id,Math.max(0,Number(payload?.newSwipeId??0)||0));
+        if(activeChanged){
+            if(_pendingActiveSwipeDeletion?.timer)clearTimeout(_pendingActiveSwipeDeletion.timer);
+            const pending={payload,timer:null};
+            pending.timer=setTimeout(()=>{
+                if(_pendingActiveSwipeDeletion!==pending)return;
+                _pendingActiveSwipeDeletion=null;void spOnSwipeDeleted(payload,true);
+            },2000);
+            _pendingActiveSwipeDeletion=pending;
+        }else void spOnSwipeDeleted(payload,false);
     });
 }
 // Also catch swipe/edit which may renumber messages
 if (event_types.MESSAGE_UPDATED) {
-    eventSource.on(event_types.MESSAGE_UPDATED, () => { setTimeout(renderExisting, 300); });
+    eventSource.on(event_types.MESSAGE_UPDATED, idx => {
+        const id=Number(idx);
+        const snap=Number.isFinite(id)?getTrustedSnapshotFor(id):null;
+        try{updateThoughts(snap?normalizeTracker(snap):null)}catch{}
+        setTimeout(renderExisting, 300);
+    });
+}
+if (event_types.MESSAGE_SWIPED) {
+    eventSource.on(event_types.MESSAGE_SWIPED, idx => {
+        const id=Number(idx);const message=SillyTavern.getContext().chat?.[id];
+        if(message)_knownSwipeIds.set(id,Math.max(0,Number(message.swipe_id??0)||0));
+        if(_pendingActiveSwipeDeletion&&Number(_pendingActiveSwipeDeletion.payload?.messageId)===id){
+            const pending=_pendingActiveSwipeDeletion;_pendingActiveSwipeDeletion=null;clearTimeout(pending.timer);
+            void spOnSwipeDeleted(pending.payload,true);return;
+        }
+        const snap=Number.isFinite(id)?getTrustedSnapshotFor(id):null;
+        try{updateThoughts(snap?normalizeTracker(snap):null)}catch{}
+        setTimeout(()=>renderExisting(id),0);
+    });
 }
 
 // ── Keyboard shortcuts ──

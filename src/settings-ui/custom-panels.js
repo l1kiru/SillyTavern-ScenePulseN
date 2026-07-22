@@ -1,26 +1,42 @@
 // ScenePulse — Custom Panels Module
 // Extracted from index.js lines 4969-5130
 
-import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels } from '../settings.js';
-import { getActiveProfile } from '../profiles.js';
+import { ensureChatPanels, saveChatPanels } from '../settings.js';
+import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { esc, str, clamp, spConfirm } from '../utils.js';
 import { _cachedNormData } from '../state.js';
 import { buildDynamicSchema, buildDynamicPrompt } from '../schema.js';
 import { t } from '../i18n.js';
+
+function _findSection(panelBody,key){
+    if(!panelBody)return null;
+    if(globalThis.CSS?.escape){
+        return panelBody.querySelector(`.sp-section[data-key="${globalThis.CSS.escape(String(key))}"]`);
+    }
+    return Array.from(panelBody.querySelectorAll('.sp-section')).find(el=>el.dataset?.key===String(key))||null;
+}
+
+function _appendWarning(body,className,color,message){
+    const warn=document.createElement('div');warn.className=className;
+    warn.innerHTML=`<svg viewBox="0 0 16 16" width="11" height="11" fill="none" style="flex-shrink:0"><path d="M8 1L1 14h14L8 1z" stroke="${color}" stroke-width="1.2" fill="none"/><line x1="8" y1="6" x2="8" y2="9.5" stroke="${color}" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.5" r="0.8" fill="${color}"/></svg><span></span>`;
+    warn.querySelector('span').textContent=String(message);
+    body.appendChild(warn);
+}
 
 // v6.9.12: refreshCustomSection mirrors the upgraded rendering from
 // update-panel.js so live-refresh during panel editing shows the same
 // visual treatment (threshold meters, enum pills, list chips, etc.)
 export function refreshCustomSection(cp,panelBody){
     if(!panelBody||!cp?.name)return;
-    const cpKey='custom_'+cp.name.replace(/\s+/g,'_').toLowerCase();
-    const existing=panelBody.querySelector(`.sp-section[data-key="${cpKey}"]`);
+    const cpKey=customPanelSectionKey(cp.name);
+    const existing=_findSection(panelBody,cpKey);
     if(!existing)return;
     const content=existing.querySelector('.sp-section-content');
     if(!content)return;
     const d=_cachedNormData||{};
     content.innerHTML='';
-    for(const f of(cp.fields||[])){
+    for(const f of(Array.isArray(cp.fields)?cp.fields:[])){
+        if(!f||!isValidCustomFieldKey(f.key))continue;
         if(f.enabled===false)continue; // v6.9.13: per-field toggle
         const r=document.createElement('div');r.className='sp-row';
         r.innerHTML=`<div class="sp-row-label">${esc(f.label||f.key)}</div>`;
@@ -35,7 +51,7 @@ export function refreshCustomSection(cp,panelBody){
         } else if(f.type==='enum'){
             const val=str(d[f.key])||'';
             const opts=Array.isArray(f.options)?f.options:[];
-            const idx=opts.findIndex(o=>o.toLowerCase()===val.toLowerCase());
+            const idx=opts.findIndex(o=>String(o).toLowerCase()===val.toLowerCase());
             const severity=opts.length>1&&idx>=0?Math.min(3,Math.floor((idx/(opts.length-1))*4)):0;
             const chip=document.createElement('span');chip.className='sp-cp-enum-chip';chip.dataset.severity=severity;
             chip.textContent=val||'\u2014';
@@ -60,32 +76,33 @@ export function refreshCustomSection(cp,panelBody){
 
 export function renderCustomPanelsMgr(s,container,panelBody){
     // v6.9.14: read from per-chat panels (auto-cloned from global on first access)
-    const panels=ensureChatPanels();
+    const panelsRaw=ensureChatPanels();
+    const panels=Array.isArray(panelsRaw)?panelsRaw:[];
 
     const _openState={};container.querySelectorAll('.sp-custom-panel-card').forEach((c,i)=>{_openState[i]=c.classList.contains('sp-cp-open')});
     container.innerHTML='';
     // Info button + popup
     const infoRow=document.createElement('div');infoRow.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px';
-    const infoBtn=document.createElement('button');infoBtn.className='sp-cp-info-btn';infoBtn.textContent='?';infoBtn.title='How custom panels work';
+    const infoBtn=document.createElement('button');infoBtn.className='sp-cp-info-btn';infoBtn.textContent='?';infoBtn.title=t('How custom panels work');
     const infoPopup=document.createElement('div');infoPopup.className='sp-cp-info-popup';
-    infoPopup.innerHTML=`<b>Custom Panels</b> let you track anything the AI should monitor.<br><br><b>Keys</b> must be <code>lowercase_snake_case</code> (auto-enforced). Examples: <code>health</code>, <code>mana_pool</code>, <code>street_rep</code><br><br><b>LLM Hint</b> tells the AI what to output. Be specific:<br>\u2022 <code>{{user}}'s current health 0-100, reduced by damage</code><br>\u2022 <code>Mana remaining after spellcasting, starts at 100</code><br>\u2022 <code>Reputation with the merchant guild</code><br><br><b>Types:</b> <code>text</code> = free string, <code>number</code> = integer, <code>meter</code> = 0-100 bar, <code>list</code> = array, <code>enum</code> = pick from options<br><br><b>Drag</b> the \u2807 handle to reorder fields within or between panels.`;
+    infoPopup.innerHTML=t('<b>Custom Panels</b> track any state the AI should monitor. Keys use <code>lowercase_snake_case</code>. The LLM hint describes the expected value. Fields support text, number, meter, list, and enum types. Drag the handle to reorder fields.');
     infoBtn.addEventListener('click',()=>infoPopup.classList.toggle('sp-visible'));
     infoRow.appendChild(infoBtn);
-    const infoLabel=document.createElement('span');infoLabel.style.cssText='font-size:9px;color:var(--sp-text-dim);opacity:0.6';infoLabel.textContent='How custom panels work';
+    const infoLabel=document.createElement('span');infoLabel.style.cssText='font-size:9px;color:var(--sp-text-dim);opacity:0.6';infoLabel.textContent=t('How custom panels work');
     infoRow.appendChild(infoLabel);
     container.appendChild(infoRow);container.appendChild(infoPopup);
     // v6.9.14: scope indicator — always visible when panels exist
-    if (panels.length || true) {
-        const scopeRow = document.createElement('div');
-        scopeRow.className = 'sp-cp-scope-row';
-        scopeRow.innerHTML = `<span class="sp-cp-scope-icon">\u26C1</span><span class="sp-cp-scope-text">${t('Panels for this chat. Changes here only affect this chat.')}</span>`;
-        container.appendChild(scopeRow);
-    }
+    const scopeRow = document.createElement('div');
+    scopeRow.className = 'sp-cp-scope-row';
+    scopeRow.innerHTML = `<span class="sp-cp-scope-icon">\u26C1</span><span class="sp-cp-scope-text">${t('Panels for this chat. Changes here only affect this chat.')}</span>`;
+    container.appendChild(scopeRow);
     if(!panels.length){
         container.appendChild(Object.assign(document.createElement('div'),{className:'sp-cp-empty',textContent:t('No custom panels yet')+'.'}));
         return;
     }
     panels.forEach((cp,cpIdx)=>{
+        if(!cp||typeof cp!=='object')return;
+        if(!Array.isArray(cp.fields))cp.fields=[];
         const card=document.createElement('div');card.className='sp-custom-panel-card';if(_openState[cpIdx]!==undefined?_openState[cpIdx]:true)card.classList.add('sp-cp-open');
         const liveRefresh=()=>{refreshCustomSection(cp,panelBody);
             // Auto-refresh schema/prompt when custom panel changes
@@ -108,19 +125,19 @@ export function renderCustomPanelsMgr(s,container,panelBody){
             cp.enabled = toggle.checked;
             saveChatPanels();
             liveRefresh();
-            const cpKey = 'custom_' + (cp.name || 'untitled').replace(/\s+/g, '_').toLowerCase();
-            const sec = panelBody?.querySelector(`.sp-section[data-key="${cpKey}"]`);
+            const cpKey = customPanelSectionKey(cp.name);
+            const sec = _findSection(panelBody,cpKey);
             if (sec) sec.classList.toggle('sp-panel-hidden', !toggle.checked);
             card.classList.toggle('sp-cp-disabled', !toggle.checked);
         });
         const nameInput=document.createElement('input');nameInput.className='sp-cp-name';nameInput.type='text';nameInput.value=cp.name||'';nameInput.placeholder=t('Panel name');nameInput.spellcheck=false;
         nameInput.addEventListener('click',e=>e.stopPropagation());
         nameInput.addEventListener('change',()=>{
-            const oldKey='custom_'+cp.name.replace(/\s+/g,'_').toLowerCase();
+            const oldKey=customPanelSectionKey(cp.name);
             cp.name=nameInput.value.trim()||'Untitled';saveChatPanels();
-            const sec=panelBody?.querySelector(`.sp-section[data-key="${oldKey}"]`);
+            const sec=_findSection(panelBody,oldKey);
             if(sec){
-                const newKey='custom_'+cp.name.replace(/\s+/g,'_').toLowerCase();
+                const newKey=customPanelSectionKey(cp.name);
                 sec.dataset.key=newKey;
                 const titleEl=sec.querySelector('.sp-section-title');if(titleEl)titleEl.textContent=cp.name;
             }
@@ -133,18 +150,18 @@ export function renderCustomPanelsMgr(s,container,panelBody){
             clone.name=(cp.name||'Untitled')+' (copy)';
             panels.splice(cpIdx+1,0,clone);
             saveChatPanels();renderCustomPanelsMgr(s,container,panelBody);liveRefresh();
-            toastr.info('Panel duplicated');
+            toastr.info(t('Panel duplicated'));
         });
         const delBtn=document.createElement('button');delBtn.className='sp-btn sp-btn-sm sp-cp-del';delBtn.textContent='\u2715';delBtn.title=t('Delete panel');
         delBtn.addEventListener('click',async(e)=>{
             e.stopPropagation();
-            if(!await spConfirm('Delete Panel',`Remove "${cp.name||'Untitled'}" and all its fields? This cannot be undone.`))return;
+            if(!await spConfirm(t('Delete Panel'),t('Remove "{panel}" and all its fields? This cannot be undone.',{panel:cp.name||t('Untitled')})))return;
             panels.splice(cpIdx,1);saveChatPanels();
             renderCustomPanelsMgr(s,container,panelBody);
-            const cpKey='custom_'+cp.name.replace(/\s+/g,'_').toLowerCase();
-            const sec=panelBody?.querySelector(`.sp-section[data-key="${cpKey}"]`);
+            const cpKey=customPanelSectionKey(cp.name);
+            const sec=_findSection(panelBody,cpKey);
             if(sec){sec.classList.add('sp-panel-hidden');setTimeout(()=>sec.remove(),350)}
-            toastr.info('Panel deleted');
+            toastr.info(t('Panel deleted'));
         });
         header.appendChild(chevron);header.appendChild(toggle);header.appendChild(nameInput);header.appendChild(dupBtn);header.appendChild(delBtn);
         header.addEventListener('click',(e)=>{if(e.target===nameInput||e.target===toggle)return;card.classList.toggle('sp-cp-open')});
@@ -190,25 +207,31 @@ export function renderCustomPanelsMgr(s,container,panelBody){
             fToggle.addEventListener('change',()=>{f.enabled=fToggle.checked;saveChatPanels();liveRefresh();
                 row.classList.toggle('sp-cp-field-disabled',!fToggle.checked)});
             if(f.enabled===false)row.classList.add('sp-cp-field-disabled');
-            const keyIn=document.createElement('input');keyIn.className='sp-cp-field-key';keyIn.placeholder='key';keyIn.value=f.key||'';keyIn.spellcheck=false;keyIn.title='JSON key \u2014 lowercase_snake_case only.\nExamples: health, mana_pool, reputation';
-            keyIn.addEventListener('change',()=>{f.key=keyIn.value.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'').replace(/^[0-9]/,'_$&').replace(/_+/g,'_');keyIn.value=f.key;saveChatPanels();liveRefresh()});
-            const labelIn=document.createElement('input');labelIn.className='sp-cp-field-label';labelIn.placeholder='Label';labelIn.value=f.label||'';
-            labelIn.title='Display name shown in the panel.\nExamples: Health, Mana Pool, Street Rep';
+            const keyIn=document.createElement('input');keyIn.className='sp-cp-field-key';keyIn.placeholder=t('key');keyIn.value=f.key||'';keyIn.spellcheck=false;keyIn.maxLength=64;keyIn.title=t('JSON key — lowercase_snake_case only. Examples: health, mana_pool, reputation');
+            keyIn.addEventListener('change',()=>{
+                const normalized=keyIn.value.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'').replace(/^[0-9]/,'_$&').replace(/_+/g,'_');
+                if(normalized&&!isValidCustomFieldKey(normalized)){
+                    f.key='';keyIn.value='';toastr.error(t('This field key is reserved or invalid.'));
+                }else{f.key=normalized;keyIn.value=f.key}
+                saveChatPanels();liveRefresh();
+            });
+            const labelIn=document.createElement('input');labelIn.className='sp-cp-field-label';labelIn.placeholder=t('Label');labelIn.value=f.label||'';
+            labelIn.title=t('Display name shown in the panel. Examples: Health, Mana Pool, Street Rep');
             labelIn.addEventListener('change',()=>{f.label=labelIn.value;saveChatPanels();liveRefresh()});
             const typeSel=document.createElement('select');typeSel.className='sp-cp-field-type';
-            typeSel.title='Field type:\n\u2022 text \u2014 free-form string\n\u2022 number \u2014 integer\n\u2022 meter \u2014 0-100 bar\n\u2022 list \u2014 array of strings\n\u2022 enum \u2014 pick from options';
+            typeSel.title=t('Field type: text, number, meter (0–100), list, or enum');
             for(const ft of['text','number','meter','list','enum']){const o=document.createElement('option');o.value=ft;o.textContent=ft;o.selected=f.type===ft;typeSel.appendChild(o)}
             typeSel.addEventListener('change',()=>{f.type=typeSel.value;saveChatPanels();renderCustomPanelsMgr(s,container,panelBody);liveRefresh()});
-            const descIn=document.createElement('input');descIn.className='sp-cp-field-desc';descIn.placeholder='Describe for AI...';descIn.value=f.desc||'';
-            descIn.title='Instructions for the LLM.\n\u2022 "{{user}}\'s health 0-100, reduced by damage"\n\u2022 "Mana remaining after spellcasting"\n\u2022 "Items the character carries"';
+            const descIn=document.createElement('input');descIn.className='sp-cp-field-desc';descIn.placeholder=t('Describe for AI...');descIn.value=f.desc||'';
+            descIn.title=t('Instructions for the LLM describing exactly what value to return');
             descIn.addEventListener('change',()=>{f.desc=descIn.value;saveChatPanels()});
             const rmBtn=document.createElement('button');rmBtn.className='sp-btn sp-btn-sm sp-cp-field-rm';rmBtn.textContent='\u2212';rmBtn.title=t('Remove this field');
             rmBtn.addEventListener('click',()=>{cp.fields.splice(fIdx,1);saveChatPanels();renderCustomPanelsMgr(s,container,panelBody);liveRefresh()});
             row.appendChild(handle);row.appendChild(fToggle);row.appendChild(keyIn);row.appendChild(labelIn);row.appendChild(typeSel);row.appendChild(descIn);row.appendChild(rmBtn);
             if(f.type==='enum'){
                 const optRow=document.createElement('div');optRow.className='sp-cp-field-opt-row';
-                const optIn=document.createElement('input');optIn.placeholder='Enum options (comma-separated)';optIn.value=(f.options||[]).join(', ');optIn.spellcheck=false;
-                optIn.title='Comma-separated list of allowed values.\nExamples: low, medium, high, critical';
+                const optIn=document.createElement('input');optIn.placeholder=t('Enum options (comma-separated)');optIn.value=(Array.isArray(f.options)?f.options:[]).join(', ');optIn.spellcheck=false;
+                optIn.title=t('Comma-separated list of allowed values. Example: low, medium, high, critical');
                 optIn.addEventListener('change',()=>{f.options=optIn.value.split(',').map(s=>s.trim()).filter(Boolean);saveChatPanels()});
                 optRow.appendChild(optIn);
                 const wrapper=document.createElement('div');wrapper.appendChild(row);wrapper.appendChild(optRow);
@@ -219,26 +242,22 @@ export function renderCustomPanelsMgr(s,container,panelBody){
         // Validation warning for incomplete fields
         const hasIncomplete=(cp.fields||[]).some(f=>!f.key||!f.desc);
         if(hasIncomplete&&cp.fields?.length){
-            const warn=document.createElement('div');warn.className='sp-cp-warn';
-            warn.innerHTML='<svg viewBox="0 0 16 16" width="11" height="11" fill="none" style="flex-shrink:0"><path d="M8 1L1 14h14L8 1z" stroke="#f59e0b" stroke-width="1.2" fill="none"/><line x1="8" y1="6" x2="8" y2="9.5" stroke="#f59e0b" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.5" r="0.8" fill="#f59e0b"/></svg><span>Fill in keys and LLM hints so the AI knows what to track.</span>';
-            body.appendChild(warn);
+            _appendWarning(body,'sp-cp-warn','#f59e0b',t('Fill in keys and LLM hints so the AI knows what to track.'));
         }
         // v6.9.11: key collision detection — warn if any field key
         // in this panel duplicates a key in another panel
         const _allKeys=new Map();
         for(let pi=0;pi<panels.length;pi++){
             for(const pf of(panels[pi].fields||[])){
-                const k=(pf.key||'').toLowerCase().trim();
+                const k=String(pf?.key||'').toLowerCase().trim();
                 if(!k)continue;
                 if(!_allKeys.has(k))_allKeys.set(k,[]);
                 _allKeys.get(k).push(panels[pi].name||'Untitled');
             }
         }
-        const _dupeKeys=(cp.fields||[]).filter(f=>{const k=(f.key||'').toLowerCase().trim();return k&&(_allKeys.get(k)||[]).length>1}).map(f=>f.key);
+        const _dupeKeys=(cp.fields||[]).filter(f=>{const k=String(f?.key||'').toLowerCase().trim();return k&&(_allKeys.get(k)||[]).length>1}).map(f=>String(f?.key||''));
         if(_dupeKeys.length){
-            const warn=document.createElement('div');warn.className='sp-cp-warn sp-cp-warn-collision';
-            warn.innerHTML=`<svg viewBox="0 0 16 16" width="11" height="11" fill="none" style="flex-shrink:0"><path d="M8 1L1 14h14L8 1z" stroke="#ef4444" stroke-width="1.2" fill="none"/><line x1="8" y1="6" x2="8" y2="9.5" stroke="#ef4444" stroke-width="1.4" stroke-linecap="round"/><circle cx="8" cy="11.5" r="0.8" fill="#ef4444"/></svg><span>Key collision: <b>${_dupeKeys.join(', ')}</b> used in multiple panels. Values will overwrite each other.</span>`;
-            body.appendChild(warn);
+            _appendWarning(body,'sp-cp-warn sp-cp-warn-collision','#ef4444',t('Key collision: {keys}. Values in different panels will overwrite each other.',{keys:_dupeKeys.join(', ')}));
         }
         const addFieldBtn=document.createElement('button');addFieldBtn.className='sp-btn sp-btn-sm sp-cp-add-field';addFieldBtn.textContent='+ '+t('Add Field');
         addFieldBtn.addEventListener('click',()=>{

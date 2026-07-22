@@ -32,7 +32,7 @@ import { BUILT_IN_PRESETS } from './built-in.js';
  *  2. Scan every *_model key on chatCompletionSettings for the first
  *     non-empty value (catches sources we don't have a static map for,
  *     e.g. brand-new backends added after this code was written)
- *  3. textGenerationSettings.online_status_model / model
+ *  3. textCompletionSettings.online_status_model / model
  *  4. DOM fallback — the currently-:selected option in any #model_*_select
  *     dropdown (last-resort but reliable when settings haven't been saved
  *     since the user changed the dropdown)
@@ -94,7 +94,7 @@ export function getActiveModelId() {
         }
 
         // 3. textgen settings — local KoboldCpp / textgen webui / ollama etc.
-        const tg = ctx.textGenerationSettings || {};
+        const tg = ctx.textCompletionSettings || {};
         const fromTg = _firstNonEmpty(tg.online_status_model, tg.model);
         if (fromTg) return fromTg;
 

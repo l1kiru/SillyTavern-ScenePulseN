@@ -83,16 +83,3 @@ body.sp-reduce-effects .sp-mt-brand svg,
 body.sp-reduce-effects .sp-setup-icon {
     animation: none !important;
 }
-
-/* Screen reader only class */
-.sp-sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-    border-width: 0;
-}

@@ -14,6 +14,10 @@
 // ─── Stubs ─────────────────────────────────────────────────────────────
 const _stCtx = {
     version: '1.17.0',
+    chatId: 'chat-address-test',
+    characterId: 7,
+    name2: 'Test Character',
+    chat: [{ is_user: false, name: 'Test Character', mes: 'Tracked assistant reply', swipe_id: 1, swipes: ['First reply', 'Tracked assistant reply'] }],
     chatMetadata: { scenepulse: { snapshots: {} } },
     extensionSettings: { scenepulse: {} },
     getRequestHeaders: () => ({ 'Content-Type': 'application/json', 'X-CSRF-Token': 'test-token' }),
@@ -114,6 +118,23 @@ console.log('\n── Scenario 1: capture + ring buffer ──');
     assertEq('entry 1 severity', all[1].severity, 'warning');
     assertEq('entry 2 severity', all[2].severity, 'info');
     assertTrue('entries have timestamps', !!all[0].ts);
+    assertTrue('chat address captured', !!all[0].context.chatKey);
+    assertEq('message index captured', all[0].context.mesIdx, 0);
+    assertEq('swipe captured', all[0].context.swipeId, 1);
+    assertTrue('message fingerprint captured', !!all[0].context.messageFingerprint);
+}
+
+// Identical errors from different messages must remain separate so each row
+// retains the correct chat/message address.
+console.log('\n── Scenario 3b: de-dupe respects message address ──');
+{
+    cl._resetForTests();
+    cl.captureError({ source: 'scenepulse', severity: 'error', message: 'same address-sensitive error' });
+    _stCtx.chat.push({ is_user: false, name: 'Test Character', mes: 'Next reply', swipe_id: 0 });
+    cl.captureError({ source: 'scenepulse', severity: 'error', message: 'same address-sensitive error' });
+    assertEq('separate entries for separate messages', cl.getEntries().length, 2);
+    assertEq('second error keeps second message index', cl.getEntries()[1].context.mesIdx, 1);
+    _stCtx.chat.pop();
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -182,7 +203,7 @@ console.log('\n── Scenario 6: context truncation ──');
     cl.captureError({ source: 'scenepulse', message: 'with ctx', context: longCtx });
     const e = cl.getEntries()[0];
     const keys = Object.keys(e.context);
-    assertEq('context capped at 12 keys', keys.length, 12);
+    assertEq('context capped at 16 keys', keys.length, 16);
     assertTrue('big string truncated', e.context.bigString.length <= 200);
 }
 

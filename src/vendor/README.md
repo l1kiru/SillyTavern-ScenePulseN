@@ -6,13 +6,13 @@ Third-party libraries pinned in source. Used by ScenePulse internals only — ne
 
 | | |
 |---|---|
-| **File** | `jsonrepair.mjs` |
-| **Version** | 3.12.0 |
+| **Files** | `jsonrepair.mjs`, `jsonrepair.bundle.mjs` |
+| **Version** | 3.15.0 |
 | **License** | ISC (see [`jsonrepair.LICENSE`](./jsonrepair.LICENSE)) |
 | **Upstream** | https://github.com/josdejong/jsonrepair |
-| **Source** | https://esm.sh/jsonrepair@3.12.0/es2022/jsonrepair.bundle.mjs |
-| **Vendored** | 2026-04-06 |
-| **Local patches** | None |
+| **Source** | npm package `jsonrepair@3.15.0`, regular ESM build |
+| **Vendored** | 2026-07-21 |
+| **Local wrapper** | Retries duplicate trailing commas and leading-plus numbers after upstream rejects them |
 | **Used by** | [`src/generation/extraction.js`](../generation/extraction.js) — `cleanJson()` repair pass for malformed inline tracker JSON |
 
 ### Why vendored
@@ -22,8 +22,10 @@ ScenePulse is a no-build SillyTavern extension loaded by the browser as a `<scri
 ### Upgrading
 
 ```bash
-curl -L https://esm.sh/jsonrepair@<NEW_VERSION>/es2022/jsonrepair.bundle.mjs > src/vendor/jsonrepair.mjs
-# Update the version + date in this README and in the header comment of jsonrepair.mjs
+npm pack jsonrepair@<NEW_VERSION>
+npx esbuild package/lib/esm/index.js --bundle --format=esm --minify --legal-comments=none --outfile=src/vendor/jsonrepair.bundle.mjs
+# Update the version + date in this README and the bundle header.
+# Keep jsonrepair.mjs as the small ScenePulse fallback wrapper.
 # Re-fetch the LICENSE file if upstream license text has changed:
 curl -L https://raw.githubusercontent.com/josdejong/jsonrepair/main/LICENSE.md > src/vendor/jsonrepair.LICENSE
 # Re-run the validation suite:
@@ -31,7 +33,7 @@ node tests/vendor/jsonrepair.test.mjs
 node tests/vendor/compare.test.mjs
 ```
 
-The `esm.sh` bundle ships as a single-line minified ESM module that exports `jsonrepair` and `JSONRepairError`. ScenePulse only consumes `jsonrepair`.
+`jsonrepair.bundle.mjs` is the unmodified upstream logic bundled into one browser-loadable ESM file. `jsonrepair.mjs` keeps the stable ScenePulse import and adds two narrowly tested fallbacks.
 
 ### Validation
 

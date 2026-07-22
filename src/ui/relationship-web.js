@@ -18,15 +18,12 @@
 import { log, warn } from '../logger.js';
 import { t } from '../i18n.js';
 import { esc, clamp } from '../utils.js';
-import { charColor } from '../color.js';
-import { resolvePortraitUrl, buildPortraitIndex, getPortraitDescriptor, getPortraitPreviewAttrs, hidePortraitPreview } from './portraits.js';
+import { buildPortraitIndex, getPortraitDescriptor, getPortraitPreviewAttrs, hidePortraitPreview } from './portraits.js';
 import {
     isEnabled as isGraphEnabled,
-    getCachedEdges,
     getCachedGraph,
     isCacheStale,
     generateGraph,
-    clearCache,
     EDGE_COLORS,
     EDGE_GLYPHS,
     orgColor,
@@ -107,19 +104,6 @@ function _layoutForceDirected(nodes, edges, userIdx) {
     const area = W * H;
     const k = Math.max(120, Math.sqrt(area / n) * 1.05);
     const k2 = k * k;
-
-    // Adjacency for attractive force lookups
-    const adj = new Map();
-    for (const e of edges) {
-        if (e.from < 0 || e.to < 0) continue;
-        const key = `${Math.min(e.from, e.to)}|${Math.max(e.from, e.to)}`;
-        adj.set(key, true);
-    }
-    function connected(i, j) {
-        if (i === j) return false;
-        const key = `${Math.min(i, j)}|${Math.max(i, j)}`;
-        return adj.has(key);
-    }
 
     // Simulation loop
     // v6.8.41: bumped initial temperature from 0.12 → 0.18 so nodes
@@ -225,15 +209,18 @@ function _buildGraph(entries, npcEdges, userName) {
     // to a monogram-style colored disc in that case.
     const stIdx = buildPortraitIndex();
 
-    // Add {{user}} as node 0 (by convention — the renderer uses userIdx=0)
-    // Try to resolve a portrait for the user via the ST context avatar.
+    // Add {{user}} as node 0 (by convention — the renderer uses userIdx=0).
+    // SillyTavern does not expose user_avatar directly through getContext(),
+    // so read the selected persona element and then fall back to chat/default
+    // persona state that is part of the public context.
     let userPortrait = null;
     try {
-        // The user's persona avatar in SillyTavern is accessed differently
-        // than NPC avatars. Fall back gracefully if unavailable.
         const ctx = SillyTavern.getContext();
-        const userAvatar = ctx.user_avatar || ctx.userAvatar;
-        if (userAvatar) userPortrait = `/User Avatars/${encodeURIComponent(userAvatar)}`;
+        const selectedPersona = document.querySelector('#user_avatar_block .avatar-container.selected')?.dataset?.avatarId;
+        const userAvatar = selectedPersona || ctx.chatMetadata?.persona || ctx.powerUserSettings?.default_persona;
+        if (userAvatar) userPortrait = typeof ctx.getThumbnailUrl === 'function'
+            ? ctx.getThumbnailUrl('persona', userAvatar)
+            : `/User Avatars/${encodeURIComponent(userAvatar)}`;
     } catch {}
     // v6.8.43: unified portrait descriptor. When no image URL is
     // available, the descriptor still carries the monogram letter + bg

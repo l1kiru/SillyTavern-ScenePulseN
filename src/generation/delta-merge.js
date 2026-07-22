@@ -3,6 +3,7 @@
 
 import { log, warn } from '../logger.js';
 import { getSettings, saveSettings } from '../settings.js';
+import { buildCharacterNameMap, characterNameKey } from '../character-identity.js';
 
 // Array fields merged by 'name' key (entity merge)
 const ENTITY_ARRAYS = {
@@ -42,6 +43,56 @@ const REPLACE_ARRAYS = ['plotBranches', 'charactersPresent', 'witnesses'];
 // v6.23.4 `anyPanelsActive` regression chain was caused by exactly this kind
 // of distributed-string coupling).
 const INTERNAL_META_KEYS = new Set(['_spMeta', '_validationWarnings', '_temporal']);
+
+// Full-state responses only contain the current scene. Keep accumulated
+// character/relationship records for the wiki and returning NPCs.
+export function preserveOffSceneEntities(current, previous) {
+    if (!current || !previous) return current;
+    if (Array.isArray(current.characters) && Array.isArray(previous.characters)) {
+        for (const prior of previous.characters) {
+            const priorKey = characterNameKey(prior?.name);
+            if (!priorKey) continue;
+            const exact = current.characters.find(ch => characterNameKey(ch?.name) === priorKey);
+            const reveal = current.characters.find(ch =>
+                Array.isArray(ch?.aliases) && ch.aliases.some(a => characterNameKey(a) === priorKey));
+            const staleName = current.characters.find(ch =>
+                Array.isArray(prior.aliases) && prior.aliases.some(a => characterNameKey(a) === characterNameKey(ch?.name)));
+            const match = exact || reveal || staleName;
+            if (!match) {
+                current.characters.push(structuredClone(prior));
+                log('Full-state: preserved off-scene entity:', prior.name, 'in characters');
+                continue;
+            }
+            const oldCurrentName = match.name;
+            if (staleName && !exact && !reveal) match.name = prior.name;
+            const aliases = [...(Array.isArray(prior.aliases) ? prior.aliases : []),
+                ...(Array.isArray(match.aliases) ? match.aliases : [])];
+            if (staleName && characterNameKey(oldCurrentName) !== characterNameKey(match.name)) aliases.push(oldCurrentName);
+            const seen = new Set();
+            match.aliases = aliases.filter(alias => {
+                const key = characterNameKey(alias);
+                if (!key || key === characterNameKey(match.name) || seen.has(key)) return false;
+                seen.add(key);
+                return true;
+            });
+        }
+    }
+    if (Array.isArray(current.relationships) && Array.isArray(previous.relationships)) {
+        const nameMap = buildCharacterNameMap(current.characters);
+        const resolve = name => nameMap.get(characterNameKey(name)) || name;
+        for (const rel of current.relationships) rel.name = resolve(rel?.name);
+        const currentNames = new Set(current.relationships.map(rel => characterNameKey(rel?.name)));
+        for (const prior of previous.relationships) {
+            const canonical = resolve(prior?.name);
+            const key = characterNameKey(canonical);
+            if (!key || currentNames.has(key)) continue;
+            current.relationships.push({ ...structuredClone(prior), name: canonical });
+            currentNames.add(key);
+            log('Full-state: preserved off-scene entity:', prior.name, 'in relationships');
+        }
+    }
+    return current;
+}
 
 // ── Fuzzy quest name matching ─────────────────────────────────────────────
 // Normalize a quest name to a stable token set for comparison:
@@ -220,6 +271,11 @@ export function mergeDelta(prev, delta) {
     if (!('plotBranches' in delta)) {
         merged.plotBranches = [];
     }
+    // Presence-like arrays describe THIS beat. Carrying witnesses forward
+    // invents observers who may already have left the scene.
+    if (!('witnesses' in delta)) {
+        merged.witnesses = [];
+    }
 
     // v6.8.18: reconcile relationships and charactersPresent against the
     // merged character roster's alias map. If a character was renamed this
@@ -229,6 +285,26 @@ export function mergeDelta(prev, delta) {
     // Also merges duplicate relationship entries when both names collapse
     // to the same canonical character.
     reconcileIdentityAliases(merged);
+
+    // innerThought and immediateNeed are volatile scene state, not durable
+    // biography. A missing fresh value must render empty rather than leak a
+    // previous character's thought through an exact/alias identity match.
+    if (Array.isArray(merged.characters) && Array.isArray(merged.charactersPresent)) {
+        const nameMap = buildCharacterNameMap(merged.characters);
+        const resolve = name => characterNameKey(nameMap.get(characterNameKey(name)) || name);
+        const present = new Set(merged.charactersPresent.map(resolve).filter(Boolean));
+        const freshByName = new Map();
+        for (const ch of Array.isArray(delta.characters) ? delta.characters : []) {
+            freshByName.set(resolve(ch?.name), ch);
+        }
+        for (const ch of merged.characters) {
+            const key = characterNameKey(ch?.name);
+            if (!present.has(key)) continue;
+            const fresh = freshByName.get(key);
+            if (!fresh || !String(fresh.innerThought || '').trim()) ch.innerThought = '';
+            if (!fresh || !String(fresh.immediateNeed || '').trim()) ch.immediateNeed = '';
+        }
+    }
 
     // Post-merge: run a single fuzzy-dedup + cross-tier pass. This consolidates
     // accumulated near-duplicates from prior turns that the per-entry merge
@@ -277,28 +353,66 @@ export function mergeDelta(prev, delta) {
 function mergeEntityArray(prevArr, deltaArr, keyField, useFuzzy, useAliases) {
     const result = prevArr.map(item => ({ ...item }));
 
+    // Repair legacy split identities before matching the new delta. Older
+    // builds could leave both "Jenna (aliases: Stranger)" and a separate
+    // "Stranger" entry in the same snapshot. Collapse that explicit alias
+    // link now so a fresh delta addressed to either name reaches one record.
+    if (useAliases) {
+        let repaired = true;
+        while (repaired) {
+            repaired = false;
+            outer: for (let i = 0; i < result.length; i++) {
+                const canonical = result[i];
+                for (const alias of Array.isArray(canonical.aliases) ? canonical.aliases : []) {
+                    const aliasKey = characterNameKey(alias);
+                    const duplicateIdx = result.findIndex((item, j) =>
+                        j !== i && characterNameKey(item?.[keyField]) === aliasKey);
+                    if (duplicateIdx === -1) continue;
+
+                    const duplicate = result[duplicateIdx];
+                    const merged = { ...duplicate, ...canonical };
+                    const seen = new Set();
+                    merged.aliases = [
+                        ...(Array.isArray(canonical.aliases) ? canonical.aliases : []),
+                        ...(Array.isArray(duplicate.aliases) ? duplicate.aliases : []),
+                        duplicate[keyField],
+                    ].filter(value => {
+                        const valueKey = characterNameKey(value);
+                        if (!valueKey || valueKey === characterNameKey(merged[keyField]) || seen.has(valueKey)) return false;
+                        seen.add(valueKey);
+                        return true;
+                    });
+                    result[i] = merged;
+                    result.splice(duplicateIdx, 1);
+                    repaired = true;
+                    log('Entity merge: repaired split identity', duplicate[keyField], '→', merged[keyField]);
+                    break outer;
+                }
+            }
+        }
+    }
+
     // Build two indexes: canonical-name → index, and (optionally) alias → index.
     // Both are maintained in sync as we process delta entries so subsequent
     // deltas can match on entries added earlier in the same batch.
     const prevMap = new Map();
     const aliasMap = new Map();
     const _lowKey = (v) => (v || '').toString().toLowerCase().trim();
-    const _rebuildAliasIndex = (i) => {
+    const _rebuildAliasIndex = () => {
         if (!useAliases) return;
-        const aliases = Array.isArray(result[i]?.aliases) ? result[i].aliases : [];
-        for (const a of aliases) {
-            const al = _lowKey(a);
-            if (!al) continue;
-            // First writer wins — if two entries share an alias, we'd rather
-            // merge the earlier one consistently. This is edge-case behavior.
-            if (!aliasMap.has(al)) aliasMap.set(al, i);
+        aliasMap.clear();
+        const nameMap = buildCharacterNameMap(result);
+        for (const [alias, canonical] of nameMap) {
+            if (alias === _lowKey(canonical)) continue;
+            const idx = prevMap.get(_lowKey(canonical));
+            if (idx !== undefined) aliasMap.set(alias, idx);
         }
     };
     for (let i = 0; i < result.length; i++) {
         const key = _lowKey(result[i][keyField]);
         if (key) prevMap.set(key, i);
-        _rebuildAliasIndex(i);
     }
+    _rebuildAliasIndex();
 
     // Track which prev indices have already absorbed a delta entry so one
     // prev quest can't be matched twice in the same merge pass.
@@ -443,7 +557,7 @@ function mergeEntityArray(prevArr, deltaArr, keyField, useFuzzy, useAliases) {
                     }
                 } catch (_) { /* settings not available in test context */ }
             }
-            _rebuildAliasIndex(existingIdx);
+            _rebuildAliasIndex();
         } else {
             // Normalize aliases on new entries so downstream code can trust
             // the field exists and is an array.
@@ -458,7 +572,7 @@ function mergeEntityArray(prevArr, deltaArr, keyField, useFuzzy, useAliases) {
             // duplicate phrasings, and rely on the post-merge dedup pass in mergeDelta
             // to catch fuzzy cases within the same batch.
             prevMap.set(key, result.length - 1);
-            _rebuildAliasIndex(result.length - 1);
+            _rebuildAliasIndex();
             log('Entity merge: new entity added:', key);
         }
     }
@@ -481,17 +595,10 @@ export function reconcileIdentityAliases(snap) {
     if (!snap || typeof snap !== 'object') return snap;
     if (!Array.isArray(snap.characters)) return snap;
 
-    // Build alias → canonical name map from characters
-    const aliasToCanon = new Map();
-    for (const ch of snap.characters) {
-        if (!ch || !ch.name || !Array.isArray(ch.aliases)) continue;
-        const canon = ch.name;
-        for (const a of ch.aliases) {
-            const al = (a || '').toString().toLowerCase().trim();
-            if (al) aliasToCanon.set(al, canon);
-        }
-    }
-    if (aliasToCanon.size === 0) return snap;
+    // Ambiguous aliases are intentionally excluded. Guessing which of two
+    // characters owns a shared label (for example, "Stranger") corrupts
+    // presence, relationships, and thoughts.
+    const aliasToCanon = buildCharacterNameMap(snap.characters);
 
     let renamedRels = 0, mergedRels = 0, renamedPresent = 0;
 

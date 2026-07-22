@@ -39,6 +39,17 @@ export function getActivePromptRole() {
     return 'system';
 }
 
+/** Map a configured role to SillyTavern chat-message flags. */
+export function promptRoleFlags(role) {
+    const isSystem = role === 'system';
+    const isUser = role === 'user';
+    return {
+        is_user: isUser,
+        is_system: isSystem,
+        name: isSystem ? 'System' : (isUser ? 'ScenePulse' : 'Assistant'),
+    };
+}
+
 /**
  * Apply the active profile's role to a {systemPrompt, prompt} pair before
  * sending to generateRaw.

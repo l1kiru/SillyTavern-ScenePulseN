@@ -27,7 +27,6 @@
 .sp-urgency-low { background: rgba(100,100,100,0.12); color: var(--sp-text-dim); }
 .sp-urgency-resolved { background: rgba(91,196,122,0.15); color: var(--sp-green); }
 .sp-plot-name { font-weight: 600; color: var(--sp-text-bright); font-size: var(--sp-fs-base); }
-.sp-plot-notes { color: var(--sp-text-dim); font-size: var(--sp-fs-xs); }
 /* Quest status badges (NEW / UPDATED) */
 .sp-quest-status {
     font-size: var(--sp-fs-xs); font-weight: 700; padding: 1px 5px; border-radius: 4px;

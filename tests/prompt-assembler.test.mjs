@@ -115,7 +115,7 @@ console.log('\n── Default output contains every expected section ──');
     assertContains('contains opening header',   out, '# SCENE TRACKER');
     assertContains('contains role text',        out, 'You are a precise scene analysis engine.');
     assertContains('contains critical rules',   out, '## CRITICAL RULES');
-    assertContains('contains rule 1',           out, 'EVERY field in the schema MUST contain meaningful data');
+    assertContains('contains rule 1',           out, 'Use [] for genuinely empty array fields');
     assertContains('contains FIELD SPECIFICATIONS heading', out, '## FIELD SPECIFICATIONS');
     assertContains('contains dashboard env block', out, '### Environment');
     assertContains('contains scene block',      out, '### Scene Analysis');
@@ -139,7 +139,14 @@ console.log('\n── Delta mode conditional ──');
     const withDelta = assemblePrompt(_allOnSettings(), null, { isDelta: true });
     assertNotContains('isDelta:false omits delta block', noDelta, '## DELTA MODE');
     assertContains('isDelta:true includes delta heading', withDelta, '## DELTA MODE — RETURN ONLY CHANGES');
-    assertContains('isDelta:true includes rule 7 (charactersPresent)', withDelta, 'charactersPresent: ALWAYS include');
+    assertContains('isDelta:true requires charactersPresent', withDelta, 'charactersPresent, witnesses');
+    assertContains('isDelta:true requires fresh thoughts', withDelta, 'Recompute innerThought and immediateNeed');
+
+    const noIdeasSettings = _allOnSettings();
+    noIdeasSettings.panels.storyIdeas = false;
+    const noIdeas = assemblePrompt(noIdeasSettings, null, { isDelta: true });
+    assertNotContains('disabled story ideas remove field specification', noIdeas, '### Plot Branches');
+    assertNotContains('disabled story ideas remove delta requirement', noIdeas, 'plotBranches');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -156,7 +163,7 @@ console.log('\n── Per-slot override replaces only the targeted slot ──')
     assertContains('override appears in output', out, 'CUSTOM ROLE TEXT — output JSON, that is all.');
     assertNotContains('default role text removed', out, 'You are a precise scene analysis engine.');
     // Other slots unchanged:
-    assertContains('critical rules unchanged',  out, 'EVERY field in the schema MUST contain meaningful data');
+    assertContains('critical rules unchanged',  out, 'Use [] for genuinely empty array fields');
     assertContains('name awareness unchanged',  out, 'Buzzcut');
     assertContains('quest validation unchanged', out, 'PLAYER ACTION TEST');
 }
