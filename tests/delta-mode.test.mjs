@@ -96,7 +96,7 @@ console.log('\n── Multi-turn chain (4 deltas) ──');
     assertEq('turn 1: weather carried forward', m1.weather, 'Sunny');
     assertEq('turn 1: 3 characters', m1.characters.length, 3);
     assertEq('turn 1: Buzzcut thought updated', m1.characters.find(c => c.name === 'Buzzcut').innerThought, 'He is lying.');
-    assertEq('turn 1: Reyes carried forward', m1.characters.find(c => c.name === 'Reyes').innerThought, 'Nervous.');
+    assertEq('turn 1: omitted present thought is cleared', m1.characters.find(c => c.name === 'Reyes').innerThought, '');
     assertEq('turn 1: Keene added', m1.characters.find(c => c.name === 'Keene').role, 'Detective');
     assertEq('turn 1: Buzzcut affection unchanged', m1.relationships.find(r => r.name === 'Buzzcut').affection, 20);
     assertEq('turn 1: main quest carried forward', m1.mainQuests.length, 1);

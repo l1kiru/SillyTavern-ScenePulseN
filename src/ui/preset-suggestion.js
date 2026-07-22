@@ -51,14 +51,6 @@ function _markShownThisSession(presetId) {
 function _isPermanentlyDismissed(presetId) {
     try { return _readSet(localStorage, _DISMISSED_KEY).has(presetId); } catch { return false; }
 }
-function _markPermanentlyDismissed(presetId) {
-    try {
-        const s = _readSet(localStorage, _DISMISSED_KEY);
-        s.add(presetId);
-        _writeSet(localStorage, _DISMISSED_KEY, s);
-    } catch {}
-}
-
 /**
  * Check the active connection's model id against the bundled presets and
  * surface a one-time suggestion toast if a match is found and the user
@@ -90,20 +82,7 @@ export async function maybeSuggestPreset() {
     const patch = buildPresetPatch(preset, profile);
     updateActiveProfile(s, { ...patch, appliedPresetId: preset.id });
     saveSettings();
-    try { toastr.success(t(`Applied ${preset.displayName} preset to "${profile.name}"`)); } catch {}
-}
-
-/**
- * Permanently dismiss the suggestion for the currently-detected preset.
- * Useful as a settings UI affordance ("Don't suggest presets for this model").
- */
-export function dismissPresetSuggestion() {
-    const modelId = getActiveModelId();
-    if (!modelId) return;
-    const preset = findMatchingPreset(modelId);
-    if (!preset) return;
-    _markPermanentlyDismissed(preset.id);
-    try { toastr.info(t(`Won't suggest the ${preset.displayName} preset again. Re-enable in localStorage if you change your mind.`)); } catch {}
+    try { toastr.success(t('Applied {preset} preset to "{profile}"', { preset: preset.displayName, profile: profile.name })); } catch {}
 }
 
 /**
@@ -138,6 +117,6 @@ export async function forceShowPresetSuggestion() {
     const patch = buildPresetPatch(preset, profile);
     updateActiveProfile(s, { ...patch, appliedPresetId: preset.id });
     saveSettings();
-    try { toastr.success(t(`Applied ${preset.displayName} preset to "${profile.name}"`)); } catch {}
+    try { toastr.success(t('Applied {preset} preset to "{profile}"', { preset: preset.displayName, profile: profile.name })); } catch {}
     return 'applied';
 }

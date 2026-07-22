@@ -31,7 +31,6 @@
     .sp-rel-meta { font-size: var(--sp-fs-xs); }
 
     .sp-char-name { font-size: var(--sp-fs-base); }
-    .sp-char-role-badge { font-size: var(--sp-fs-xs); }
     .sp-char-grid { font-size: var(--sp-fs-xs); }
     .sp-char-field { font-size: var(--sp-fs-xs); }
     .sp-char-val { font-size: var(--sp-fs-xs); }
@@ -40,7 +39,6 @@
     .sp-idea-hook { font-size: var(--sp-fs-xs); }
     .sp-idea-card { padding: 5px 7px; }
 
-    .sp-quest-name { font-size: var(--sp-fs-xs); }
     .sp-quest-detail { font-size: var(--sp-fs-xs); }
 
     .sp-gen-footer { font-size: var(--sp-fs-xs); flex-wrap: wrap; gap: 3px 6px; }
@@ -63,7 +61,6 @@
     .sp-brand-title-wrap { display: none; }
     /* v6.15.0: phase pill no longer hidden — degrades to colored dot via the
        container query in relationships.css instead. Color preserves the signal. */
-    .sp-char-role-badge { max-width: 100px; }
 }
 
 /* 1366x768 laptops — tighter everything (viewport height concern) */

@@ -74,7 +74,7 @@ const _LOWER_INDEX = Object.freeze(
  */
 export function coerceRelPhase(raw) {
     if (raw == null) return 'Unknown';
-    const s = String(raw).trim().replace(/^[\s"'(\[\-—]+|[\s"')\].,;:!?\-—]+$/g, '');
+    const s = String(raw).trim().replace(/^[\s"'([\-—]+|[\s"')\].,;:!?\-—]+$/g, '');
     if (!s) return 'Unknown';
 
     // 2. exact case-insensitive

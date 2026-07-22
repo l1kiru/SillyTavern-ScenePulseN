@@ -35,7 +35,7 @@
 #sp-panel.sp-mode-tablet .sp-idea-header { min-height: 44px; }
 #sp-panel.sp-mode-tablet .sp-quest-header { min-height: 42px; }
 #sp-panel.sp-mode-tablet .sp-plot-tier-title { min-height: 42px; }
-#sp-panel.sp-mode-tablet .sp-btn { min-height: 40px; }
+#sp-panel.sp-mode-tablet .sp-btn, #sp-panel.sp-mode-tablet .sp-empty-action { min-height: 40px; }
 #sp-panel.sp-mode-tablet .sp-ck { min-height: 40px; }
 #sp-panel.sp-mode-tablet .sp-fs select, #sp-panel.sp-mode-tablet .sp-fi input { min-height: 40px; }
 #sp-panel.sp-mode-tablet .sp-cp-field-rm { width: 32px; height: 32px; }
@@ -48,10 +48,6 @@ body:has(#sp-panel.sp-mode-tablet.sp-visible) #top-settings-holder { display: no
 
 /* Show mobile top bar for tablet mode too */
 body:has(#sp-panel.sp-mode-tablet.sp-visible) .sp-mobile-topbar { display: flex !important; }
-
-/* Thought bubbles: hide in tablet mode (overlap fullscreen panel) */
-#sp-panel.sp-mode-tablet.sp-visible ~ .sp-thought-bubble,
-body:has(#sp-panel.sp-mode-tablet.sp-visible) .sp-thought-bubble { display: none !important; }
 
 /* Thought Panel on tablet — hide entirely (no room alongside fullscreen panel) */
 .sp-mode-tablet ~ #sp-thought-panel, #sp-panel.sp-mode-tablet ~ #sp-thought-panel {

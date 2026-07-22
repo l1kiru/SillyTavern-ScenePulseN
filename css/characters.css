@@ -140,11 +140,8 @@
 .sp-char-card.sp-char-primary { border-left-width: 4px; border-left-color: var(--char-accent, var(--sp-accent)); }
 /* v6.8.15: role and inner thought are first-class card-body rows now — full
    editable text instead of a truncated header badge / hidden-from-main-panel field. */
-.sp-char-role-row,
-.sp-char-thought-row { display: grid; grid-template-columns: auto 1fr; gap: 2px 6px; padding: 4px 0 2px 2px; align-items: baseline; }
-.sp-char-thought-row { border-top: 1px dashed var(--sp-border); margin-top: 4px; padding-top: 5px; }
+.sp-char-role-row { display: grid; grid-template-columns: auto 1fr; gap: 2px 6px; padding: 4px 0 2px 2px; align-items: baseline; }
 .sp-char-role-val { font-size: var(--sp-fs-xs); color: var(--sp-text); line-height: 1.35; }
-.sp-char-thought-val { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); font-style: italic; line-height: 1.4; }
 .sp-char-grid { display: grid; grid-template-columns: auto 1fr; gap: 1px 6px; padding-left: 2px; }
 .sp-char-field { font-size: var(--sp-fs-xs); font-weight: 600; color: var(--sp-text-dim); text-transform: uppercase; letter-spacing: 0.03em; text-align: right; padding: 1px 0; }
 .sp-char-val { font-size: var(--sp-fs-xs); color: var(--sp-text); padding: 1px 0; }
@@ -214,13 +211,7 @@
     box-shadow: 0 0 4px var(--char-accent, var(--sp-accent));
     opacity: 1;
 }
-.sp-char-goals { margin-top: 4px; padding-top: 4px; border-top: 1px dashed var(--sp-border); }
-.sp-char-goal-item { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); padding: 1px 0 1px 4px; }
-.sp-char-goal-item strong { color: var(--sp-text); }
 /* v6.8.16: fertility section no longer needs its own border — the
    subsection label above it already supplies the visual divider. */
 .sp-fert-section { padding-top: 2px; }
 .sp-fert-na { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); font-style: italic; }
-.sp-fert-inline { display: inline-flex; align-items: baseline; gap: 3px; }
-.sp-fert-inline-label { font-size: var(--sp-fs-xs); font-weight: 600; color: var(--sp-text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
-.sp-fert-inline-val { font-size: var(--sp-fs-xs); color: var(--sp-text); }

@@ -15,7 +15,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 globalThis.SillyTavern = {
-    getContext: () => ({ chatCompletionSettings: {}, textGenerationSettings: {} }),
+    getContext: () => ({ chatCompletionSettings: {}, textCompletionSettings: {} }),
 };
 if (typeof document === 'undefined') {
     globalThis.document = { querySelectorAll: () => [] };

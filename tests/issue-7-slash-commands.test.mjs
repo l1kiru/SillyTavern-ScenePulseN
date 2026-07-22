@@ -275,6 +275,36 @@ console.log('\n── Scenario 12: /sp-debug honors maxSnapshots ──');
     assertContains('shows actual cap', out2, '/ 100');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 13. /sp toggle writes the active profile and immediately affects schema
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\n── Scenario 13: /sp-toggle uses active profile (issue #17) ──');
+{
+    resetSettings();
+    const s = settings.getSettings();
+    profiles.migrateLegacySettingsToProfile(s);
+    const active = profiles.getActiveProfile(s);
+    active.panels = { ...s.panels, storyIdeas: true };
+    // Deliberately opposite legacy root value: the command must not write it.
+    s.panels.storyIdeas = true;
+    s._spOrphanMigrationDone = true;
+
+    const out = await captured['sp-toggle']({}, 'storyIdeas');
+    assertContains('profile panel toggle acknowledged', out, 'Story Ideas');
+    assertEq('active profile changed', active.panels.storyIdeas, false);
+    assertEq('legacy root left untouched', s.panels.storyIdeas, true);
+
+    const schema = settings.getActiveSchema().value;
+    assertEq('dynamic schema drops plotBranches immediately', !!schema.properties?.plotBranches, false);
+    const prompt = settings.getActivePrompt();
+    assertEq('assembled prompt drops Plot Branches immediately', prompt.includes('### Plot Branches'), false);
+
+    active.schema=JSON.stringify({type:'object',properties:{sceneSummary:{type:'string'},plotBranches:{type:'array'}},required:['sceneSummary','plotBranches']});
+    const customSchema=settings.getActiveSchema().value;
+    assertEq('disabled story ideas are also removed from a custom schema',!!customSchema.properties?.plotBranches,false);
+    assertEq('custom schema no longer requires plotBranches',customSchema.required.includes('plotBranches'),false);
+}
+
 // ─── Summary ──────────────────────────────────────────────────────────
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 console.log(`${fail === 0 ? 'PASS' : 'FAIL'} ${pass}/${pass + fail}`);

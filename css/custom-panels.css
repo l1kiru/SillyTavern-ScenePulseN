@@ -8,9 +8,6 @@
     font-size: var(--sp-fs-xs); color: var(--sp-accent);
     animation: sp-glass-in 0.3s ease-out;
 }
-.sp-chat-banner-icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.6; }
-.sp-chat-banner-icon svg { width: 16px; height: 16px; }
-.sp-chat-banner-text { opacity: 0.7; white-space: nowrap; }
 .sp-banner-timer { margin-left: auto; font-family: var(--sp-font-mono); font-size: var(--sp-fs-xs); opacity: 0.5; white-space: nowrap; }
 
 /* ── Panel Manager (main panel overlay) ── */
@@ -101,9 +98,6 @@
                 margin 0.25s ease, padding 0.25s ease,
                 border-color 0.2s ease;
 }
-.sp-panel-toggles { display: flex; flex-direction: column; gap: 2px; }
-.sp-panel-toggle { padding: 3px 0 !important; }
-
 /* ── Toolbar separator ── */
 .sp-toolbar-sep {
     width: 1px; height: 14px; margin: 0 2px;
@@ -153,20 +147,6 @@
 .sp-cp-field-toggle { width: 9px; height: 9px; accent-color: var(--sp-accent); cursor: pointer; justify-self: center; margin: 0; padding: 0; vertical-align: middle; }
 .sp-cp-field-disabled { opacity: 0.35; }
 .sp-cp-field-disabled input, .sp-cp-field-disabled select { pointer-events: none; }
-/* v6.9.13: per-chat override indicator */
-.sp-cp-overridden { border-color: rgba(77,184,164,0.3) !important; }
-.sp-cp-overridden .sp-cp-header::after {
-    content: 'chat override'; font-size: var(--sp-fs-xs); color: var(--sp-accent);
-    text-transform: uppercase; letter-spacing: 0.05em; opacity: 0.7;
-    margin-left: auto; padding-right: 4px; white-space: nowrap;
-}
-/* Per-panel reset-to-global button */
-.sp-cp-reset {
-    background: var(--sp-surface) !important; color: var(--sp-text-dim) !important;
-    border: 1px solid var(--sp-border) !important; font-size: var(--sp-fs-xs) !important;
-    padding: 1px 5px !important; border-radius: 4px; cursor: pointer; transition: all 0.15s;
-}
-.sp-cp-reset:hover { color: var(--sp-accent) !important; border-color: var(--sp-accent) !important; }
 /* Scope indicator row — always visible when custom panels exist */
 .sp-cp-scope-row {
     display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
@@ -175,13 +155,6 @@
 }
 .sp-cp-scope-icon { font-size: var(--sp-fs-xs); color: var(--sp-accent); opacity: 0.6; flex-shrink: 0; }
 .sp-cp-scope-text { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); flex: 1; line-height: 1.4; }
-.sp-cp-reset-all {
-    background: var(--sp-surface) !important; color: var(--sp-text-dim) !important;
-    border: 1px solid var(--sp-border) !important; font-size: var(--sp-fs-xs) !important;
-    white-space: nowrap; cursor: pointer; padding: 3px 8px !important;
-    border-radius: 4px; transition: all 0.15s; flex-shrink: 0;
-}
-.sp-cp-reset-all:hover { color: var(--sp-accent) !important; border-color: var(--sp-accent) !important; }
 /* v6.9.11: key collision warning */
 .sp-cp-warn-collision { border-color: rgba(239,68,68,0.2); background: rgba(239,68,68,0.05); }
 .sp-cp-warn-collision span { color: var(--sp-red); }

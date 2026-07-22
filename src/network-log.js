@@ -54,7 +54,7 @@ function _redactUrl(url) {
     if (qIdx >= 0) out = out.slice(0, qIdx) + '?[REDACTED]';
     // Path segments matching secret-shapes — broad but conservative.
     out = out
-        .replace(/sk-(?:ant-)?[A-Za-z0-9_\-]{20,}/g, '[KEY]')
+        .replace(/sk-(?:ant-)?[A-Za-z0-9_-]{20,}/g, '[KEY]')
         .replace(/AIza[A-Za-z0-9_-]{35}/g, '[KEY]')
         .replace(/\/[A-Za-z0-9_-]{32,}/g, '/[KEY]');
     return out;

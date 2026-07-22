@@ -17,20 +17,21 @@
 
 import { log, warn } from '../logger.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, getActiveSchema, getActivePrompt, getLatestSnapshot, getLanguage, shouldUseDelta, getActivePanels } from '../settings.js';
+import { getSettings, getActiveSchema, getActivePrompt, getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, getLanguage, shouldUseDelta, hasStaleSnapshotBefore, getActivePanels } from '../settings.js';
 import { anyPanelsActive } from '../settings.js';
 import { getGroupMemberNames } from '../normalize.js';
 import {
-    generating, inlineGenStartMs, inlineExtractionDone, pendingInlineIdx,
-    setGenerating, setInlineGenStartMs, setInlineExtractionDone, setPendingInlineIdx,
+    generating, inlineGenStartMs, inlineExtractionDone, pendingInlineIdx, inlineGenerationContext,
+    setGenerating, setInlineGenStartMs, setInlineExtractionDone, setPendingInlineIdx, setInlineGenerationContext,
     _inlineWaitTimerId, set_inlineWaitTimerId
 } from '../state.js';
 import { spSetGenerating } from '../ui/mobile.js';
 import { startStreamingHider, stopStreamingHider } from './streaming.js';
 import { showChatBanner, cleanupGenUI } from '../ui/loading.js';
 import { startStWatchdog } from './st-watchdog.js';
-import { getActiveProfile } from '../profiles.js';
-import { getActivePromptRole } from '../prompts/role.js';
+import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
+import { getActivePromptRole, promptRoleFlags } from '../prompts/role.js';
+import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
 
 // ── Stall watchdog (v6.27.16) ─────────────────────────────────────
 //
@@ -60,6 +61,7 @@ function _onStallFire(genStart){
     setInlineGenStartMs(0);
     setInlineExtractionDone(false);
     setPendingInlineIdx(-1);
+    setInlineGenerationContext(null);
     try { stopStreamingHider(); } catch {}
     try { cleanupGenUI(); } catch {}
     try {
@@ -99,7 +101,9 @@ export function clearStallWatchdog(){
 export function buildInlineTrackerPrompt(){
     const s=getSettings();
     const sysPr=getActivePrompt();
-    const snap=getLatestSnapshot();
+    const snap=inlineGenerationContext?.baseSnapshot??getLatestSnapshot();
+    const profile=getActiveProfile(s);
+    const panels=(profile?.panels&&Object.keys(profile.panels).length)?profile.panels:(s.panels||DEFAULTS.panels);
     // Filter resolved quests + legacy activeTasks from embedded snapshot before
     // sending the previous state back to the LLM. Completed quests don't need
     // to re-enter the model's context, and activeTasks is a removed tier —
@@ -109,13 +113,14 @@ export function buildInlineTrackerPrompt(){
         const c={...s};
         for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}
         delete c.activeTasks;delete c._spMeta;
+        if(panels.storyIdeas===false)delete c.plotBranches;
         // v6.9.1: prune characters and relationships to only those
         // currently in charactersPresent (or with no presence data).
         // This reduces prompt tokens for long-running chats with 10+
         // historical characters, most of whom aren't in the current
         // scene. The STORED snapshot retains everyone (wiki needs it);
         // this pruning is prompt-only so the LLM sees a focused roster.
-        if(Array.isArray(c.charactersPresent)&&c.charactersPresent.length>0){
+        if(Array.isArray(c.charactersPresent)){
             const presentSet=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));
             // Keep full details for present characters; preserve off-scene
             // characters as name+role stubs so the LLM can reference them
@@ -173,15 +178,6 @@ QUEST STATE RULES (all REQUIRED):
     // s.panels — was silently producing prompts with NO panel-specific
     // hints because empty {} resolved every check to undefined!==false=true,
     // listing fields the user had disabled instead of respecting their toggles).
-    let panels;
-    try {
-        const profile = getActiveProfile(s);
-        panels = (profile && profile.panels && Object.keys(profile.panels).length)
-            ? profile.panels
-            : (s.panels || DEFAULTS.panels);
-    } catch {
-        panels = s.panels || DEFAULTS.panels;
-    }
     let mandatoryHints='';
     if(panels.storyIdeas!==false)mandatoryHints+='\n- plotBranches: EXACTLY 5 story suggestions (dramatic, intense, comedic, twist, exploratory). Each needs type, name, hook.';
     if(panels.quests!==false)mandatoryHints+='\n- mainQuests (MAX 3) / sideQuests (MAX 4): Persistent life arcs spanning multiple scenes, NOT scene-level actions. Introduce AT MOST 1 new quest per turn. Each needs name, urgency, detail. Every quest must be something {{user}} can personally ACT on \u2014 NPC activities and world facts are character notes, not quests. MAX 1 critical quest at a time; urgency = timing, not importance.';
@@ -204,27 +200,31 @@ QUEST STATE RULES (all REQUIRED):
     // Custom panel hints (v6.9.14: per-chat definitions)
     const customPanels=getActivePanels(s);
     for(const cp of customPanels){
-        if(!cp.fields?.length||cp.enabled===false)continue;
+        if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
         // v6.9.13: filter out disabled fields from hints
-        const _activeFields=cp.fields.filter(f=>f.enabled!==false);
-        if(_activeFields.length)mandatoryHints+=`\n- ${_activeFields.map(f=>f.key).join(', ')}: ${cp.name} fields \u2014 populate from story context.`;
+        const _activeFields=cp.fields.filter(f=>f?.enabled!==false&&isValidCustomFieldKey(f?.key));
+        if(_activeFields.length)mandatoryHints+=`\n- ${_activeFields.map(f=>f.key).join(', ')}: ${String(cp.name||'Untitled')} fields \u2014 populate from story context.`;
     }
     // v6.8.50: use the shared shouldUseDelta() helper instead of
     // checking deltaMode directly. This respects the periodic full-
     // state refresh counter, so every N delta turns we automatically
     // switch back to full-state for one generation to re-establish
     // ground truth and flush stale data.
-    const isDelta = shouldUseDelta();
+    const targetId=inlineGenerationContext?.mesIdx??SillyTavern.getContext().chat?.length??0;
+    const isDelta = !hasStaleSnapshotBefore(targetId)&&shouldUseDelta(snap);
     const _lang=getLanguage();
     const _langBlock=_lang?`\nLANGUAGE: All narrative string values MUST be in ${_lang}. JSON keys and enum values remain in English.\n`:'';
+    const deltaAlways=panels.storyIdeas===false?'time, date, elapsed, charactersPresent, witnesses':'time, date, elapsed, charactersPresent, witnesses, plotBranches';
+    const deltaExample=panels.storyIdeas===false?'{"time":"14:30","date":"03/15/2025","elapsed":"120","charactersPresent":["NPC"],"witnesses":[],"characters":[...]}':'{"time":"14:30","date":"03/15/2025","elapsed":"120","charactersPresent":["NPC"],"witnesses":[],"characters":[...],"plotBranches":[...]}';
 
     if(isDelta){
         return `After your complete narrative, append a scene-tracking JSON block wrapped in markers. Include ONLY fields that changed since the previous state.
 
 DELTA RULES:
-- Always include these fields: time, date, elapsed, plotBranches.
+- Always include these fields: ${deltaAlways}.
 - Include any other field ONLY if its value changed.
-- For characters/relationships: include only entities that changed, with ALL their sub-fields.
+- For characters: include a FULL entity for EVERY NPC in charactersPresent. Recompute innerThought and immediateNeed from THIS turn; never copy them from previous state.
+- For relationships: include only entities that changed, with ALL their sub-fields.
 - Omit unchanged fields \u2014 omission means "no change."
 ${mandatoryHints?'\nWHEN INCLUDING:'+mandatoryHints:''}
 
@@ -234,7 +234,7 @@ ${_langBlock}${prevState}
 MANDATORY OUTPUT \u2014 append this exact format after your narrative (the markers are machine-parsed, never omit them):
 
 <!--SP_TRACKER_START-->
-{"time":"14:30","date":"03/15/2025","elapsed":"120","sceneMood":"tense","plotBranches":[...]}
+${deltaExample}
 <!--SP_TRACKER_END-->`;
     }
 
@@ -244,7 +244,7 @@ Required keys: ${fieldList}
 ${mandatoryHints?'\nMANDATORY FIELDS:'+mandatoryHints:''}
 
 No schema metadata. Only actual tracker data as a flat JSON object.
-Every field must have a non-empty value. Never return "" or []. Infer from context if unsure.
+Every required scalar must have a meaningful value. Use [] for genuinely empty array fields \u2014 especially charactersPresent, witnesses, characters, and relationships \u2014 and never invent an entity just to avoid an empty array.
 
 ${fieldSpecs}
 ${_langBlock}${prevState}
@@ -270,7 +270,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _stuck = inlineGenStartMs<=0 || (Date.now()-inlineGenStartMs)>60000;
         if(_stuck){
             log('Interceptor: generating flag stuck (startMs='+inlineGenStartMs+') — force resetting');
-            setGenerating(false);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenStartMs(0);
+            setGenerating(false);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenStartMs(0);setInlineGenerationContext(null);
         } else {
             log('Interceptor: skipped \u2014 manual/partial generation in progress');return;
         }
@@ -278,6 +278,20 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
     if(!anyPanelsActive()){log('Interceptor: skipped \u2014 all panels disabled, no custom panels');return}
 
     if(s.injectionMethod==='inline'){
+        const _liveChat=SillyTavern.getContext().chat||[];
+        const _lastIdx=_liveChat.length-1;
+        const _lastIsAssistant=_lastIdx>=0&&!_liveChat[_lastIdx]?.is_user&&!_liveChat[_lastIdx]?.is_system;
+        const _targetMesIdx=_lastIsAssistant?_lastIdx:_liveChat.length;
+        const _targetSwipeId=_lastIsAssistant?getActiveSwipeId(_targetMesIdx):0;
+        const _baseSnapshot=_lastIsAssistant?getPrevSnapshot(_targetMesIdx):getLatestSnapshot();
+        setInlineGenerationContext({
+            mesIdx:_targetMesIdx,
+            swipeId:_targetSwipeId,
+            baseSnapshot:_baseSnapshot,
+            chatKey:currentChatKey(),
+            parentFingerprint:currentChatFingerprint(_targetMesIdx-1),
+            owner:captureOperationOwner(_targetMesIdx,_targetSwipeId)
+        });
         const _genStart = Date.now();
         setInlineGenStartMs(_genStart);
         setInlineExtractionDone(false);
@@ -322,15 +336,10 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         // inspector still shows system."
         const _spRole = getActivePromptRole();
         const _isSys = _spRole === 'system';
-        const _isUsr = _spRole === 'user';
         // 'assistant' role: both flags false. ST treats it as an
         // assistant turn — rarely useful, shipped for parity with the
         // separate-mode applyPromptRole() helper.
-        const _flags = {
-            is_user: _isUsr,
-            is_system: _isSys,
-            name: _isSys ? 'System' : (_isUsr ? 'ScenePulse' : 'Assistant'),
-        };
+        const _flags = promptRoleFlags(_spRole);
         const _extra = { isSmallSys: _isSys };
 
         // Head anchor — short planning reminder at the START of the context.

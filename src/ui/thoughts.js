@@ -4,7 +4,7 @@ import { esc } from '../utils.js';
 import { t } from '../i18n.js';
 import { getSettings, saveSettings } from '../settings.js';
 import { charColor } from '../color.js';
-import { generating, genNonce, lastGenSource, setLastGenSource } from '../state.js';
+import { setLastGenSource } from '../state.js';
 import { showThoughtLoading, showStopButton, hideStopButton, clearThoughtLoading } from './loading.js';
 import { generateTracker } from '../generation/engine.js';
 import { guardRegenIfBusy } from '../generation/regen-guard.js';
@@ -98,7 +98,7 @@ export function createThoughtPanel(){
         showStopButton();
         log('Thought regen: starting...');
         setLastGenSource('manual:thoughts');
-        const result=await generateTracker(chat.length-1);
+        const result=await generateTracker(chat.length-1,'characters');
         btn.classList.remove('sp-spinning');
         hideStopButton();
         clearThoughtLoading();

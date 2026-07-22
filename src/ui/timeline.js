@@ -1,8 +1,8 @@
 // src/ui/timeline.js — Timeline Scrubber
 import { log } from '../logger.js';
 import { t } from '../i18n.js';
-import { currentSnapshotMesIdx, setCurrentSnapshotMesIdx, _isTimelineScrub, set_isTimelineScrub, _tlScrubDebounce, set_tlScrubDebounce, _tlScrubRaf, set_tlScrubRaf } from '../state.js';
-import { getTrackerData } from '../settings.js';
+import { currentSnapshotMesIdx, setCurrentSnapshotMesIdx, set_isTimelineScrub, _tlScrubDebounce, set_tlScrubDebounce } from '../state.js';
+import { getTrackerData,getSnapshotProvenance } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import { updatePanel } from './update-panel.js';
 import { showPanel } from './panel.js';
@@ -15,6 +15,7 @@ export function renderTimeline(){
     let tl=document.getElementById('sp-timeline');
     if(tl)tl.remove();
     const all=getTrackerData();const sorted=Object.keys(all.snapshots).map(Number).sort((a,b)=>a-b);
+    const provenance=new Map(getSnapshotProvenance().map(p=>[p.id,p]));
     if(sorted.length<2)return;
     const latest=sorted[sorted.length-1];
     let selectedKey=currentSnapshotMesIdx>=0?currentSnapshotMesIdx:latest;
@@ -51,9 +52,9 @@ export function renderTimeline(){
         const wrap=document.createElement('div');wrap.className='sp-tl-node';
         wrap.style.left=pct+'%';
         const isSelected=k===selectedKey;
-        const isLatest=k===latest;
+        const isLatest=k===latest;const prov=provenance.get(k);const provStatus=prov?.status||'legacy';
         const dot=document.createElement('div');
-        dot.className='sp-tl-dot'+(isLatest?' sp-tl-dot-latest':'')+(isSelected?' sp-tl-dot-selected':'');
+        dot.className='sp-tl-dot'+(isLatest?' sp-tl-dot-latest':'')+(isSelected?' sp-tl-dot-selected':'')+(provStatus==='stale'?' sp-tl-dot-stale':provStatus==='legacy'?' sp-tl-dot-legacy':'');
         dot.style.position='relative';
         // Ring INSIDE dot -- inset centers it perfectly regardless of dot size
         if(isSelected){
@@ -64,7 +65,8 @@ export function renderTimeline(){
         // Extract snapshot data
         const snap=all.snapshots[String(k)];
         let dateLabel='',tooltipParts=[];
-        tooltipParts.push('Msg #'+k);
+        const reasonLabel=prov?.reason==='ANCESTOR_CHANGED'?t('Ancestor changed'):prov?.reason==='SOURCE_CHANGED'?t('Source changed'):'';
+        tooltipParts.push('Msg #'+k);tooltipParts.push(t(provStatus).toUpperCase()+(reasonLabel?' · '+reasonLabel:''));
         if(snap){
             // Lightweight extraction -- skip full normalizeTracker for performance
             const _loc=snap.location||snap.Location||'';
@@ -117,11 +119,11 @@ export function renderTimeline(){
         wrap.appendChild(lbl);
         wrap.addEventListener('click',()=>{
             const snap=all.snapshots[String(k)];if(!snap)return;
+            if(provStatus==='stale'){try{toastr.warning(t('This snapshot belongs to an earlier version of the chat branch.'),'ScenePulse')}catch{} _scrollToMessage(k);return}
             if(currentSnapshotMesIdx===k)return;
             set_isTimelineScrub(true);
             // Cancel any pending debounced update
             if(_tlScrubDebounce)clearTimeout(_tlScrubDebounce);
-            if(_tlScrubRaf)cancelAnimationFrame(_tlScrubRaf);
             setCurrentSnapshotMesIdx(k);
             // Visually update selected dot immediately (cheap CSS toggle, no DOM rebuild)
             tl.querySelectorAll('.sp-tl-dot').forEach(d=>{d.classList.remove('sp-tl-dot-selected');d.querySelector('.sp-tl-ring')?.remove()});
@@ -148,6 +150,7 @@ export function renderTimeline(){
         disc.innerHTML=`<div class="sp-tl-disc-text"><span class="sp-tl-disc-icon">\u26A0</span> Viewing msg #${selectedKey} \u2014 not the current scene.</div><button class="sp-tl-disc-btn">${t('Jump to latest')}</button>`;
         disc.querySelector('.sp-tl-disc-btn').addEventListener('click',()=>{
             const latestSnap=all.snapshots[String(latest)];if(!latestSnap)return;
+            if(provenance.get(latest)?.status==='stale'){try{toastr.warning(t('Regenerate ScenePulse before using this state.'),'ScenePulse')}catch{} return}
             if(currentSnapshotMesIdx===latest)return;
             set_isTimelineScrub(true);
             if(_tlScrubDebounce)clearTimeout(_tlScrubDebounce);
@@ -169,14 +172,14 @@ export function renderTimeline(){
         const browseBtn=document.createElement('button');
         browseBtn.className='sp-tl-browse-btn';
         browseBtn.textContent=t('Browse All')+` (${sorted.length})`;
-        browseBtn.addEventListener('click',()=>_showSnapshotBrowser(all,sorted));
+        browseBtn.addEventListener('click',()=>_showSnapshotBrowser(all,sorted,provenance));
         tl.appendChild(browseBtn);
     }
     body.appendChild(tl);
     log('\u23F1 renderTimeline:',((performance.now()-_tlStart)|0)+'ms','nodes:',displayKeys.length);
 }
 
-function _showSnapshotBrowser(all,sorted){
+function _showSnapshotBrowser(all,sorted,provenance){
     document.querySelectorAll('.sp-browse-overlay').forEach(el=>el.remove());
     const overlay=document.createElement('div');overlay.className='sp-browse-overlay';
     const PER_PAGE=10;
@@ -189,6 +192,7 @@ function _showSnapshotBrowser(all,sorted){
         let listHtml='';
         for(const k of pageItems){
             const snap=all.snapshots[String(k)];if(!snap)continue;
+            const prov=provenance.get(k);const provStatus=prov?.status||'legacy';
             const time=snap.time||'';const date=snap.date||'';
             const loc=snap.location||'';const topic=snap.sceneTopic||'';
             const mood=snap.sceneMood||'';const tension=snap.sceneTension||'';
@@ -199,8 +203,8 @@ function _showSnapshotBrowser(all,sorted){
             const tokens=(meta.promptTokens||0)+(meta.completionTokens||0);
             const elapsed=meta.elapsed||0;
             const isSelected=k===currentSnapshotMesIdx;
-            listHtml+=`<div class="sp-browse-item${isSelected?' sp-browse-selected':''}" data-key="${k}">
-                <div class="sp-browse-row1"><span class="sp-browse-idx">#${k}</span><span class="sp-browse-time">${esc(time)}${date?' \u00B7 '+esc(date):''}</span><span class="sp-browse-tension sp-browse-tension-${tension}">${esc(tension)}</span></div>
+            listHtml+=`<div class="sp-browse-item sp-browse-${provStatus}${isSelected?' sp-browse-selected':''}" data-key="${k}" data-status="${provStatus}">
+                <div class="sp-browse-row1"><span class="sp-browse-idx">#${k}</span><span class="sp-browse-time">${esc(time)}${date?' \u00B7 '+esc(date):''}</span><span class="sp-browse-status">${esc(t(provStatus))}</span><span class="sp-browse-tension sp-browse-tension-${tension}">${esc(tension)}</span></div>
                 <div class="sp-browse-row2"><span class="sp-browse-loc">${esc(loc||'\u2014')}</span></div>
                 <div class="sp-browse-row3"><span class="sp-browse-topic">${esc(topic)}</span>${mood?'<span class="sp-browse-mood">\u00B7 '+esc(mood)+'</span>':''}</div>
                 <div class="sp-browse-row4"><span>${charNames?esc(charNames):'no characters'}</span><span>${relCount} rel${relCount!==1?'s':''} \u00B7 ${questCount} quest${questCount!==1?'s':''}</span>${tokens?'<span>~'+tokens+'t'+(elapsed?' \u00B7 '+elapsed.toFixed(1)+'s':'')+'</span>':''}</div>
@@ -231,6 +235,10 @@ function _showSnapshotBrowser(all,sorted){
             item.addEventListener('click',()=>{
                 const k=Number(item.dataset.key);
                 const snap=all.snapshots[String(k)];if(!snap)return;
+                if(item.dataset.status==='stale'){
+                    try{toastr.warning(t('This snapshot belongs to an earlier version of the chat branch.'),'ScenePulse')}catch{}
+                    overlay.remove();_scrollToMessage(k);return;
+                }
                 overlay.remove();
                 setCurrentSnapshotMesIdx(k);
                 const norm=normalizeTracker(snap);

@@ -628,7 +628,7 @@ export const BUILT_IN_PRESETS = [
         matchPatterns: ['huihui-glm-4.6v-flash-abliterated', 'glm-4.6v'],
         systemPromptRole: 'system',
         promptOverrides: {},
-        notes: 'Vision-capable — feed character portraits via lorebook for richer descriptions. Sampler hints from GLM-4 Flash docs.',
+        notes: 'Sampler hints from GLM-4 Flash docs.',
         samplerHints: {
             temperature: 0.6,
             top_p: 0.95,

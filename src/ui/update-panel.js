@@ -8,14 +8,15 @@ import { relPhaseFamily } from '../rel-phase.js';
 import { markStart as _spPmStart, markEnd as _spPmEnd } from '../perf-monitor.js';
 import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, saveSettings } from '../settings.js';
-import { getLatestSnapshot, getPrevSnapshot, getTrackerData, getActivePanels } from '../settings.js';
-import { getActiveProfile } from '../profiles.js';
+import { getSettings, buildProfileView, getActivePanels } from '../settings.js';
+import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
+import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
 import {
     _lastPanelUpdate, set_lastPanelUpdate,
-    _cachedNormData, set_cachedNormData,
+    set_cachedNormData,
+    setLastGenSource,
     genMeta, lastGenSource,
     currentSnapshotMesIdx,
     currentWeatherType,
@@ -30,19 +31,27 @@ import { updateThoughts } from './thoughts.js';
 import { mkEditable } from './edit-mode.js';
 import { mkSection } from './section.js';
 import { injectStoryIdea } from '../story-ideas.js';
-import { showPanel } from './panel.js';
-import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton } from './loading.js';
-import { generating, genNonce, setLastGenSource } from '../state.js';
-import { generateTracker } from '../generation/engine.js';
 import { classifyQuest } from './classify-quest.js';
 import { openDiffViewer } from './diff-viewer.js';
 import { createSparklineCanvas } from './sparklines.js';
 import { detectStagnation } from '../stagnation.js';
 import { getPortraitHtml, buildPortraitIndex, setPortraitOverride, clearPortraitOverride } from './portraits.js';
 import { getCharacterHistory, invalidateCharacterHistory } from './character-history.js';
+import { updateCharacterField } from '../character-identity.js';
 
 let _wdmFrameId = null;
 let _wdmObserver = null;
+
+export function restoreGenerationMeta(d){
+    if(!d?._spMeta)return;
+    const m=d._spMeta;
+    if(m.completionTokens>0||m.elapsed>0){
+        genMeta.promptTokens=m.promptTokens||0;
+        genMeta.completionTokens=m.completionTokens||0;
+        genMeta.elapsed=m.elapsed||0;
+    }
+    if(m.source)setLastGenSource(m.source);
+}
 
 // ── Quest mutation index helper ──────────────────────────────────────────
 // View order can differ from storage order because filterForView's per-tier
@@ -260,15 +269,7 @@ function _updatePanelInner(d,_force=false){
     if(!d?._spViewFiltered)d=filterForView(d);
     set_cachedNormData(d); // Cache for panel manager toggles
     // Restore generation metadata from persisted snapshot data
-    if(d?._spMeta){
-        const m=d._spMeta;
-        if(m.completionTokens>0||m.elapsed>0){
-            genMeta.promptTokens=m.promptTokens||0;
-            genMeta.completionTokens=m.completionTokens||0;
-            genMeta.elapsed=m.elapsed||0;
-        }
-        if(m.source)setLastGenSource(m.source);
-    }
+    restoreGenerationMeta(d);
     if(!_isTimelineScrub)log('updatePanel: chars=',d?.characters?.length||0,'rels=',d?.relationships?.length||0,
         'quests=',((d?.mainQuests?.length||0)+(d?.sideQuests?.length||0)),
         'scene=',d?.sceneTopic?'\u2713':'\u2717','time=',d?.time||'?');
@@ -286,7 +287,8 @@ function _updatePanelInner(d,_force=false){
     body.innerHTML='';
     if(mgrNode)body.appendChild(mgrNode);
     try { // Error boundary: if rendering fails, restore previous panel content
-    const s=getSettings();
+    const rootSettings=getSettings();
+    const s=buildProfileView(rootSettings,getActiveProfile(rootSettings));
     const ft=s.fieldToggles||{};
 
     // Environment -- always visible, NOT collapsible
@@ -295,7 +297,7 @@ function _updatePanelInner(d,_force=false){
     const dc=s.dashCards||{...DEFAULTS.dashCards};
     const dateStr=d.date||'';
     const dateParts=dateStr.match(/(\d+)\/(\d+)\/(\d+)/);
-    const dayName=dateStr.match(/\((\w+)\)/)?.[1]||'';
+    const dayName=t(dateStr.match(/\((\w+)\)/)?.[1]||'');
     const months=['',t('Jan'),t('Feb'),t('Mar'),t('Apr'),t('May'),t('Jun'),t('Jul'),t('Aug'),t('Sep'),t('Oct'),t('Nov'),t('Dec')];
     const mon=dateParts?months[parseInt(dateParts[1])]||dateParts[1]:'';
     const dayNum=dateParts?parseInt(dateParts[2]):0;
@@ -390,7 +392,7 @@ function _updatePanelInner(d,_force=false){
     const barL=4,barR=196,barW=barR-barL;
     const chevX=barL+(barW*tempPct/100);
     const TEMP_STOPS=[[0,'4a3fa0'],[12,'3060c8'],[24,'2898d8'],[38,'28b8b0'],[50,'38c878'],[60,'4dbd5c'],[70,'a0c830'],[80,'e8b020'],[88,'e07828'],[96,'c83030'],[100,'901818']];
-    function lerpTempColor(pct){
+    const lerpTempColor=(pct)=>{
         let lo=TEMP_STOPS[0],hi=TEMP_STOPS[TEMP_STOPS.length-1];
         for(let i=0;i<TEMP_STOPS.length-1;i++){if(pct>=TEMP_STOPS[i][0]&&pct<=TEMP_STOPS[i+1][0]){lo=TEMP_STOPS[i];hi=TEMP_STOPS[i+1];break}}
         const t=hi[0]===lo[0]?0:(pct-lo[0])/(hi[0]-lo[0]);
@@ -399,7 +401,7 @@ function _updatePanelInner(d,_force=false){
         const g=Math.round(p(lo[1].slice(2,4))+(p(hi[1].slice(2,4))-p(lo[1].slice(2,4)))*t);
         const b=Math.round(p(lo[1].slice(4,6))+(p(hi[1].slice(4,6))-p(lo[1].slice(4,6)))*t);
         return{r,g,b,hex:`#${[r,g,b].map(x=>x.toString(16).padStart(2,'0')).join('')}`};
-    }
+    };
     const tc=lerpTempColor(tempPct);
     const tempBar=`<div class="sp-temp-bar-wrap"><svg class="sp-temp-bar-svg" viewBox="0 0 200 22" xmlns="http://www.w3.org/2000/svg" preserveAspectRatio="none"><defs><linearGradient id="spTempGrad" x1="0" y1="0" x2="1" y2="0"><stop offset="0%" stop-color="#4a3fa0"/><stop offset="12%" stop-color="#3060c8"/><stop offset="24%" stop-color="#2898d8"/><stop offset="38%" stop-color="#28b8b0"/><stop offset="50%" stop-color="#38c878"/><stop offset="60%" stop-color="#4dbd5c"/><stop offset="70%" stop-color="#a0c830"/><stop offset="80%" stop-color="#e8b020"/><stop offset="88%" stop-color="#e07828"/><stop offset="96%" stop-color="#c83030"/><stop offset="100%" stop-color="#901818"/></linearGradient></defs><rect x="${barL}" y="6" width="${barW}" height="6" rx="3" fill="rgba(255,255,255,0.05)" stroke="rgba(255,255,255,0.06)" stroke-width="0.4"/><rect x="${barL}" y="6" width="${barW}" height="6" rx="3" fill="url(#spTempGrad)" opacity="0.85"/><polygon points="${chevX-4},1.5 ${chevX+4},1.5 ${chevX},6" fill="var(--sp-text-bright)" opacity="0.85"/><line x1="${chevX}" y1="6" x2="${chevX}" y2="12" stroke="var(--sp-text-bright)" stroke-width="0.8" opacity="0.5"/></svg><div class="sp-temp-bar-label">${esc(tempDisplay)}</div></div>`;
     dash.innerHTML+=`<div class="sp-dash-card sp-dash-card-temp" data-card="temperature" style="background:linear-gradient(135deg,rgba(${tc.r},${tc.g},${tc.b},0.28) 0%,rgba(${tc.r},${tc.g},${tc.b},0.08) 100%);border-color:rgba(${tc.r},${tc.g},${tc.b},0.30);--temp-r:${tc.r};--temp-g:${tc.g};--temp-b:${tc.b}">${tempBar}</div>`;
@@ -588,7 +590,7 @@ function _updatePanelInner(d,_force=false){
     // override them. Falls back to hardcoded defaults if the variable
     // isn't set (e.g., during SSR or before stylesheet loads).
     const _cs = typeof getComputedStyle === 'function' ? getComputedStyle(document.documentElement) : null;
-    function _tv(level, fallback) { return _cs?.getPropertyValue('--sp-tension-' + level)?.trim() || fallback; }
+    const _tv=(level, fallback)=>_cs?.getPropertyValue('--sp-tension-' + level)?.trim() || fallback;
     const _tensionColors = {
         calm: _tv('calm', '#60a5fa'),
         low: _tv('low', '#4ade80'),
@@ -676,10 +678,10 @@ function _updatePanelInner(d,_force=false){
     const _prevQSnap=getPrevSnapshot(currentSnapshotMesIdx);
     const _prevQMaps={};
     for(const _qk of['mainQuests','sideQuests']){const _m={};if(_prevQSnap&&Array.isArray(_prevQSnap[_qk]))for(const _q of _prevQSnap[_qk])_m[(_q.name||'').toLowerCase().trim()]=_q;_prevQMaps[_qk]=_m}
-    function _classifyQuest(q,tierKey){
+    const _classifyQuest=(q,tierKey)=>{
         const prev=_prevQMaps[tierKey]?.[(q.name||'').toLowerCase().trim()]||null;
         return classifyQuest(q, prev, !!_prevQSnap);
-    }
+    };
     // Pre-compute status counts per tier
     const _tierStatusCounts={};let _totalQNew=0,_totalQUpdated=0,_totalQDone=0;
     for(const _tk of['mainQuests','sideQuests']){let _nc=0,_uc=0,_dc=0;if(Array.isArray(d[_tk]))for(const _q of d[_tk]){const _s=_classifyQuest(_q,_tk);if(_s==='new')_nc++;else if(_s==='updated')_uc++;else if(_s==='resolved')_dc++}_tierStatusCounts[_tk]={n:_nc,u:_uc,d:_dc};_totalQNew+=_nc;_totalQUpdated+=_uc;_totalQDone+=_dc}
@@ -720,7 +722,7 @@ function _updatePanelInner(d,_force=false){
                 emptyDiv.innerHTML=`<span class="sp-plot-empty-text">${esc(t(tier.empty))}</span>`;
                 emptyDiv.classList.add('sp-editable');
                 emptyDiv.addEventListener('click',(e)=>{e.stopPropagation();const panel=document.getElementById('sp-panel');if(!panel?.classList.contains('sp-edit-mode'))return;if(emptyDiv.contentEditable==='true')return;emptyDiv.contentEditable='true';emptyDiv.classList.add('sp-editing');emptyDiv.textContent='';emptyDiv.focus()});
-                function saveNewQuest(){if(emptyDiv.contentEditable!=='true')return;emptyDiv.contentEditable='false';emptyDiv.classList.remove('sp-editing');const val=emptyDiv.textContent.trim();if(val){const newQuest={name:val,urgency:'moderate',detail:''};if(!d[tier.key])d[tier.key]=[];d[tier.key].push(newQuest);const snap=getLatestSnapshot();if(snap){if(!snap[tier.key])snap[tier.key]=[];snap[tier.key].push(newQuest);SillyTavern.getContext().saveMetadata()}const norm=normalizeTracker(snap||d);updatePanel(norm);toastr.success(t('Added')+': '+val,tier.t)}else{emptyDiv.innerHTML=`<span class="sp-plot-empty-text">${esc(t(tier.empty))}</span>`}}
+                const saveNewQuest=()=>{if(emptyDiv.contentEditable!=='true')return;emptyDiv.contentEditable='false';emptyDiv.classList.remove('sp-editing');const val=emptyDiv.textContent.trim();if(val){const newQuest={name:val,urgency:'moderate',detail:''};if(!d[tier.key])d[tier.key]=[];d[tier.key].push(newQuest);const snap=getLatestSnapshot();if(snap){if(!snap[tier.key])snap[tier.key]=[];snap[tier.key].push(newQuest);SillyTavern.getContext().saveMetadata()}const norm=normalizeTracker(snap||d);updatePanel(norm);toastr.success(t('Added')+': '+val,tier.t)}else{emptyDiv.innerHTML=`<span class="sp-plot-empty-text">${esc(t(tier.empty))}</span>`}};
                 emptyDiv.addEventListener('blur',saveNewQuest);
                 emptyDiv.addEventListener('keydown',(e)=>{if(e.key==='Enter'){e.preventDefault();saveNewQuest()}});
                 tierBody.appendChild(emptyDiv);
@@ -751,7 +753,7 @@ function _updatePanelInner(d,_force=false){
                 actWrap.appendChild(completeBtn);actWrap.appendChild(removeBtn);
             }
             rightGroup.appendChild(actWrap);headerDiv.appendChild(rightGroup)}
-            headerDiv.addEventListener('click',(ev)=>{if(ev.target.closest('.sp-quest-actions'))return;e.classList.toggle('sp-card-open')});e.appendChild(headerDiv);const detailEl=document.createElement('div');detailEl.className='sp-quest-detail';detailEl.textContent=p.detail||'\u2014';if(!p.detail){detailEl.classList.add('sp-empty-field');detailEl.dataset.placeholder='Quest details'}mkEditable(detailEl,()=>p.detail||'',v=>{p.detail=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,p.name);if(_si>=0)snap[tier.key][_si].detail=v});e.appendChild(detailEl);mkEditable(nameEl,()=>p.name||'',v=>{const _oldName=p.name;p.name=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,_oldName);if(_si>=0)snap[tier.key][_si].name=v});tierBody.appendChild(e)}}
+            headerDiv.addEventListener('click',(ev)=>{if(ev.target.closest('.sp-quest-actions'))return;e.classList.toggle('sp-card-open')});e.appendChild(headerDiv);const detailEl=document.createElement('div');detailEl.className='sp-quest-detail';detailEl.textContent=p.detail||'\u2014';if(!p.detail){detailEl.classList.add('sp-empty-field');detailEl.dataset.placeholder=t('Quest details')}mkEditable(detailEl,()=>p.detail||'',v=>{p.detail=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,p.name);if(_si>=0)snap[tier.key][_si].detail=v});e.appendChild(detailEl);mkEditable(nameEl,()=>p.name||'',v=>{const _oldName=p.name;p.name=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,_oldName);if(_si>=0)snap[tier.key][_si].name=v});tierBody.appendChild(e)}}
             // Add quest button
             const addBtn=document.createElement('div');addBtn.className='sp-quest-add';addBtn.innerHTML='<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> '+t('Add quest');
             addBtn.addEventListener('click',()=>{_showAddQuestDialog(tier.t,tier.key,d)});
@@ -800,7 +802,7 @@ function _updatePanelInner(d,_force=false){
 const _phaseFam=relPhaseFamily(rel.relPhase);
 if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${esc(rel.relType)}">${esc(rel.relType)}</span>`;if(rel.relPhase)hh+=`<span class="sp-rel-phase-badge" data-ft="rel_phase" data-family="${esc(_phaseFam)}" title="${esc(rel.relPhase)}">${esc(rel.relPhase)}</span>`;hh+=`</div>`;bl.innerHTML=hh;bl.querySelector('.sp-rel-header').addEventListener('click',(e)=>{if(e.target.closest('.sp-char-portrait'))return;bl.classList.toggle('sp-card-open')});
         const _body=document.createElement('div');_body.className='sp-rel-body';
-        {const meta=document.createElement('div');meta.className='sp-rel-meta';{const ttItem=document.createElement('div');ttItem.className='sp-rel-meta-item';ttItem.dataset.ft='rel_timeknown';ttItem.innerHTML=`<span class="sp-rel-meta-label">${t('Time Known')}</span>`;const ttVal=document.createElement('span');ttVal.textContent=rel.timeTogether||'\u2014';if(!rel.timeTogether){ttItem.classList.add('sp-empty-field');ttVal.dataset.placeholder='Time known'}mkEditable(ttVal,()=>rel.timeTogether||'',v=>{rel.timeTogether=v;const snap=getLatestSnapshot();if(snap){const sr=snap.relationships?.find(r=>r.name===rel.name);if(sr)sr.timeTogether=v}});ttItem.appendChild(ttVal);meta.appendChild(ttItem)}{const msItem=document.createElement('div');msItem.className='sp-rel-meta-item sp-rel-milestone';msItem.dataset.ft='rel_milestone';msItem.innerHTML=`<span class="sp-rel-meta-label">${t('Milestone')}</span>`;const msVal=document.createElement('span');msVal.textContent=rel.milestone||'\u2014';if(!rel.milestone){msItem.classList.add('sp-empty-field');msVal.dataset.placeholder='Milestone'}mkEditable(msVal,()=>rel.milestone||'',v=>{rel.milestone=v;const snap=getLatestSnapshot();if(snap){const sr=snap.relationships?.find(r=>r.name===rel.name);if(sr)sr.milestone=v}});msItem.appendChild(msVal);meta.appendChild(msItem)}_body.appendChild(meta)}
+        {const meta=document.createElement('div');meta.className='sp-rel-meta';{const ttItem=document.createElement('div');ttItem.className='sp-rel-meta-item';ttItem.dataset.ft='rel_timeknown';ttItem.innerHTML=`<span class="sp-rel-meta-label">${t('Time Known')}</span>`;const ttVal=document.createElement('span');ttVal.textContent=rel.timeTogether||'\u2014';if(!rel.timeTogether){ttItem.classList.add('sp-empty-field');ttVal.dataset.placeholder=t('Time Known')}mkEditable(ttVal,()=>rel.timeTogether||'',v=>{rel.timeTogether=v;const snap=getLatestSnapshot();if(snap){const sr=snap.relationships?.find(r=>r.name===rel.name);if(sr)sr.timeTogether=v}});ttItem.appendChild(ttVal);meta.appendChild(ttItem)}{const msItem=document.createElement('div');msItem.className='sp-rel-meta-item sp-rel-milestone';msItem.dataset.ft='rel_milestone';msItem.innerHTML=`<span class="sp-rel-meta-label">${t('Milestone')}</span>`;const msVal=document.createElement('span');msVal.textContent=rel.milestone||'\u2014';if(!rel.milestone){msItem.classList.add('sp-empty-field');msVal.dataset.placeholder='Milestone'}mkEditable(msVal,()=>rel.milestone||'',v=>{rel.milestone=v;const snap=getLatestSnapshot();if(snap){const sr=snap.relationships?.find(r=>r.name===rel.name);if(sr)sr.milestone=v}});msItem.appendChild(msVal);meta.appendChild(msItem)}_body.appendChild(meta)}
         // Unique per-meter delta icons — emotionally distinct UP and DOWN variants
         const _H='<svg viewBox="0 0 14 14" width="13" height="13">';
         // UP: full heart (love growing)  |  DOWN: cracked heart (love fading)
@@ -873,7 +875,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const n=(c?.name||'').toLowerCase();
             return !!_charName2&&(n.startsWith(_charName2)||_charName2.startsWith(n));
         };
-        const sortedChars=(d.characters||[]).map((ch,i)=>({ch,ci:i})).sort((a,b)=>{
+        const sortedChars=(d.characters||[]).map(ch=>({ch})).sort((a,b)=>{
             const aP=_primOf(a.ch),bP=_primOf(b.ch);
             if(aP&&!bP)return -1;
             if(bP&&!aP)return 1;
@@ -931,7 +933,13 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             return changed;
         };
         for(let _ci2=0;_ci2<sortedChars.length;_ci2++){
-            const{ch,ci}=sortedChars[_ci2];
+            const{ch}=sortedChars[_ci2];
+            const _saveCharField=(key,value)=>{
+                ch[key]=value;
+                const snap=getLatestSnapshot();
+                updateCharacterField(snap?.characters,ch.name,key,value);
+                if(key==='innerThought')updateThoughts(d);
+            };
             const cc=charColor(ch.name);
             const cd=document.createElement('div');
             cd.className='sp-char-card';
@@ -1057,7 +1065,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     const oldStr=String(oldVal||t('(empty)'));
                     vd.title=t('Previous')+': '+(oldStr.length>160?oldStr.substring(0,157)+'\u2026':oldStr);
                 }
-                mkEditable(vd,()=>ch[key]||'',nv=>{ch[key]=nv;const snap=getLatestSnapshot();if(snap?.characters?.[ci])snap.characters[ci][key]=nv});
+                mkEditable(vd,()=>ch[key]||'',nv=>_saveCharField(key,nv));
                 parent.appendChild(fd);parent.appendChild(vd);
             };
 
@@ -1072,7 +1080,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     const oldVal=String(_prevCh?.role||t('(empty)'));
                     vd.title=t('Previous')+': '+(oldVal.length>160?oldVal.substring(0,157)+'\u2026':oldVal);
                 }
-                mkEditable(vd,()=>ch.role||'',nv=>{ch.role=nv;const snap=getLatestSnapshot();if(snap?.characters?.[ci])snap.characters[ci].role=nv});
+                mkEditable(vd,()=>ch.role||'',nv=>_saveCharField('role',nv));
                 rr.appendChild(fd);rr.appendChild(vd);
                 _cbody.appendChild(rr);
             }
@@ -1097,7 +1105,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     const oldVal=String(_prevCh?.innerThought||t('(empty)'));
                     tq.title=t('Previous')+': '+(oldVal.length>200?oldVal.substring(0,197)+'\u2026':oldVal);
                 }
-                mkEditable(tq,()=>ch.innerThought||'',nv=>{ch.innerThought=nv;const snap=getLatestSnapshot();if(snap?.characters?.[ci])snap.characters[ci].innerThought=nv});
+                mkEditable(tq,()=>ch.innerThought||'',nv=>_saveCharField('innerThought',nv));
                 _cbody.appendChild(tq);
                 // Immediate need — compact grid row under the thought
                 const gr=document.createElement('div');gr.className='sp-char-grid';
@@ -1200,7 +1208,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                             const fd=document.createElement('div');fd.className='sp-char-field';fd.textContent=l;
                             const vd=document.createElement('div');vd.className='sp-char-val';vd.textContent=(key==='fertStatus'&&v)?t(v):(v||'\u2014');
                             if(!v){fd.classList.add('sp-empty-field');vd.classList.add('sp-empty-field');vd.dataset.placeholder=l}
-                            mkEditable(vd,()=>String(ch[key]||''),nv=>{ch[key]=nv;const snap=getLatestSnapshot();if(snap?.characters?.[ci])snap.characters[ci][key]=nv});
+                            mkEditable(vd,()=>String(ch[key]||''),nv=>_saveCharField(key,nv));
                             fg.appendChild(fd);fg.appendChild(vd);
                         }
                         fertDiv.appendChild(fg);
@@ -1323,7 +1331,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         const f=document.createDocumentFragment();
         if(!d.plotBranches?.length){f.appendChild(Object.assign(document.createElement('div'),{className:'sp-row',innerHTML:'<div class="sp-row-value" style="color:var(--sp-text-dim);font-style:italic">'+t('None suggested yet')+'</div>'}));return f}
         const cats={dramatic:{label:t('Dramatic'),color:'#c47a9a',icon:'<svg viewBox="0 0 16 16" fill="none"><path d="M8 2C5 2 3 5 3 8c0 2 1.5 4 3.5 5L8 14.5 9.5 13C11.5 12 13 10 13 8c0-3-2-6-5-6z" fill="currentColor" opacity="0.2" stroke="currentColor" stroke-width="1.1"/><path d="M6.5 7.5Q7 6 8 6Q9 6 9.5 7.5" stroke="currentColor" stroke-width="0.8" stroke-linecap="round" opacity="0.6"/></svg>'},intense:{label:t('Intense'),color:'#d45050',icon:'<svg viewBox="0 0 16 16" fill="none"><polygon points="8,1 10,6 15,6.5 11,10 12.5,15 8,12 3.5,15 5,10 1,6.5 6,6" fill="currentColor" opacity="0.2" stroke="currentColor" stroke-width="1"/></svg>'},comedic:{label:t('Comedic'),color:'#d4a855',icon:'<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" fill="currentColor" opacity="0.15" stroke="currentColor" stroke-width="1.1"/><circle cx="5.8" cy="6.5" r="0.8" fill="currentColor" opacity="0.5"/><circle cx="10.2" cy="6.5" r="0.8" fill="currentColor" opacity="0.5"/><path d="M5.5 9.5Q8 12.5 10.5 9.5" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" fill="none"/></svg>'},twist:{label:t('Twist'),color:'#9070c0',icon:'<svg viewBox="0 0 16 16" fill="none"><path d="M4 12L8 4l4 8" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><circle cx="8" cy="10" r="1.2" fill="currentColor" opacity="0.4"/><line x1="8" y1="5.5" x2="8" y2="8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.6"/></svg>'},exploratory:{label:t('Exploratory'),color:'#5b9cc4',icon:'<svg viewBox="0 0 16 16" fill="none"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.1"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2" stroke="currentColor" stroke-width="0.8" opacity="0.4" stroke-linecap="round"/><polygon points="8,5 9.5,7.5 8,7 6.5,7.5" fill="currentColor" opacity="0.5"/><circle cx="8" cy="8" r="1" fill="currentColor" opacity="0.3"/></svg>'}};
-        for(const b of d.plotBranches){const cat=cats[b.type]||cats.exploratory;const c=document.createElement('div');c.className=`sp-idea-card sp-idea-${b.type}`;c.dataset.ft='branch_'+b.type;c.style.setProperty('--idea-color',cat.color);c.innerHTML=`<div class="sp-idea-header"><span class="sp-idea-chevron">\u25B6</span><span class="sp-idea-icon">${cat.icon}</span><span class="sp-idea-type">${cat.label}</span><span class="sp-idea-name">${esc(b.name)}</span><span class="sp-idea-spacer"></span><span class="sp-idea-paste" title="Paste to message box (edit before sending)"><svg viewBox="0 0 16 16" width="12" height="12" fill="none"><rect x="3" y="2" width="10" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M6 1.5h4a1 1 0 0 1 1 1V3H5v-.5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="0.8" opacity="0.6"/><line x1="5.5" y1="6" x2="10.5" y2="6" stroke="currentColor" stroke-width="0.8" opacity="0.5"/><line x1="5.5" y1="8.5" x2="10.5" y2="8.5" stroke="currentColor" stroke-width="0.8" opacity="0.5"/><line x1="5.5" y1="11" x2="8.5" y2="11" stroke="currentColor" stroke-width="0.8" opacity="0.5"/></svg></span><span class="sp-idea-inject" title="Send immediately and generate"><svg viewBox="0 0 16 16" width="12" height="12" fill="none"><path d="M3 2.5L13 8L3 13.5V9.5L9 8L3 6.5z" fill="currentColor" opacity="0.7" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"/></svg></span></div><div class="sp-idea-body"><div class="sp-idea-hook">${esc(b.hook)}</div></div>`;
+        for(const b of d.plotBranches){const cat=cats[b.type]||cats.exploratory;const c=document.createElement('div');c.className=`sp-idea-card sp-idea-${b.type}`;c.dataset.ft='branch_'+b.type;c.style.setProperty('--idea-color',cat.color);c.innerHTML=`<div class="sp-idea-header"><span class="sp-idea-chevron">\u25B6</span><span class="sp-idea-icon">${cat.icon}</span><span class="sp-idea-type">${cat.label}</span><span class="sp-idea-name">${esc(b.name)}</span><span class="sp-idea-spacer"></span><span class="sp-idea-paste" title="${esc(t('Paste to message box (edit before sending)'))}"><svg viewBox="0 0 16 16" width="12" height="12" fill="none"><rect x="3" y="2" width="10" height="12" rx="1.5" stroke="currentColor" stroke-width="1.2"/><path d="M6 1.5h4a1 1 0 0 1 1 1V3H5v-.5a1 1 0 0 1 1-1z" stroke="currentColor" stroke-width="0.8" opacity="0.6"/><line x1="5.5" y1="6" x2="10.5" y2="6" stroke="currentColor" stroke-width="0.8" opacity="0.5"/><line x1="5.5" y1="8.5" x2="10.5" y2="8.5" stroke="currentColor" stroke-width="0.8" opacity="0.5"/><line x1="5.5" y1="11" x2="8.5" y2="11" stroke="currentColor" stroke-width="0.8" opacity="0.5"/></svg></span><span class="sp-idea-inject" title="${esc(t('Send immediately and generate'))}"><svg viewBox="0 0 16 16" width="12" height="12" fill="none"><path d="M3 2.5L13 8L3 13.5V9.5L9 8L3 6.5z" fill="currentColor" opacity="0.7" stroke="currentColor" stroke-width="0.8" stroke-linejoin="round"/></svg></span></div><div class="sp-idea-body"><div class="sp-idea-hook">${esc(b.hook)}</div></div>`;
         c.querySelector('.sp-idea-header').addEventListener('click',(e)=>{if(e.target.closest('.sp-idea-paste')||e.target.closest('.sp-idea-inject'))return;c.classList.toggle('sp-card-open')});
         c.querySelector('.sp-idea-paste').addEventListener('click',(e)=>{e.stopPropagation();const direction=`[OOC: Take the story in a ${b.type} direction \u2014 "${b.name}". ${b.hook}]`;const textarea=document.getElementById('send_textarea');if(textarea){textarea.value=direction;textarea.dispatchEvent(new Event('input',{bubbles:true}));textarea.focus();toastr.info(`${cat.label}: ${b.name}`,'Pasted \u2014 edit and send when ready')}});
         c.querySelector('.sp-idea-inject').addEventListener('click',(e)=>{e.stopPropagation();injectStoryIdea(b,cat)});
@@ -1333,12 +1341,13 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     // Custom Panels (v6.9.14: per-chat definitions)
     const customPanels=getActivePanels(s);
     for(const cp of customPanels){
-        if(!cp.fields?.length||cp.enabled===false)continue;
-        const cpKey='custom_'+cp.name.replace(/\s+/g,'_').toLowerCase();
-        const _cpSec=mkSection(cpKey,cp.name,null,()=>{
+        if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
+        const cpName=typeof cp.name==='string'&&cp.name.trim()?cp.name:'Untitled';
+        const cpKey=customPanelSectionKey(cpName);
+        const _cpSec=mkSection(cpKey,cpName,null,()=>{
             const frag=document.createDocumentFragment();
             for(const f of cp.fields){
-                if(f.enabled===false)continue; // v6.9.13: per-field toggle
+                if(!f||f.enabled===false||!isValidCustomFieldKey(f.key))continue; // v6.9.13: per-field toggle
                 const r=document.createElement('div');r.className='sp-row';
                 r.innerHTML=`<div class="sp-row-label">${esc(f.label||f.key)}</div>`;
                 if(f.type==='meter'){
@@ -1354,7 +1363,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     // v6.9.12: severity-colored badge pill
                     const val=str(d[f.key])||'';
                     const opts=Array.isArray(f.options)?f.options:[];
-                    const idx=opts.findIndex(o=>o.toLowerCase()===val.toLowerCase());
+                    const idx=opts.findIndex(o=>String(o).toLowerCase()===val.toLowerCase());
                     const severity=opts.length>1&&idx>=0?Math.min(3,Math.floor((idx/(opts.length-1))*4)):0;
                     const chip=document.createElement('span');
                     chip.className='sp-cp-enum-chip';chip.dataset.severity=severity;
@@ -1418,10 +1427,10 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         } catch {}
         if(currentSnapshotMesIdx>=0)fhtml+=`<span title="${t('Message index')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 11V3a1 1 0 0 1 1-1h5l4 4v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.1"/><path d="M7 2v4h4" stroke="currentColor" stroke-width="0.9" opacity="0.5"/></svg> #${currentSnapshotMesIdx}</span>`;
         if(_mTokens>0)fhtml+=`<span title="${t('Estimated tokens')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><rect x="1" y="3" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.1"/><line x1="4" y1="6" x2="4" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.6"/><line x1="7" y1="5" x2="7" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><line x1="10" y1="7" x2="10" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.4"/></svg> ~${_mTokens.toLocaleString()}</span>`;
-        if(_mElapsed>0)fhtml+=`<span title="${t('Generation time')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.1"/><path d="M7 4v3.5l2.5 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg> ${_mElapsed.toFixed(1)}s</span>`;
+        if(_mElapsed>0)fhtml+=`<span class="sp-gen-summary" title="${t('Generation time')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.1"/><path d="M7 4v3.5l2.5 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg> ${_mElapsed.toFixed(1)}s</span>`;
         if(_mInject==='inline')fhtml+=`<span title="${t('Together')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 7h4l1.5-3 2 6 1.5-3h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${t('Together')}</span>`;
         else fhtml+=`<span title="${t('Separate')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="4.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/><circle cx="9.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/></svg> ${t('Separate')}</span>`;
-        if(_mSource){const srcMap={'auto:together':t('Auto'),'auto:together:backup':t('Backup'),'auto:together:fallback':t('Fallback'),'auto:separate':t('Auto'),'manual:full':t('Full regen'),'manual:settings':t('Settings'),'manual:message':t('Msg regen'),'manual:thoughts':t('Thoughts')};let srcLabel=srcMap[_mSource]||'';if(!srcLabel&&_mSource.startsWith('manual:section:'))srcLabel=_mSource.replace('manual:section:','');const isFallback=_mSource.includes('fallback');const isBackup=_mSource.includes('backup');const cls=isFallback?'sp-gen-src sp-gen-src-warn':isBackup?'sp-gen-src sp-gen-src-warn':'sp-gen-src';if(srcLabel)fhtml+=`<span title="Source: ${esc(_mSource)}" class="${cls}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.4"/><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1" opacity="0.4"/></svg> ${esc(srcLabel)}</span>`}
+        if(_mSource){const srcMap={'auto:together':t('Auto'),'auto:together:backup':t('Backup'),'auto:together:fallback':t('Fallback'),'auto:separate':t('Auto'),'manual:full':t('Full regen'),'manual:settings':t('Settings'),'manual:message':t('Msg regen'),'manual:thoughts':t('Thoughts')};let srcLabel=srcMap[_mSource]||'';if(!srcLabel&&_mSource.startsWith('manual:section:'))srcLabel=_mSource.replace('manual:section:','');const isFallback=_mSource.includes('fallback');const isBackup=_mSource.includes('backup');const cls=isFallback?'sp-gen-src sp-gen-src-warn':isBackup?'sp-gen-src sp-gen-src-warn':'sp-gen-src';if(srcLabel)fhtml+=`<span title="${esc(t('Source: {source}',{source:_mSource}))}" class="${cls}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.4"/><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1" opacity="0.4"/></svg> ${esc(srcLabel)}</span>`}
         // Tracking-only token cost (just the tracker portion, not narrative)
         if(_mTokens>0)fhtml+=`<span title="${t('Tracker data tokens only (excludes narrative)')}" class="sp-gen-badge-tracker">${t('Tracker')}: ~${_mTokens.toLocaleString()}</span>`;
         // Delta savings indicator (read from snapshot metadata for historical nodes, fallback to current session)
@@ -1444,23 +1453,16 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         fhtml+=`<span class="sp-gen-debug" title="${t('Open Debug Inspector (Ctrl+Shift+D)')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M5 3a2 2 0 0 1 4 0v1H5V3z" stroke="currentColor" stroke-width="1.1" stroke-linecap="round" stroke-linejoin="round"/><rect x="3.5" y="4" width="7" height="6.5" rx="3" stroke="currentColor" stroke-width="1.1"/><line x1="2" y1="6" x2="3.5" y2="6.5" stroke="currentColor" stroke-width="1"/><line x1="12" y1="6" x2="10.5" y2="6.5" stroke="currentColor" stroke-width="1"/><line x1="2" y1="10" x2="3.5" y2="9" stroke="currentColor" stroke-width="1"/><line x1="12" y1="10" x2="10.5" y2="9" stroke="currentColor" stroke-width="1"/><line x1="7" y1="11" x2="7" y2="13" stroke="currentColor" stroke-width="1"/></svg> ${t('Debug')}</span>`;
         // Analytics button
         fhtml+=`<span class="sp-gen-analytics" title="${t('Token analytics')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><rect x="1.5" y="8" width="2" height="4.5" rx="0.4" fill="currentColor" opacity="0.4"/><rect x="4.5" y="5.5" width="2" height="7" rx="0.4" fill="currentColor" opacity="0.5"/><rect x="7.5" y="3" width="2" height="9.5" rx="0.4" fill="currentColor" opacity="0.6"/><rect x="10.5" y="1" width="2" height="11.5" rx="0.4" fill="currentColor" opacity="0.7"/></svg> ${t('Analytics')}</span>`;
-        // Tool calling status indicator (Separate mode only)
-        {const _isFnTool=_mSource==='auto:function_tool';const _fnEnabled=s.functionToolEnabled&&s.injectionMethod==='separate';
-        const _fnFellBack=_fnEnabled&&!_isFnTool&&_mSource&&_mSource!=='';
-        if(_fnEnabled||_isFnTool){
-            const _fnCls=_isFnTool?'sp-gen-badge-fn sp-gen-badge-fn-ok':_fnFellBack?'sp-gen-badge-fn sp-gen-badge-fn-fail':'sp-gen-badge-fn sp-gen-badge-fn-standby';
-            const _fnTip=_isFnTool?t('Function tool calling succeeded')
-                :_fnFellBack?t('Tool calling enabled but model did not call the tool — fell back to inline extraction')
-                :t('Function tool calling enabled — awaiting generation');
-            const _fnLabel=_isFnTool?t('Tool OK'):_fnFellBack?t('Tool Miss'):t('Tool');
-            const _fnIcon=_isFnTool
-                ?'<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 7.5l3 3 7-7" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>'
-                :_fnFellBack
-                ?'<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.1"/><line x1="4.5" y1="4.5" x2="9.5" y2="9.5" stroke="currentColor" stroke-width="1.2"/><line x1="9.5" y1="4.5" x2="4.5" y2="9.5" stroke="currentColor" stroke-width="1.2"/></svg>'
-                :'<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M8 2L5 7h3l-1 5 4-6H8l1-4z" stroke="currentColor" stroke-width="1" fill="currentColor" opacity="0.5"/></svg>';
-            fhtml+=`<span class="${_fnCls}" title="${_fnTip}">${_fnIcon} ${_fnLabel}</span>`;
-        }}
         footer.innerHTML=fhtml;
+        for(const item of footer.querySelectorAll(':scope > span')){
+            if(!item.classList.contains('sp-gen-badge-profile')&&!item.classList.contains('sp-gen-summary')&&!item.classList.contains('sp-gen-badge-mode'))item.classList.add('sp-gen-detail');
+        }
+        if(footer.querySelector('.sp-gen-detail')){
+            const diagnostics=document.createElement('button');diagnostics.className='sp-gen-more';diagnostics.type='button';
+            diagnostics.title=t('Diagnostics');diagnostics.setAttribute('aria-label',t('Diagnostics'));diagnostics.setAttribute('aria-expanded','false');diagnostics.textContent='•••';
+            diagnostics.addEventListener('click',()=>{const open=footer.classList.toggle('sp-gen-footer-expanded');diagnostics.setAttribute('aria-expanded',String(open))});
+            footer.appendChild(diagnostics);
+        }
         // v6.22.0: profile badge → opens the Profile manager (settings panel
         // already has the manager mounted; we trigger its button via DOM so
         // we don't have to import profiles-manager directly from here).

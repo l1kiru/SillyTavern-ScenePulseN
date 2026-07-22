@@ -1,0 +1,9 @@
+{
+  "name": "sillytavern-scenepulse",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node tests/run-all.mjs",
+    "sync-locales": "node tools/sync-locales.mjs"
+  }
+}

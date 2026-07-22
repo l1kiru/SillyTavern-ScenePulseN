@@ -29,6 +29,11 @@
     filter: drop-shadow(0 0 6px rgba(77,184,164,0.4));
     transform: scale(1.15);
 }
+
+@media (max-width: 600px) {
+    .sp-st-restore { width: 44px; height: 44px; padding: 8px; }
+    .sp-st-restore svg { width: 28px; height: 28px; }
+}
 /* Generation pulse animation — subtle, no heavy glow */
 .sp-st-generating {
     animation: sp-gen-pulse 1.2s ease-in-out infinite !important;
@@ -151,6 +156,13 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 #sp-panel.sp-mode-mobile .sp-section-header { padding: 12px 14px; min-height: 48px; }
 #sp-panel.sp-mode-mobile .sp-section-title { font-size: var(--sp-fs-sm); }
 #sp-panel.sp-mode-mobile .sp-section-badge { font-size: var(--sp-fs-xs); padding: 2px 7px; min-width: 18px; }
+#sp-panel.sp-mode-mobile .sp-scene-section .sp-section-header { flex-wrap: wrap; }
+#sp-panel.sp-mode-mobile .sp-scene-section .sp-section-spacer { order: 3; }
+#sp-panel.sp-mode-mobile .sp-scene-section .sp-section-refresh { order: 4; }
+#sp-panel.sp-mode-mobile .sp-scene-section .sp-section-badge {
+    order: 5; flex: 1 0 calc(100% - 28px); max-width: calc(100% - 28px);
+    margin-left: 18px;
+}
 #sp-panel.sp-mode-mobile .sp-section-chevron { font-size: var(--sp-fs-xs); }
 /* Scene Details */
 #sp-panel.sp-mode-mobile .sp-row { padding: 6px 12px; }
@@ -167,7 +179,6 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 #sp-panel.sp-mode-mobile .sp-rel-name { font-size: var(--sp-fs-lg); }
 #sp-panel.sp-mode-mobile .sp-rel-type-badge, #sp-panel.sp-mode-mobile .sp-rel-phase-badge { font-size: var(--sp-fs-xs); padding: 3px 8px; }
 #sp-panel.sp-mode-mobile .sp-rel-meta-label { font-size: var(--sp-fs-xs); min-width: 70px; }
-#sp-panel.sp-mode-mobile .sp-rel-meta-value { font-size: var(--sp-fs-base); }
 /* v6.13.7: minmax(0, X) locks the column width regardless of content.
    See css/relationships.css for rationale. */
 #sp-panel.sp-mode-mobile .sp-meter-row { grid-template-columns: auto 1fr minmax(0, 70px) 44px; gap: 4px; padding: 3px 0; }
@@ -179,11 +190,16 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 /* Characters */
 #sp-panel.sp-mode-mobile .sp-char-header { padding: 10px 12px; min-height: 48px; }
 #sp-panel.sp-mode-mobile .sp-char-name { font-size: var(--sp-fs-lg); }
-#sp-panel.sp-mode-mobile .sp-char-role-badge { font-size: var(--sp-fs-xs); max-width: 200px; }
 #sp-panel.sp-mode-mobile .sp-char-val { font-size: var(--sp-fs-base); }
 /* Story Ideas */
 #sp-panel.sp-mode-mobile .sp-idea-header { padding: 10px 12px; min-height: 48px; }
 #sp-panel.sp-mode-mobile .sp-idea-name { font-size: var(--sp-fs-md); }
+#sp-panel.sp-mode-mobile .sp-idea-name {
+    white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2; line-height: 1.25;
+}
+#sp-panel.sp-mode-mobile .sp-idea-inject,
+#sp-panel.sp-mode-mobile .sp-idea-paste { opacity: 0.85; }
 #sp-panel.sp-mode-mobile .sp-idea-hook { font-size: var(--sp-fs-base); padding: 8px 12px; }
 #sp-panel.sp-mode-mobile .sp-idea-paste, #sp-panel.sp-mode-mobile .sp-idea-inject { width: 32px; height: 32px; }
 /* Timeline */
@@ -191,6 +207,9 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 #sp-panel.sp-mode-mobile .sp-tl-bar { width: 90%; }
 #sp-panel.sp-mode-mobile .sp-tl-dot { width: 14px; height: 14px; }
 #sp-panel.sp-mode-mobile .sp-tl-label { font-size: var(--sp-fs-xs); }
+#sp-panel.sp-mode-mobile .sp-tl-node:first-child .sp-tl-label,
+#sp-panel.sp-mode-mobile .sp-tl-node:last-child .sp-tl-label,
+#sp-panel.sp-mode-mobile .sp-tl-label-active { opacity: 0.8; }
 #sp-panel.sp-mode-mobile .sp-tl-disc-btn { padding: 6px 12px; font-size: var(--sp-fs-xs); }
 /* Timeline disclaimer text bigger on mobile */
 #sp-panel.sp-mode-mobile .sp-tl-disclaimer { font-size: var(--sp-fs-base); line-height: 1.5; padding: 10px 12px; text-align: center; width: 90%; }
@@ -204,7 +223,6 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 #sp-panel.sp-mode-mobile .sp-regen-text { font-size: var(--sp-fs-md); font-weight: 700; }
 #sp-panel.sp-mode-mobile .sp-regen-inline .sp-regen-text { font-size: var(--sp-fs-sm); }
 #sp-panel.sp-mode-mobile .sp-regen-inline .sp-regen-spinner { width: 28px; height: 28px; }
-#sp-panel.sp-mode-mobile .sp-overlay-label { font-size: var(--sp-fs-sm); }
 #sp-panel.sp-mode-mobile .sp-inline-wait { font-size: var(--sp-fs-base); padding: 10px 14px; }
 #sp-panel.sp-mode-mobile .sp-inline-wait-spinner { width: 14px; height: 14px; }
 /* Top-right bleed prevention */
@@ -227,15 +245,12 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 #sp-panel.sp-mode-mobile .sp-cp-add-field { padding: 10px 14px; min-height: 44px; }
 #sp-panel.sp-mode-mobile .sp-cp-drag-handle { font-size: 18px; width: 28px; }
 /* Settings */
-#sp-panel.sp-mode-mobile .sp-btn { padding: 8px 14px; font-size: var(--sp-fs-base); min-height: 44px; }
+#sp-panel.sp-mode-mobile .sp-btn, #sp-panel.sp-mode-mobile .sp-empty-action { padding: 8px 14px; font-size: var(--sp-fs-base); min-height: 44px; }
 #sp-panel.sp-mode-mobile .sp-ck { padding: 10px 0; font-size: var(--sp-fs-sm); min-height: 44px; }
 #sp-panel.sp-mode-mobile .sp-fs select, #sp-panel.sp-mode-mobile .sp-fi input { font-size: var(--sp-fs-sm); padding: 8px 10px; min-height: 44px; }
 /* Scene Transition */
 #sp-panel.sp-mode-mobile ~ #sp-scene-transition, .sp-mode-mobile #sp-scene-transition { font-size: 28px; padding: 30px 20px; -webkit-mask-image: radial-gradient(ellipse 90% 85% at center, black 25%, transparent 70%); mask-image: radial-gradient(ellipse 90% 85% at center, black 25%, transparent 70%); }
 @media (max-width: 600px) { #sp-scene-transition { font-size: 28px !important; padding: 30px 20px !important; -webkit-mask-image: radial-gradient(ellipse 90% 85% at center, black 25%, transparent 70%) !important; mask-image: radial-gradient(ellipse 90% 85% at center, black 25%, transparent 70%) !important; } }
-/* Fertility inline on mobile */
-#sp-panel.sp-mode-mobile .sp-fert-inline-label { font-size: var(--sp-fs-xs); }
-#sp-panel.sp-mode-mobile .sp-fert-inline-val { font-size: var(--sp-fs-xs); }
 /* Thought Panel on mobile */
 .sp-mode-mobile ~ #sp-thought-panel, #sp-panel.sp-mode-mobile ~ #sp-thought-panel {
     width: 100vw !important; left: 0 !important; right: 0 !important;

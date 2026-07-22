@@ -4,11 +4,12 @@
 import { log, warn } from './logger.js';
 import { t } from './i18n.js';
 import { spConfirm } from './utils.js';
-import { getSettings, saveSettings, getLatestSnapshot, getTrackerData, anyPanelsActive, forceFullStateRefresh, clearForceFullState } from './settings.js';
+import { getSettings, saveSettings, getLatestSnapshot, getTrackerData, clearAllSnapshots, anyPanelsActive, forceFullStateRefresh, clearForceFullState, buildProfileView } from './settings.js';
 import { getActiveProfile, setActiveProfile } from './profiles.js';
 import { normalizeTracker, clearNormCache } from './normalize.js';
 import { generating } from './state.js';
-import { BUILTIN_PANELS, VERSION } from './constants.js';
+import { BUILTIN_PANELS, DEFAULTS, VERSION } from './constants.js';
+import { renderEmptyState } from './ui/empty-state.js';
 
 let _registered = false;
 
@@ -170,18 +171,19 @@ function _spHelp() {
 // ── /sp status ──
 function _spStatus() {
     const s = getSettings();
+    const ap = getActiveProfile(s);
+    const sView = buildProfileView(s, ap);
     const snap = getLatestSnapshot();
     const data = getTrackerData();
     const snapCount = Object.keys(data.snapshots || {}).length;
-    const enabledPanels = Object.entries(s.panels || {}).filter(([, v]) => v !== false).map(([k]) => k);
+    const enabledPanels = Object.entries({ ...DEFAULTS.panels, ...sView.panels }).filter(([, v]) => v !== false).map(([k]) => k);
 
     if (!snap) {
-        const apEmpty = getActiveProfile(s);
         return [
             `ScenePulse v${VERSION}`,
             `Enabled: ${s.enabled ? 'Yes' : 'No'}`,
             `Mode: ${s.injectionMethod || 'inline'}${s.deltaMode ? ' (delta)' : ''}`,
-            `Profile: ${apEmpty?.name || '(none)'}`,
+            `Profile: ${ap?.name || '(none)'}`,
             `Panels: ${enabledPanels.join(', ') || 'none'}`,
             `Snapshots: ${snapCount}`,
             'No tracker data yet — send a message to generate.',
@@ -195,7 +197,6 @@ function _spStatus() {
     const sideQ = norm.sideQuests?.filter(q => q.urgency !== 'resolved').length || 0;
     const meta = snap._spMeta || {};
 
-    const ap = getActiveProfile(s);
     return [
         `ScenePulse v${VERSION} — Status`,
         `Mode: ${s.injectionMethod || 'inline'}${s.deltaMode ? ' (delta)' : ''} | Language: ${s.language || 'English'}`,
@@ -213,7 +214,7 @@ function _spStatus() {
         `Quests: ${mainQ} main, ${sideQ} side`,
         `North Star: ${norm.northStar || 'Not revealed'}`,
         '',
-        meta.elapsed ? `Last gen: ${meta.elapsed.toFixed(1)}s | ~${(meta.promptTokens || 0) + (meta.completionTokens || 0)} tokens | Source: ${meta.source || '?'}` : '',
+        meta.elapsed ? `${t('Last gen')}: ${meta.elapsed.toFixed(1)}s | ~${(meta.promptTokens || 0) + (meta.completionTokens || 0)} ${t('tokens')} | ${t('Source')}: ${meta.source || '?'}` : '',
     ].filter(Boolean).join('\n');
 }
 
@@ -328,14 +329,13 @@ async function _spClear() {
     if (!count) return 'No tracker data to clear.';
     if (!await spConfirm(t('Clear Data'), t('Remove all tracker snapshots from this chat?') + ` (${count} snapshots)`)) return 'Cancelled.';
 
-    data.snapshots = {};
+    clearAllSnapshots();
     clearNormCache();
     try { SillyTavern.getContext().saveMetadata(); } catch (e) { warn('sp-clear save:', e); }
 
     // Clear panel
     try {
-        const body = document.getElementById('sp-panel-body');
-        if (body) body.innerHTML = '<div class="sp-empty-state"><div class="sp-empty-icon">📡</div><div class="sp-empty-title">No scene data yet</div><div class="sp-empty-sub">Tracker data cleared. Click <strong>⟳</strong> to regenerate.</div></div>';
+        renderEmptyState();
         import('./ui/timeline.js').then(m => m.renderTimeline?.()).catch(() => {});
     } catch {}
 
@@ -352,16 +352,19 @@ async function _spClear() {
 
 // ── /sp toggle ──
 // v6.13.4 (issue #7): also handles custom panels (per-chat). Built-in
-// panels live on s.panels; custom panels live on chatMetadata.scenepulse
+// panels live on the active profile; custom panels live on chatMetadata.scenepulse
 // .chatPanels (each with its own enabled flag). The matcher checks both
 // lists case-insensitively before reporting Unknown.
 function _spToggle(args, value) {
     const rawPanel = (Array.isArray(value) ? value[0] : value || '').toString().trim();
     const panelLow = rawPanel.toLowerCase();
     const s = getSettings();
+    const activeProfile = getActiveProfile(s);
+    const sView = buildProfileView(s, activeProfile);
+    const profileSettings = s.profiles?.find(p => p?.id === activeProfile?.id) || s;
 
     if (!panelLow) {
-        const builtinStatus = Object.entries(s.panels || {})
+        const builtinStatus = Object.entries({ ...DEFAULTS.panels, ...sView.panels })
             .map(([k, v]) => `  ${k}: ${v !== false ? 'ON' : 'OFF'}`)
             .join('\n');
         let customStatus = '';
@@ -380,8 +383,9 @@ function _spToggle(args, value) {
     const validPanels = Object.keys(BUILTIN_PANELS);
     const panel = validPanels.find(k => k.toLowerCase() === panelLow);
     if (panel) {
-        if (!s.panels) s.panels = {};
-        s.panels[panel] = s.panels[panel] === false ? true : false;
+        profileSettings.panels = { ...DEFAULTS.panels, ...sView.panels };
+        profileSettings.panels[panel] = profileSettings.panels[panel] === false;
+        if (profileSettings !== s) profileSettings.updatedAt = new Date().toISOString();
         saveSettings();
         try {
             const snap = getLatestSnapshot();
@@ -390,8 +394,8 @@ function _spToggle(args, value) {
                 import('./ui/update-panel.js').then(m => m.updatePanel?.(norm, true)).catch(() => {});
             }
         } catch {}
-        log('Slash command: /sp toggle (builtin)', panel, '→', s.panels[panel] ? 'ON' : 'OFF');
-        return `${BUILTIN_PANELS[panel]?.name || panel}: ${s.panels[panel] ? 'ON' : 'OFF'}`;
+        log('Slash command: /sp toggle (builtin)', panel, '→', profileSettings.panels[panel] ? 'ON' : 'OFF');
+        return `${BUILTIN_PANELS[panel]?.name || panel}: ${profileSettings.panels[panel] ? 'ON' : 'OFF'}`;
     }
 
     // 2. Try custom panels in current chat (case-insensitive on name)
@@ -436,6 +440,7 @@ function _spExport() {
     // bundle that produced the snapshots. Per-chat panels also included
     // for parity with the in-app Export Config button.
     const ap = getActiveProfile(s);
+    const sView = buildProfileView(s, ap);
     const exportData = {
         extension: 'ScenePulse',
         version: VERSION,
@@ -444,8 +449,8 @@ function _spExport() {
             injectionMethod: s.injectionMethod,
             deltaMode: s.deltaMode,
             language: s.language,
-            panels: s.panels,
-            customPanels: s.customPanels,
+            panels: sView.panels,
+            customPanels: sView.customPanels,
             profiles: s.profiles,
             activeProfileId: s.activeProfileId,
         },
@@ -516,6 +521,8 @@ function _spProfile(args, value) {
 // ── /sp debug ──
 function _spDebug() {
     const s = getSettings();
+    const activeProfile = getActiveProfile(s);
+    const sView = buildProfileView(s, activeProfile);
     const data = getTrackerData();
     const snap = getLatestSnapshot();
     const snapCount = Object.keys(data.snapshots || {}).length;
@@ -534,18 +541,17 @@ function _spDebug() {
         `Fallback: ${s.fallbackEnabled ? 'enabled' : 'disabled'} | Profile: ${s.fallbackProfile || '(none)'}`,
         '',
         `Snapshots: ${snapCount} / ${s.maxSnapshots > 0 ? s.maxSnapshots : '∞'}`,
-        `Active panels: ${Object.entries(s.panels || {}).filter(([, v]) => v !== false).map(([k]) => k).join(', ')}`,
-        `Custom panels: ${(s.customPanels || []).length}`,
-        `Field toggles: ${Object.entries(s.fieldToggles || {}).filter(([, v]) => v === false).length} disabled`,
+        `Active panels: ${Object.entries({ ...DEFAULTS.panels, ...sView.panels }).filter(([, v]) => v !== false).map(([k]) => k).join(', ')}`,
+        `Custom panels: ${(sView.customPanels || []).length}`,
+        `Field toggles: ${Object.entries(sView.fieldToggles || {}).filter(([, v]) => v === false).length} disabled`,
         '',
         snap ? `Latest snapshot keys: ${Object.keys(snap).filter(k => k !== '_spMeta').join(', ')}` : 'No snapshot data',
         snap?.characters ? `Characters: ${snap.characters.map(c => c.name).join(', ')}` : '',
         snap?.relationships ? `Relationships: ${snap.relationships.map(r => r.name).join(', ')}` : '',
         '',
         meta.source ? `Last gen: source=${meta.source} elapsed=${meta.elapsed?.toFixed(1)}s tokens=~${(meta.promptTokens || 0) + (meta.completionTokens || 0)}` : 'No generation metadata',
-        `Active profile: ${getActiveProfile(s).name || '(unset)'}`,
-        `Schema: ${getActiveProfile(s).schema ? 'custom override' : 'dynamic (auto)'}`,
-        `Prompt: ${getActiveProfile(s).systemPrompt ? 'custom override' : 'dynamic (auto)'}`,
-        `Lorebook mode: ${s.lorebookMode || 'character_attached'}`,
+        `Active profile: ${activeProfile.name || '(unset)'}`,
+        `Schema: ${activeProfile.schema ? 'custom override' : 'dynamic (auto)'}`,
+        `Prompt: ${activeProfile.systemPrompt ? 'custom override' : 'dynamic (auto)'}`,
     ].filter(l => l !== undefined).join('\n');
 }

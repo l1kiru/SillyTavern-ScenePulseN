@@ -25,9 +25,6 @@
 .sp-st-sep {
     font-weight: 100; opacity: 0.4; font-size: 32px;
 }
-#sp-scene-transition .sp-st-line {
-    display: flex; align-items: center; gap: 24px;
-}
 #sp-scene-transition .sp-st-rule {
     display: block; width: 140px; height: 1px; opacity: 0;
     background: linear-gradient(90deg, transparent, rgba(77,184,164,0.6), transparent);

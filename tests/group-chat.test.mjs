@@ -143,9 +143,9 @@ console.log('\n── _isPrimary in group chat ──');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 4. Group carry-forward — missing members restored from prev snapshot
+// 4. Normalization does not resurrect group members absent from this turn
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\n── Group carry-forward: missing members restored ──');
+console.log('\n── Group presence: absent members stay absent ──');
 {
     setGroupChat(['Alice', 'Bob', 'Carol']);
     // Seed a previous snapshot with full state for all three group members
@@ -168,24 +168,17 @@ console.log('\n── Group carry-forward: missing members restored ──');
         relationships: [],
     };
     const norm = normalizeTracker(d);
-    // All three group members should be present in the normalized output
-    assertEq('carry-forward: 3 chars in output', norm.characters.length, 3);
+    assertEq('only emitted character remains', norm.characters.length, 1);
     const names = norm.characters.map(c => c.name).sort();
-    assertEq('carry-forward: names preserved', names, ['Alice', 'Bob', 'Carol']);
-    // Alice gets the fresh data from the current turn
+    assertEq('absent members not resurrected', names, ['Alice']);
     const alice = norm.characters.find(c => c.name === 'Alice');
     assertEq('Alice has fresh innerThought', alice?.innerThought, 'current alice');
-    // Bob and Carol are carried forward from prev with their old data intact
-    const bob = norm.characters.find(c => c.name === 'Bob');
-    const carol = norm.characters.find(c => c.name === 'Carol');
-    assertEq('Bob carried forward with prev data', bob?.innerThought, 'prev bob');
-    assertEq('Carol carried forward with prev data', carol?.innerThought, 'prev carol');
 }
 
 // ═══════════════════════════════════════════════════════════════════════
-// 5. filterForView preserves group members even if missing from charactersPresent
+// 5. filterForView honors charactersPresent in group chats
 // ═══════════════════════════════════════════════════════════════════════
-console.log('\n── filterForView: group member rescue ──');
+console.log('\n── filterForView: explicit group presence ──');
 {
     setGroupChat(['Alice', 'Bob', 'Carol']);
     const snap = {
@@ -208,12 +201,9 @@ console.log('\n── filterForView: group member rescue ──');
     };
     const view = filterForView(snap);
     const viewNames = (view.characters || []).map(c => c.name).sort();
-    // Alice (in charactersPresent), Bob (group member), Carol (group member)
-    // should all survive. Waiter (not in charactersPresent, not a group member)
-    // should be filtered out.
-    assertEq('filterForView preserves group members', viewNames, ['Alice', 'Bob', 'Carol']);
+    assertEq('filterForView keeps only explicitly present member', viewNames, ['Alice']);
     const viewRels = (view.relationships || []).map(r => r.name).sort();
-    assertEq('filterForView preserves group member relationships', viewRels, ['Alice', 'Bob', 'Carol']);
+    assertEq('filterForView keeps only explicitly present relationship', viewRels, ['Alice']);
 }
 
 // ═══════════════════════════════════════════════════════════════════════

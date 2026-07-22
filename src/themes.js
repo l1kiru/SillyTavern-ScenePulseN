@@ -1,13 +1,36 @@
 // src/themes.js — Theme presets system
-// 6 themes that swap CSS custom properties on the panel root
+// Theme presets that swap ScenePulse CSS custom properties.
 
 import { log } from './logger.js';
-import { t } from './i18n.js';
 
 export const THEMES = {
     default: {
         name: 'Default',
         vars: {} // Uses variables.css defaults
+    },
+    sillytavern: {
+        name: 'SillyTavern',
+        vars: {
+            // ST controls the neutral shell; ScenePulse keeps its semantic palette.
+            // Quote/emphasis colors can be nearly grey in user themes and are not
+            // suitable as the only accent or contrast source for a dense dashboard.
+            '--sp-accent': '#4db8a4',
+            '--sp-accent-dim': 'rgba(77,184,164,0.15)',
+            '--sp-accent-glow': 'rgba(77,184,164,0.4)',
+            '--sp-bg': 'color-mix(in srgb, var(--SmartThemeBlurTintColor) 86%, #101218)',
+            '--sp-bg-solid': 'color-mix(in srgb, var(--SmartThemeBlurTintColor) 86%, #101218)',
+            '--sp-surface': 'color-mix(in srgb, var(--SmartThemeBodyColor) 6%, var(--sp-bg-solid))',
+            '--sp-surface-hover': 'color-mix(in srgb, var(--SmartThemeBodyColor) 11%, var(--sp-bg-solid))',
+            '--sp-border': 'color-mix(in srgb, var(--SmartThemeBodyColor) 10%, transparent)',
+            '--sp-border-strong': 'color-mix(in srgb, var(--SmartThemeBodyColor) 18%, transparent)',
+            '--sp-text': 'var(--SmartThemeBodyColor)',
+            '--sp-text-dim': 'color-mix(in srgb, var(--SmartThemeBodyColor) 64%, transparent)',
+            '--sp-text-bright': 'var(--SmartThemeBodyColor)',
+            '--sp-font': 'var(--mainFontFamily)',
+            '--sp-font-mono': 'var(--monoFontFamily)',
+            '--sp-radius': '5px',
+            '--sp-radius-lg': '10px',
+        }
     },
     midnight: {
         name: 'Midnight',
@@ -99,24 +122,15 @@ export function applyTheme(themeId) {
         return;
     }
 
-    // Inject <style> element with CSS variable overrides scoped to SP elements
+    // ScenePulse variables are namespaced, so a body-level override safely reaches
+    // the panel, settings drawer and any modal mounted outside either container.
     const varsCSS = Object.entries(theme.vars).map(([k, v]) => `${k}: ${v};`).join('\n    ');
     const style = document.createElement('style');
     style.id = 'sp-theme-style';
     style.textContent = `
-#sp-panel, #sp-thought-panel, .sp-diff-overlay, .sp-confirm-overlay, .sp-graph-popup, .sp-loading-glass {
+body {
     ${varsCSS}
 }`;
     document.head.appendChild(style);
     log('Theme applied:', themeId);
-}
-
-/**
- * Get list of available themes for settings UI.
- */
-export function getThemeList() {
-    return Object.entries(THEMES).map(([id, theme]) => ({
-        id,
-        name: t(theme.name),
-    }));
 }

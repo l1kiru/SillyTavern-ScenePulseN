@@ -3,7 +3,7 @@ import { log } from '../logger.js';
 import { t } from '../i18n.js';
 import { esc, clamp } from '../utils.js';
 import { relPhaseFamily } from '../rel-phase.js';
-import { getTrackerData, getLatestSnapshot, getPrevSnapshot, getSettings, saveSettings, getWikiArchive } from '../settings.js';
+import { getTrackerData, getPrevSnapshot, getSettings, saveSettings, getWikiArchive } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import { charColor } from '../color.js';
 import { createSparklineCanvas, _scrollToMessage } from './sparklines.js';
@@ -50,12 +50,6 @@ function _saveNote(name, text) {
     saveSettings();
 }
 function _getNote(name) { return _getNotes()[name.toLowerCase().trim()] || ''; }
-
-// v6.8.20: avatar lookup delegated to shared portraits module.
-// Kept as a thin wrapper so the rest of the file doesn't need to change
-// its call sites. buildPortraitIndex returns the same name → URL map the
-// old function did; resolvePortraitUrl adds user override + alias match.
-function _getAvatarUrl() { return buildPortraitIndex(); }
 
 // ── Build wiki entries from snapshot data ──
 //

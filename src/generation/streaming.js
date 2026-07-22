@@ -9,8 +9,41 @@ import {
     set_streamHiderInterval, set_streamHiderStart, set_streamHiderStyleEl, set_streamHiderObserver
 } from '../state.js';
 
+const TRACKER_STARTS=['<!--SP_TRACKER_START-->','{{//SP_TRACKER_START}}','[SCENE TRACKER','```json'];
+let _lockFromStreamEvent=null;
+
+// STREAM_TOKEN_RECEIVED supplies cumulative text before SillyTavern paints it.
+// Return the start of a complete marker, a marker prefix at the stream tail,
+// or a raw tracker object that starts on a new line.
+export function findTrackerPayloadStart(value){
+    const text=String(value||'');
+    for(const marker of TRACKER_STARTS){
+        const full=text.indexOf(marker);
+        if(full!==-1)return full;
+        for(let n=marker.length-1;n>=2;n--){
+            if(text.endsWith(marker.slice(0,n)))return text.length-n;
+        }
+    }
+    const lineStart=text.lastIndexOf('\n')+1;
+    const tail=text.slice(lineStart).trimStart().replace(/[ \t]+/g,'');
+    if(['{','{"','{"t','{"ti','{"tim','{"time','{"time"','{"time":'].includes(tail)||/^\{"time"\s*:/.test(tail))return lineStart;
+    return -1;
+}
+
+export function noteStreamingText(text){
+    const start=findTrackerPayloadStart(text);
+    if(start===-1||!_lockFromStreamEvent)return;
+    const value=String(text||'');
+    const lineStart=value.lastIndexOf('\n',Math.max(0,start-1))+1;
+    const startsOnOwnLine=value.slice(lineStart,start).trim()==='';
+    _lockFromStreamEvent(startsOnOwnLine);
+}
+
 export function startStreamingHider(){
     stopStreamingHider();
+    // stopStreamingHider removes styles after a short extraction grace period.
+    // A new generation must not inherit that old rule during the grace period.
+    document.getElementById('sp-stream-hider-style')?.remove();
     set_streamHiderStart(Date.now());
     const styleEl=document.createElement('style');
     styleEl.id='sp-stream-hider-style';
@@ -64,7 +97,31 @@ export function startStreamingHider(){
         return false;
     };
 
-    const _sel=()=>_mesId?`.mes[mesid="${_mesId}"] .mes_text`:`.mes:last-child .mes_text`;
+    const _sel=()=>_mesId?`.mes[mesid="${_mesId}"] .mes_text`:`.mes.last_mes:not([is_user="true"]) .mes_text`;
+
+    // Token events fire before ST updates the message DOM. Freeze at the
+    // currently-rendered (therefore tracker-free) height so no marker or JSON
+    // token can be painted. Mutation/polling below remains as a fallback for
+    // older ST builds that do not expose the event payload.
+    _lockFromStreamEvent=startsOnOwnLine=>{
+        if(_locked)return;
+        const el=document.querySelector('.mes.last_mes:not([is_user="true"]) .mes_text');
+        if(!el)return;
+        _lastMes=el;
+        _mesId=el.closest('.mes')?.getAttribute('mesid');
+        _safeH=Math.max(0,el.scrollHeight||0);
+        _locked=true;
+        const capPx=Math.ceil(_safeH);
+        // Height clipping preserves visible narrative when the tracker starts
+        // on its required new line. If a model violates that format and puts
+        // the marker inline, hide the message briefly: height alone cannot
+        // clip a same-line suffix without also leaking its first characters.
+        styleEl.textContent=startsOnOwnLine
+            ? `${_sel()}{max-height:${capPx}px!important;overflow:hidden!important}`
+            : `${_sel()}{visibility:hidden!important}`;
+        el.dataset.spHasTracker='true';
+        log('StreamHider: pre-paint LOCK at',capPx+'px mesid='+_mesId);
+    };
 
     // STRATEGY: Always apply a rolling max-height cap during streaming.
     // When JSON is detected, the cap freezes — JSON is behind overflow:hidden.
@@ -93,7 +150,7 @@ export function startStreamingHider(){
             // JSON detected — freeze at LAST safe height (do not remeasure;
             // the current text already contains tracker tokens).
             _locked=true;
-            const capPx=Math.max(40,Math.ceil(_safeH));
+            const capPx=Math.max(0,Math.ceil(_safeH));
             currentStyleEl.textContent=`${_sel()}{max-height:${capPx}px!important;overflow:hidden!important}`;
             if(_lastMes)_lastMes.dataset.spHasTracker='true';
             log('StreamHider: LOCKED at',capPx+'px mesid='+_mesId);
@@ -159,6 +216,7 @@ export function startStreamingHider(){
     set_streamHiderInterval(interval);
 }
 export function stopStreamingHider(){
+    _lockFromStreamEvent=null;
     if(_streamHiderInterval){
         const elapsed=_streamHiderStart?Math.round((Date.now()-_streamHiderStart)/1000):0;
         log('StreamHider: stopped after',elapsed+'s');
@@ -168,5 +226,10 @@ export function stopStreamingHider(){
     if(_streamHiderObserver){try{_streamHiderObserver.disconnect()}catch(e){}set_streamHiderObserver(null)}
     // Remove the CSS rule after a delay — gives extraction time to clean the DOM
     const styleElRef=_streamHiderStyleEl;
-    setTimeout(()=>{if(styleElRef){styleElRef.remove();set_streamHiderStyleEl(null)}},600);
+    setTimeout(()=>{
+        if(!styleElRef)return;
+        styleElRef.remove();
+        // A delayed cleanup from generation N must not clear generation N+1.
+        if(_streamHiderStyleEl===styleElRef)set_streamHiderStyleEl(null);
+    },600);
 }

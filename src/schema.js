@@ -8,6 +8,7 @@
 
 import { DEFAULTS, BUILTIN_PANELS, BUILTIN_SCHEMA } from './constants.js';
 import { getActivePanels } from './settings.js';
+import { isValidCustomFieldKey } from './profiles.js';
 import { assemblePrompt } from './prompts/assembler.js';
 
 // ── Sub-field toggle → schema property mappings ──
@@ -43,6 +44,48 @@ const REL_SUBFIELD_MAP={
 };
 const BRANCH_TYPES=['dramatic','intense','comedic','twist','exploratory'];
 
+export const SECTION_FIELDS=Object.freeze({
+    dashboard:['time','date','location','weather','temperature'],
+    scene:['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent','witnesses'],
+    quests:['northStar','mainQuests','sideQuests'],
+    relationships:['relationships'],
+    characters:['characters'],
+    branches:['plotBranches'],
+});
+
+export const DELTA_REQUIRED_FIELDS=Object.freeze([
+    'time','date','elapsed','plotBranches','charactersPresent','witnesses',
+]);
+
+function cloneSchema(value){
+    if(typeof structuredClone==='function')return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+}
+
+/** Build the schema for one concrete request without mutating the profile schema. */
+export function buildRequestSchema(schemaWrapper,{mode='full',fields=[]}={}){
+    const wrapper=cloneSchema(schemaWrapper||{});
+    const value=wrapper.value&&typeof wrapper.value==='object'?wrapper.value:wrapper;
+    const props=value?.properties||{};
+    let selected=Object.keys(props);
+    if(mode==='section')selected=fields.filter(key=>Object.hasOwn(props,key));
+    const selectedSet=new Set(selected);
+    value.properties=Object.fromEntries(selected.map(key=>[key,props[key]]));
+    if(mode==='delta')value.required=DELTA_REQUIRED_FIELDS.filter(key=>selectedSet.has(key));
+    else if(mode==='section')value.required=selected;
+    else value.required=(Array.isArray(value.required)?value.required:selected).filter(key=>selectedSet.has(key));
+    if(value.additionalProperties===undefined)value.additionalProperties=false;
+    if(wrapper.value){
+        wrapper.value=value;
+        wrapper.strict=false;
+        // SillyTavern's generateRawData otherwise turns malformed structured
+        // output into "{}", hiding the response that our repair path needs.
+        wrapper.returnInvalid=true;
+        return wrapper;
+    }
+    return{name:'ScenePulse',description:'Scene tracker.',strict:false,returnInvalid:true,value};
+}
+
 // Deep-clone a schema object and strip disabled sub-field properties
 function filterArraySchema(baseSchema,subFieldMap,ft){
     const clone=structuredClone(baseSchema);
@@ -66,6 +109,12 @@ export function buildDynamicSchema(s){
     const props={};const required=[];
     const panels=s.panels||DEFAULTS.panels;
     const ft=s.fieldToggles||{};
+    // Operational time fields are not standalone UI cards, but generation,
+    // delta merging and temporal validation depend on them. Keep them in the
+    // request schema even though the panel manager does not expose toggles.
+    props.elapsed=structuredClone(BUILTIN_SCHEMA.value.properties.elapsed);
+    props.temporalIntent=structuredClone(BUILTIN_SCHEMA.value.properties.temporalIntent);
+    required.push('elapsed');
     // Built-in panels: add their fields to the schema
     for(const[panelId,panelDef] of Object.entries(BUILTIN_PANELS)){
         if(!panels[panelId])continue;
@@ -103,9 +152,9 @@ export function buildDynamicSchema(s){
     // Custom panels: add their fields (v6.9.14: per-chat definitions)
     const customPanels=getActivePanels(s);
     for(const cp of customPanels){
-        if(!cp.fields?.length||cp.enabled===false)continue;
+        if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
         for(const f of cp.fields){
-            if(f.enabled===false)continue; // v6.9.13: per-field toggle
+            if(!f||f.enabled===false||!isValidCustomFieldKey(f.key))continue; // v6.9.13: per-field toggle
             const k=f.key;
             if(f.type==='text'){
                 props[k]={type:'string',description:f.desc||f.label};
@@ -121,7 +170,7 @@ export function buildDynamicSchema(s){
             required.push(k);
         }
     }
-    return{"$schema":"http://json-schema.org/draft-07/schema#",type:"object",properties:props,required};
+    return{"$schema":"http://json-schema.org/draft-07/schema#",type:"object",properties:props,required,additionalProperties:false};
 }
 
 // ── Dynamic Prompt Builder (v6.18.0 wrapper) ──

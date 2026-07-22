@@ -48,10 +48,6 @@ export function cleanupGenUI(){
 }
 
 // ── Loading overlay helpers -- transparent overlays that sit on top of existing content ──
-export function loadingHTML(label,sub,inline=false){
-    const cls=inline?'sp-regen-overlay sp-regen-inline':'sp-regen-overlay';
-    return `<div class="${cls}"><div class="sp-regen-spinner"><span class="sp-ring-3"></span></div><div class="sp-regen-text">${esc(label)}</div>${sub?`<div class="sp-regen-sub">${esc(sub)}<span class="sp-ellipsis"></span></div>`:''}</div>`;
-}
 export function showLoadingOverlay(container,label,sub,inline=false){
     if(!container)return;
     clearLoadingOverlay(container);

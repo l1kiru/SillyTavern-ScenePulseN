@@ -109,8 +109,6 @@
 .sp-pros-cons { font-size: var(--sp-fs-xs); line-height: 1.7; color: var(--sp-text-dim); background: rgba(255,255,255,0.02); border: 1px solid var(--sp-border); border-radius: var(--sp-radius); padding: 5px 8px; margin: 3px 0; }
 .sp-pro { color: #6ec87a; }
 .sp-con { color: #d46060; }
-/* ═══ EXPERIMENTAL BADGE ═══ */
-.sp-badge-exp { display: inline-flex; align-items: center; gap: 3px; font-size: var(--sp-fs-xs); font-weight: 600; letter-spacing: 0.3px; text-transform: uppercase; color: #d4a017; background: rgba(212,160,23,0.1); border: 1px solid rgba(212,160,23,0.25); border-radius: 3px; padding: 1px 5px; margin-left: 6px; vertical-align: middle; line-height: 1.4; }
 .sp-ctx-hint { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); margin: 2px 0 6px; line-height: 1.5; background: rgba(255,255,255,0.02); border: 1px solid var(--sp-border); border-radius: var(--sp-radius); padding: 5px 8px; }
 .sp-ctx-range { display: block; padding: 1px 0 1px 6px; border-left: 2px solid var(--sp-accent); margin: 2px 0; }
 .sp-ctx-note { display: block; margin-top: 4px; font-style: italic; opacity: 0.7; }
@@ -162,26 +160,6 @@
     font-weight: 600;
     border-radius: 5px;
     text-align: left;
-}
-.sp-prompt-edit-slots {
-    color: var(--sp-accent) !important;
-    border: 1px solid rgba(77,184,164,0.45) !important;
-    background: rgba(77,184,164,0.08) !important;
-}
-.sp-prompt-edit-slots:hover {
-    background: rgba(77,184,164,0.18) !important;
-    color: #fff !important;
-    border-color: var(--sp-accent) !important;
-}
-.sp-prompt-browse-presets {
-    color: #93c5fd !important;
-    border: 1px solid rgba(96,165,250,0.4) !important;
-    background: rgba(96,165,250,0.08) !important;
-}
-.sp-prompt-browse-presets:hover {
-    background: rgba(96,165,250,0.2) !important;
-    color: #fff !important;
-    border-color: #93c5fd !important;
 }
 .sp-prompt-primary-hint {
     margin-bottom: 12px;
@@ -274,4 +252,34 @@
     background: rgba(77,184,164,0.12); color: var(--sp-accent);
     font-size: 9px; font-weight: 700; letter-spacing: 0.04em;
     text-transform: uppercase; margin-left: 4px; cursor: help;
+}
+
+/* Readable settings copy and touch-sized controls. Inline legacy sizes are
+   intentionally overridden here so the settings template stays unchanged. */
+#scenepulse-settings .sp-hint { font-size: var(--sp-fs-xs) !important; }
+
+@media (max-width: 600px) {
+    #scenepulse-settings .sp-settings-tabs {
+        position: sticky; top: 0; z-index: 2;
+        overflow-x: auto; scrollbar-width: none;
+    }
+    #scenepulse-settings .sp-settings-tab {
+        min-width: max-content; min-height: 44px; padding: 9px 12px;
+        font-size: var(--sp-fs-xs);
+    }
+    #scenepulse-settings label.sp-ck {
+        min-height: 44px; padding: 8px 2px;
+        align-items: flex-start; font-size: var(--sp-fs-sm);
+    }
+    #scenepulse-settings label.sp-ck input[type="checkbox"] {
+        width: 20px; height: 20px; margin-top: 1px; flex-shrink: 0;
+    }
+    #scenepulse-settings .sp-hint {
+        font-size: var(--sp-fs-base) !important; line-height: 1.5;
+    }
+    #scenepulse-settings .sp-btn,
+    #scenepulse-settings .sp-btn-sm,
+    #scenepulse-settings select,
+    #scenepulse-settings input[type="number"] { min-height: 44px; }
+    #scenepulse-settings .sp-font-scale-row { flex-wrap: wrap; }
 }

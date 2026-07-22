@@ -5,7 +5,7 @@ import { log } from '../logger.js';
 import { esc } from '../utils.js';
 import { t } from '../i18n.js';
 import { getSnapshotFor, getPrevSnapshot, getSettings } from '../settings.js';
-import { currentSnapshotMesIdx, lastDeltaPayload } from '../state.js';
+import { lastDeltaPayload } from '../state.js';
 
 /**
  * Open the diff viewer overlay for a given snapshot message index.
@@ -228,7 +228,7 @@ function computeDiff(prevText, currText) {
 }
 
 function renderDiffHtml(diff) {
-    if (!diff) return '<div class="sp-diff-empty">No previous snapshot to compare</div>';
+    if (!diff) return '<div class="sp-diff-empty">'+t('No previous snapshot to compare')+'</div>';
     const { lines, stats } = diff;
     // Filter to only changed lines + 2 lines context
     const changedIndices = new Set();
@@ -252,7 +252,7 @@ function renderDiffHtml(diff) {
         html += `<div class="${cls}"><span class="sp-diff-prefix">${prefix}</span>${esc(l.text)}</div>`;
         lastShown = i;
     }
-    if (!changedIndices.size) html += '<div class="sp-diff-empty">No changes detected</div>';
+    if (!changedIndices.size) html += '<div class="sp-diff-empty">'+t('No changes detected')+'</div>';
     html += '</pre>';
     return html;
 }

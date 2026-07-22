@@ -1,18 +1,18 @@
 // src/ui/panel.js — Side Panel Creation, Show/Hide, Toolbar Event Handling
 import { log, warn } from '../logger.js';
-import { esc, clamp, str } from '../utils.js';
+import { esc, str } from '../utils.js';
 import { t } from '../i18n.js';
 import { MASCOT_SVG, DEFAULTS, VERSION } from '../constants.js';
-import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels } from '../settings.js';
+import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView } from '../settings.js';
 import { BUILTIN_PANELS } from '../constants.js';
 import { buildDynamicSchema } from '../schema.js';
-import { getActiveProfile } from '../profiles.js';
+import { customPanelSectionKey, getActiveProfile, validateCustomPanels } from '../profiles.js';
 import { getLatestSnapshot } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import {
-    generating, genNonce, lastGenSource, setLastGenSource,
-    currentWeatherType, setCurrentWeatherType,
-    currentTimePeriod, setCurrentTimePeriod,
+    generating, genNonce, setLastGenSource,
+    setCurrentWeatherType,
+    setCurrentTimePeriod,
     _cachedNormData
 } from '../state.js';
 import { generateTracker } from '../generation/engine.js';
@@ -26,13 +26,13 @@ import { closeDiffViewer } from './diff-viewer.js';
 import { updateThoughts } from './thoughts.js';
 import { renderCustomPanelsMgr } from '../settings-ui/custom-panels.js';
 import { mkSection } from './section.js';
-import { injectStoryIdea } from '../story-ideas.js';
+import { renderEmptyState } from './empty-state.js';
 
 // Feature badge sync — exported so external modules can update the badge
 export function updateFeatBadge(){
     const s=getSettings();const active=[s.showThoughts!==false,s.weatherOverlay!==false,s.timeTint!==false,s.sceneTransitions!==false].filter(Boolean).length;
-    const badge=document.getElementById('sp-feat-badge');if(badge)badge.textContent=active+'/4';
-    const btn=document.getElementById('sp-tb-features');if(btn)btn.classList.toggle('sp-tb-active',active>0);
+    const badge=document.getElementById('sp-feat-badge');if(badge)badge.textContent=String(active);
+    const btn=document.getElementById('sp-tb-features');if(btn){btn.classList.toggle('sp-tb-active',active>0);btn.setAttribute('aria-label',`${t('Feature toggles')}: ${active}/4`)}
 }
 
 // Brand icon state — reflects generating/idle/error
@@ -161,12 +161,28 @@ export function createPanel(){
         <button class="sp-toolbar-btn" id="sp-tb-edit" title="${t('Toggle edit mode')}"><svg viewBox="0 0 16 16" width="15" height="15" fill="none"><path d="M11.5 1.5l3 3-8.5 8.5H3v-3l8.5-8.5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/><line x1="9.5" y1="3.5" x2="12.5" y2="6.5" stroke="currentColor" stroke-width="0.8" opacity="0.4"/><line x1="3" y1="14.5" x2="13" y2="14.5" stroke="currentColor" stroke-width="1" opacity="0.3" stroke-linecap="round"/></svg></button>
         <button class="sp-toolbar-btn" id="sp-tb-empty" title="${t('Show empty fields')}"><svg viewBox="0 0 16 16" width="15" height="15" fill="none"><rect x="2" y="3" width="12" height="2" rx="0.8" stroke="currentColor" stroke-width="1" opacity="0.6"/><rect x="2" y="7" width="12" height="2" rx="0.8" stroke="currentColor" stroke-width="1" opacity="0.3" stroke-dasharray="2 1.5"/><rect x="2" y="11" width="12" height="2" rx="0.8" stroke="currentColor" stroke-width="1" opacity="0.6"/></svg></button>
         </div>
-        <div class="sp-dev-wrap" id="sp-dev-wx-wrap" style="display:none"><button class="sp-toolbar-btn sp-tb-dev" id="sp-tb-dev-wx" title="DEV: Weather overlays"><svg viewBox="0 0 16 16" width="15" height="15" fill="none"><path d="M4 12c-1.8 0-3-1-3-2.5S2 7.5 3.5 7C4 4.5 6 3 8.5 3c2.2 0 4 1.5 4.2 3.5C14 6.8 15 8 15 9.5S13.5 12 12 12z" stroke="currentColor" stroke-width="1.1" fill="currentColor" opacity="0.15"/><path d="M6 8l2-3 2 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/><line x1="8" y1="8" x2="8" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.6"/></svg></button><div class="sp-dev-dropdown" id="sp-dev-wx-menu"></div></div>
+        <div class="sp-dev-wrap" id="sp-dev-wx-wrap" style="display:none"><button class="sp-toolbar-btn sp-tb-dev" id="sp-tb-dev-wx" title="${t('DEV: Weather overlays')}"><svg viewBox="0 0 16 16" width="15" height="15" fill="none"><path d="M4 12c-1.8 0-3-1-3-2.5S2 7.5 3.5 7C4 4.5 6 3 8.5 3c2.2 0 4 1.5 4.2 3.5C14 6.8 15 8 15 9.5S13.5 12 12 12z" stroke="currentColor" stroke-width="1.1" fill="currentColor" opacity="0.15"/><path d="M6 8l2-3 2 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.6"/><line x1="8" y1="8" x2="8" y2="13" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" opacity="0.6"/></svg></button><div class="sp-dev-dropdown" id="sp-dev-wx-menu"></div></div>
         <div class="sp-dev-wrap" id="sp-dev-time-wrap" style="display:none"><button class="sp-toolbar-btn sp-tb-dev" id="sp-tb-dev-time" title="DEV: Time-of-day tints"><svg viewBox="0 0 16 16" width="15" height="15" fill="none"><circle cx="8" cy="8" r="5.5" stroke="currentColor" stroke-width="1.2"/><line x1="8" y1="8" x2="8" y2="4.5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="8" y1="8" x2="11" y2="9.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><circle cx="8" cy="8" r="0.8" fill="currentColor"/></svg></button><div class="sp-dev-dropdown" id="sp-dev-time-menu"></div></div>
         <button class="sp-toolbar-btn" id="sp-tb-minimize" title="${t('Hide panel')}" style="display:none"><svg viewBox="0 0 16 16" width="15" height="15" fill="none"><path d="M4 6l4 4 4-4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/><line x1="2" y1="13" x2="14" y2="13" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" opacity="0.4"/></svg></button>
     </div>
-    <div id="sp-panel-body"><div class="sp-empty-state"><div class="sp-empty-icon">\uD83D\uDCE1</div><div class="sp-empty-title">${t('No scene data yet')}</div><div class="sp-empty-sub">${t('Send a message or click ⟳ to generate.')}</div></div></div>`;
+    <div id="sp-panel-body"></div>`;
     document.body.appendChild(panel);
+    renderEmptyState();
+    const toolbar=panel.querySelector('.sp-toolbar');
+    const more=document.createElement('div');more.className='sp-toolbar-more';
+    more.innerHTML=`<button class="sp-toolbar-btn" id="sp-tb-more" title="${t('More actions')}" aria-expanded="false" aria-haspopup="menu"><svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true"><circle cx="3" cy="8" r="1.25"/><circle cx="8" cy="8" r="1.25"/><circle cx="13" cy="8" r="1.25"/></svg></button><div class="sp-toolbar-more-menu" role="menu"></div>`;
+    const moreMenu=more.querySelector('.sp-toolbar-more-menu');
+    for(const id of ['sp-tb-wiki','sp-tb-toggle','sp-tb-compact','sp-tb-edit','sp-tb-empty']){
+        const button=document.getElementById(id);if(!button)continue;
+        const label=document.createElement('span');label.className='sp-toolbar-menu-label';label.textContent=button.title;
+        button.classList.add('sp-toolbar-menu-btn');button.setAttribute('role','menuitem');button.appendChild(label);moreMenu.appendChild(button);
+    }
+    toolbar.insertBefore(more,document.getElementById('sp-dev-wx-wrap'));
+    const moreButton=more.querySelector('#sp-tb-more');
+    const closeMore=()=>{more.classList.remove('sp-toolbar-more-open');moreButton.setAttribute('aria-expanded','false')};
+    moreButton.addEventListener('click',e=>{e.stopPropagation();const open=more.classList.toggle('sp-toolbar-more-open');moreButton.setAttribute('aria-expanded',String(open))});
+    moreMenu.addEventListener('click',e=>{e.stopPropagation();if(e.target.closest('button'))closeMore()});
+    document.addEventListener('click',closeMore);
     log('Panel appended to body');
 
     // ── Mobile FAB (floating action button to restore panel) ──
@@ -225,7 +241,7 @@ export function createPanel(){
         if(!result){
             const snap=getLatestSnapshot();
             if(snap){const norm=normalizeTracker(snap);updatePanel(norm)}
-            else body.innerHTML='<div class="sp-empty-state"><div class="sp-empty-icon">\u27F3</div><div class="sp-empty-title">'+t('No scene data yet')+'</div><div class="sp-empty-sub">'+t('Send a message or click ⟳ to generate.')+'</div></div>';
+            else renderEmptyState({icon:'⟳'});
         }
     });
     document.getElementById('sp-tb-toggle').addEventListener('click',()=>{
@@ -305,33 +321,42 @@ export function createPanel(){
         };
         if(mgr){closeMgr();return}
         btn.classList.add('sp-tb-active');
+        const s=getSettings();
+        const activeProfile=getActiveProfile(s);
+        // Profile-owned fields must be written back to the active profile.
+        // Root settings are only a legacy migration source.
+        const profileSettings=s.profiles?.find(p=>p?.id===activeProfile?.id)||s;
+        const savePanelSettings=()=>{if(profileSettings!==s)profileSettings.updatedAt=new Date().toISOString();saveSettings()};
+        const refreshSchemaPreview=()=>{
+            const schemaEl=document.getElementById('sp-schema');
+            if(schemaEl&&!profileSettings.schema)schemaEl.value=JSON.stringify(buildDynamicSchema(buildProfileView(s,profileSettings)),null,2);
+        };
         try {
         mgr=document.createElement('div');mgr.id='sp-panel-mgr';mgr.className='sp-panel-mgr sp-mgr-closing';
-        const s=getSettings();
         mgr.innerHTML=`<div class="sp-mgr-header"><span class="sp-mgr-title">${t('Panel Manager')}</span><button class="sp-mgr-close" title="${t('Close')}">\u2715</button></div><div class="sp-mgr-hint">Toggle panels on/off. Disabled panels are excluded from the LLM prompt.</div>`;
         mgr.querySelector('.sp-mgr-close').addEventListener('click',closeMgr);
         // Built-in panel toggles -- collapsible
         const builtinWrap=document.createElement('div');builtinWrap.className='sp-mgr-collapsible';
         const builtinHeader=document.createElement('div');builtinHeader.className='sp-mgr-collapse-header';
-        builtinHeader.innerHTML=`<span class="sp-mgr-collapse-arrow">\u25B8</span><span class="sp-mgr-collapse-label">Built-in Panels</span><span class="sp-mgr-collapse-count">${Object.values(s.panels||DEFAULTS.panels).filter(v=>v!==false).length}/${Object.keys(BUILTIN_PANELS).length}</span>`;
+        builtinHeader.innerHTML=`<span class="sp-mgr-collapse-arrow">\u25B8</span><span class="sp-mgr-collapse-label">Built-in Panels</span><span class="sp-mgr-collapse-count">${Object.values({...DEFAULTS.panels,...profileSettings.panels}).filter(v=>v!==false).length}/${Object.keys(BUILTIN_PANELS).length}</span>`;
         const togglesDiv=document.createElement('div');togglesDiv.className='sp-mgr-toggles sp-mgr-collapsed';
         builtinHeader.addEventListener('click',()=>{
             const collapsed=togglesDiv.classList.toggle('sp-mgr-collapsed');
             builtinHeader.querySelector('.sp-mgr-collapse-arrow').textContent=collapsed?'\u25B8':'\u25BE';
         });
         for(const[id,def] of Object.entries(BUILTIN_PANELS)){
-            const panels=s.panels||{...DEFAULTS.panels};
+            const panels={...DEFAULTS.panels,...profileSettings.panels};
             const row=document.createElement('label');row.className='sp-mgr-toggle';
             row.innerHTML=`<input type="checkbox" data-panel="${esc(id)}" ${panels[id]!==false?'checked':''}><span class="sp-mgr-toggle-name">${esc(def.name)}</span>`;
             const cb=row.querySelector('input');
             cb.addEventListener('change',()=>{
-                if(!s.panels)s.panels={...DEFAULTS.panels};
-                s.panels[cb.dataset.panel]=cb.checked;
-                saveSettings();
+                profileSettings.panels={...DEFAULTS.panels,...profileSettings.panels,[cb.dataset.panel]:cb.checked};
+                savePanelSettings();
+                if(cb.dataset.panel==='storyIdeas'){const setting=document.getElementById('sp-story-ideas');if(setting)setting.checked=cb.checked}
                 const sectionMap={dashboard:'.sp-env-permanent',scene:'[data-key="scene"]',quests:'[data-key="quests"]',relationships:'[data-key="relationships"]',characters:'[data-key="characters"]',storyIdeas:'[data-key="branches"]'};
                 const sel=sectionMap[cb.dataset.panel];
                 if(sel){const el=body.querySelector(sel);if(el){if(cb.checked)el.classList.remove('sp-panel-hidden');else el.classList.add('sp-panel-hidden')}}
-                const count=Object.values(s.panels).filter(v=>v!==false).length;
+                const count=Object.values(profileSettings.panels).filter(v=>v!==false).length;
                 builtinHeader.querySelector('.sp-mgr-collapse-count').textContent=count+'/'+Object.keys(BUILTIN_PANELS).length;
                 // Grey out sub-toggles when panel disabled; re-enable all sub-fields when panel enabled
                 const nextSub=row.nextElementSibling;
@@ -341,27 +366,26 @@ export function createPanel(){
                         // Re-enable all sub-fields for this panel
                         const panelDef=BUILTIN_PANELS[cb.dataset.panel];
                         if(panelDef){
-                            if(!s.fieldToggles)s.fieldToggles={};
-                            for(const f of panelDef.fields)if(!f.noToggle){s.fieldToggles[f.key]=true}
-                            for(const sf of(panelDef.subFields||[]))s.fieldToggles[sf.key]=true;
+                            if(!profileSettings.fieldToggles)profileSettings.fieldToggles={};
+                            for(const f of panelDef.fields)if(!f.noToggle){profileSettings.fieldToggles[f.key]=true}
+                            for(const sf of(panelDef.subFields||[]))profileSettings.fieldToggles[sf.key]=true;
                             if(cb.dataset.panel==='dashboard'){
-                                if(!s.dashCards)s.dashCards={...DEFAULTS.dashCards};
-                                for(const k of Object.keys(DEFAULTS.dashCards))s.dashCards[k]=true;
+                                profileSettings.dashCards={...DEFAULTS.dashCards,...profileSettings.dashCards};
+                                for(const k of Object.keys(DEFAULTS.dashCards))profileSettings.dashCards[k]=true;
                             }
                         }
                         nextSub.querySelectorAll('input').forEach(i=>{i.disabled=false;i.checked=true});
                         // Apply visibility
                         body.querySelectorAll('[data-ft]').forEach(el=>{
                             const k=el.dataset.ft;
-                            if(s.fieldToggles[k]!==false)el.style.display='';
+                            if(profileSettings.fieldToggles[k]!==false)el.style.display='';
                         });
-                        saveSettings();
+                        savePanelSettings();
                     } else {
                         nextSub.querySelectorAll('input').forEach(i=>{i.disabled=true});
                     }
                 }
-                const schemaEl=document.getElementById('sp-schema');
-                if(schemaEl&&!getActiveProfile(s).schema)schemaEl.value=JSON.stringify(buildDynamicSchema(s),null,2);
+                refreshSchemaPreview();
                 // Sync toolbar icons: hide/dim when panel disabled
                 if(cb.dataset.panel==='dashboard'){
                     const wxItem=document.getElementById('sp-feat-weather');
@@ -376,8 +400,8 @@ export function createPanel(){
             const allSubs=[...def.fields.filter(f=>!f.noToggle).map(f=>({...f,isDashCard:!!f.dashCard,isSub:false})),...(def.subFields||[]).map(sf=>({...sf,isDashCard:false,isSub:true}))];
             if(allSubs.length>=1){
                 const subWrap=document.createElement('div');subWrap.className='sp-mgr-sub-toggles';
-                const dc=s.dashCards||{...DEFAULTS.dashCards};
-                const ft=s.fieldToggles||{};
+                const dc={...DEFAULTS.dashCards,...profileSettings.dashCards};
+                const ft=profileSettings.fieldToggles||{};
                 for(const f of allSubs){
                     const fKey=f.key;const fLabel=f.label||f.key;
                     const isOn=f.isDashCard?(dc[f.dashCard]!==false):(ft[fKey]!==false);
@@ -386,8 +410,7 @@ export function createPanel(){
                     const scb=sub.querySelector('input');
                     scb.addEventListener('change',()=>{
                         if(f.isDashCard){
-                            if(!s.dashCards)s.dashCards={...DEFAULTS.dashCards};
-                            s.dashCards[f.dashCard]=scb.checked;
+                            profileSettings.dashCards={...DEFAULTS.dashCards,...profileSettings.dashCards,[f.dashCard]:scb.checked};
                             const card=body.querySelector(`[data-card="${f.dashCard}"]`);
                             if(card)card.style.display=scb.checked?'':'none';
                             // Sync toolbar buttons
@@ -414,8 +437,8 @@ export function createPanel(){
                                 _updateFeatBadge();
                             }
                         } else {
-                            if(!s.fieldToggles)s.fieldToggles={};
-                            s.fieldToggles[fKey]=scb.checked;
+                            if(!profileSettings.fieldToggles)profileSettings.fieldToggles={};
+                            profileSettings.fieldToggles[fKey]=scb.checked;
                             // CSS-only toggle -- zero rebuilds
                             body.querySelectorAll(`[data-ft="${fKey}"]`).forEach(el=>{el.style.display=scb.checked?'':'none'});
                             // char_innerThought controls the floating thoughts panel
@@ -439,17 +462,16 @@ export function createPanel(){
                                 if(settingsCb)settingsCb.checked=scb.checked;
                             }
                         }
-                        saveSettings();
-                        const schemaEl=document.getElementById('sp-schema');
-                        if(schemaEl&&!getActiveProfile(s).schema)schemaEl.value=JSON.stringify(buildDynamicSchema(s),null,2);
+                        savePanelSettings();
+                        refreshSchemaPreview();
                         log((f.isDashCard?'DashCard':f.isSub?'SubField':'Field')+' toggled:',fKey,'\u2192',scb.checked);
                     });
                     subWrap.appendChild(sub);
                     if(f.dashCard==='weather'){
                         const wxHint=document.createElement('div');wxHint.className='sp-mgr-hint-tip';
                         wxHint.dataset.hintTarget='sp-tb-features';
-                        wxHint.textContent='\u2139 Weather overlay is off \u2014 enable it in Features for visual effects.';
-                        const wxOn=()=>dc.weather!==false&&s.weatherOverlay===false;
+                        wxHint.textContent=t('Weather overlay is off — enable it in Features for visual effects.');
+                        const wxOn=()=>({...DEFAULTS.dashCards,...profileSettings.dashCards}).weather!==false&&s.weatherOverlay===false;
                         wxHint.style.display=wxOn()?'':'none';
                         wxHint.addEventListener('mouseenter',()=>{const t=document.getElementById(wxHint.dataset.hintTarget);if(t)t.classList.add('sp-tb-glow')});
                         wxHint.addEventListener('mouseleave',()=>{const t=document.getElementById(wxHint.dataset.hintTarget);if(t)t.classList.remove('sp-tb-glow')});
@@ -472,8 +494,8 @@ export function createPanel(){
         const enableAllBtn=document.createElement('button');enableAllBtn.className='sp-mgr-enable-btn sp-mgr-btn-enable';enableAllBtn.textContent=t('Enable All');
         const disableAllBtn=document.createElement('button');disableAllBtn.className='sp-mgr-enable-btn sp-mgr-btn-disable';disableAllBtn.textContent=t('Disable All');
         // State check helpers
-        function checkAllState(){
-            const p=s.panels||DEFAULTS.panels;const dc=s.dashCards||DEFAULTS.dashCards;const ft=s.fieldToggles||{};
+        const checkAllState=()=>{
+            const p={...DEFAULTS.panels,...profileSettings.panels};const dc={...DEFAULTS.dashCards,...profileSettings.dashCards};const ft=profileSettings.fieldToggles||{};
             let allOn=true,allOff=true;
             for(const pid of Object.keys(BUILTIN_PANELS)){if(p[pid]===false)allOn=false;else allOff=false}
             for(const k of Object.keys(DEFAULTS.dashCards)){if(dc[k]===false)allOn=false;else allOff=false}
@@ -483,19 +505,20 @@ export function createPanel(){
             }
             enableAllBtn.disabled=allOn;enableAllBtn.classList.toggle('sp-mgr-btn-dimmed',allOn);
             disableAllBtn.disabled=allOff;disableAllBtn.classList.toggle('sp-mgr-btn-dimmed',allOff);
-        }
+        };
         enableAllBtn.addEventListener('click',()=>{
-            if(!s.panels)s.panels={...DEFAULTS.panels};
-            for(const pid of Object.keys(BUILTIN_PANELS))s.panels[pid]=true;
-            if(!s.fieldToggles)s.fieldToggles={};
+            profileSettings.panels={...DEFAULTS.panels,...profileSettings.panels};
+            for(const pid of Object.keys(BUILTIN_PANELS))profileSettings.panels[pid]=true;
+            if(!profileSettings.fieldToggles)profileSettings.fieldToggles={};
             for(const[,def] of Object.entries(BUILTIN_PANELS)){
-                for(const f of def.fields)if(!f.noToggle)s.fieldToggles[f.key]=true;
-                for(const sf of(def.subFields||[]))s.fieldToggles[sf.key]=true;
+                for(const f of def.fields)if(!f.noToggle)profileSettings.fieldToggles[f.key]=true;
+                for(const sf of(def.subFields||[]))profileSettings.fieldToggles[sf.key]=true;
             }
-            if(!s.dashCards)s.dashCards={...DEFAULTS.dashCards};
-            for(const k of Object.keys(DEFAULTS.dashCards))s.dashCards[k]=true;
+            profileSettings.dashCards={...DEFAULTS.dashCards,...profileSettings.dashCards};
+            for(const k of Object.keys(DEFAULTS.dashCards))profileSettings.dashCards[k]=true;
             s.showThoughts=true;
-            saveSettings();
+            savePanelSettings();
+            const storySetting=document.getElementById('sp-story-ideas');if(storySetting)storySetting.checked=true;
             togglesDiv.querySelectorAll('input[data-panel]').forEach(cb=>{cb.checked=true});
             togglesDiv.querySelectorAll('.sp-mgr-sub-toggle input').forEach(cb=>{cb.checked=true;cb.disabled=false});
             togglesDiv.querySelectorAll('.sp-mgr-sub-toggles').forEach(sw=>{sw.classList.remove('sp-mgr-sub-disabled')});
@@ -512,24 +535,24 @@ export function createPanel(){
             const snap=getLatestSnapshot();
             if(snap){const n=normalizeTracker(snap);updateWeatherOverlay(n.weather);updateTimeTint(n.time);updateThoughts(n);const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.add('sp-tp-visible')}
             builtinHeader.querySelector('.sp-mgr-collapse-count').textContent=Object.keys(BUILTIN_PANELS).length+'/'+Object.keys(BUILTIN_PANELS).length;
-            const schemaEl=document.getElementById('sp-schema');
-            if(schemaEl&&!getActiveProfile(s).schema)schemaEl.value=JSON.stringify(buildDynamicSchema(s),null,2);
+            refreshSchemaPreview();
             checkAllState();
-            toastr.info('All panels and fields enabled','ScenePulse');
+            toastr.info(t('All panels and fields enabled'),'ScenePulse');
             log('Enable All: all panels + fields activated');
         });
         disableAllBtn.addEventListener('click',()=>{
-            if(!s.panels)s.panels={...DEFAULTS.panels};
-            for(const pid of Object.keys(BUILTIN_PANELS))s.panels[pid]=false;
-            if(!s.fieldToggles)s.fieldToggles={};
+            profileSettings.panels={...DEFAULTS.panels,...profileSettings.panels};
+            for(const pid of Object.keys(BUILTIN_PANELS))profileSettings.panels[pid]=false;
+            if(!profileSettings.fieldToggles)profileSettings.fieldToggles={};
             for(const[,def] of Object.entries(BUILTIN_PANELS)){
-                for(const f of def.fields)if(!f.noToggle)s.fieldToggles[f.key]=false;
-                for(const sf of(def.subFields||[]))s.fieldToggles[sf.key]=false;
+                for(const f of def.fields)if(!f.noToggle)profileSettings.fieldToggles[f.key]=false;
+                for(const sf of(def.subFields||[]))profileSettings.fieldToggles[sf.key]=false;
             }
-            if(!s.dashCards)s.dashCards={...DEFAULTS.dashCards};
-            for(const k of Object.keys(DEFAULTS.dashCards))s.dashCards[k]=false;
+            profileSettings.dashCards={...DEFAULTS.dashCards,...profileSettings.dashCards};
+            for(const k of Object.keys(DEFAULTS.dashCards))profileSettings.dashCards[k]=false;
             s.showThoughts=false;s.weatherOverlay=false;s.timeTint=false;
-            saveSettings();
+            savePanelSettings();
+            const storySetting=document.getElementById('sp-story-ideas');if(storySetting)storySetting.checked=false;
             togglesDiv.querySelectorAll('input[data-panel]').forEach(cb=>{cb.checked=false});
             togglesDiv.querySelectorAll('.sp-mgr-sub-toggle input').forEach(cb=>{cb.checked=false;cb.disabled=true});
             togglesDiv.querySelectorAll('.sp-mgr-sub-toggles').forEach(sw=>{sw.classList.add('sp-mgr-sub-disabled')});
@@ -549,16 +572,15 @@ export function createPanel(){
             }
             s.sceneTransitions=false;_updateFeatBadge();
             builtinHeader.querySelector('.sp-mgr-collapse-count').textContent='0/'+Object.keys(BUILTIN_PANELS).length;
-            const schemaEl=document.getElementById('sp-schema');
-            if(schemaEl&&!getActiveProfile(s).schema)schemaEl.value=JSON.stringify(buildDynamicSchema(s),null,2);
+            refreshSchemaPreview();
             checkAllState();
-            toastr.info('All panels disabled','ScenePulse');
+            toastr.info(t('All panels disabled'),'ScenePulse');
             log('Disable All: all panels + fields deactivated');
         });
         btnRow.appendChild(enableAllBtn);btnRow.appendChild(disableAllBtn);
         enableAllRow.appendChild(btnRow);
         const enableWarn=document.createElement('div');enableWarn.className='sp-mgr-perf-warn';
-        enableWarn.textContent='\u26A0 All panels enabled will add ~1,500\u20132,500 tokens to every generation. Expect up to 3 minutes per response depending on your model and provider.';
+        enableWarn.textContent='⚠ '+t('Enabling every panel adds about 1,500–2,500 tokens to each generation and may significantly increase response time.');
         enableAllRow.appendChild(enableWarn);
         builtinWrap.appendChild(enableAllRow);
         // Wire every toggle to refresh button state
@@ -579,7 +601,7 @@ export function createPanel(){
             saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
             // Insert just the new section -- no full rebuild
             const d=_cachedNormData||{};
-            const cpKey='custom_'+(newPanel.name||'untitled').replace(/\s+/g,'_').toLowerCase();
+            const cpKey=customPanelSectionKey(newPanel.name);
             const newSec=mkSection(cpKey,newPanel.name||'Untitled',null,()=>{
                 const frag=document.createDocumentFragment();
                 for(const f of newPanel.fields){
@@ -596,7 +618,7 @@ export function createPanel(){
             else{const footer=body.querySelector('.sp-gen-footer');if(footer)body.insertBefore(newSec,footer);else body.appendChild(newSec)}
             newSec.classList.add('sp-panel-hidden');
             requestAnimationFrame(()=>newSec.classList.remove('sp-panel-hidden'));
-            toastr.success('Panel created');
+            toastr.success(t('Panel created'));
         });
         mgr.appendChild(addBtn);
 
@@ -610,7 +632,7 @@ export function createPanel(){
             const blob=new Blob([data],{type:'application/json'});
             const a=document.createElement('a');a.href=URL.createObjectURL(blob);
             a.download='scenepulse-panels.json';a.click();URL.revokeObjectURL(a.href);
-            toastr.info('Panels exported');
+            toastr.info(t('Panels exported'));
         });
         cpActions.appendChild(exportBtn);
 
@@ -623,18 +645,33 @@ export function createPanel(){
                 try{
                     const text=await file.text();
                     const imported=JSON.parse(text);
-                    if(!Array.isArray(imported)){toastr.error('Invalid format — expected array of panels');return}
+                    const validation=validateCustomPanels(imported);
+                    if(!validation.ok){
+                        toastr.error(t('Import failed: {error}',{error:validation.errors.join('; ')}));
+                        return;
+                    }
                     const _chatPanels=ensureChatPanels();
-                    for(const p of imported){
-                        if(!p||typeof p!=='object')continue;
-                        const existing=_chatPanels.find(e=>e.name===p.name);
-                        if(existing)p.name=(p.name||'Untitled')+' (imported)';
-                        if(!p.id)p.id='cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+                    const existingKeys=new Set(_chatPanels.flatMap(p=>(Array.isArray(p?.fields)?p.fields:[]).map(f=>String(f?.key||'').toLowerCase()).filter(Boolean)));
+                    const importedKeys=validation.panels.flatMap(p=>p.fields.map(f=>f.key));
+                    const collisions=importedKeys.filter(k=>existingKeys.has(k));
+                    if(collisions.length){
+                        toastr.error(t('Import failed: {error}',{error:`Custom field keys already exist: ${[...new Set(collisions)].join(', ')}`}));
+                        return;
+                    }
+                    const usedNames=new Set(_chatPanels.map(p=>String(p?.name||'').trim().toLowerCase()).filter(Boolean));
+                    for(const p of validation.panels){
+                        const base=p.name;
+                        let candidate=base;
+                        let suffix=2;
+                        while(usedNames.has(candidate.toLowerCase()))candidate=`${base} (imported ${suffix++})`;
+                        p.name=candidate;
+                        usedNames.add(candidate.toLowerCase());
+                        p.id='cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
                         _chatPanels.push(p);
                     }
                     saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
-                    toastr.success(imported.length+' panel(s) imported');
-                }catch(e){toastr.error('Import failed: '+e.message)}
+                    toastr.success(t('Imported panels: {count}',{count:validation.panels.length}));
+                }catch(e){toastr.error(t('Import failed: {error}',{error:e.message}))}
             });
             input.click();
         });
@@ -729,12 +766,14 @@ export function createPanel(){
             // Build dropdown
             const menu=document.createElement('div');menu.className='sp-cp-tmpl-menu';
             for(const[name,fields]of Object.entries(_TEMPLATES)){
-                const item=document.createElement('div');item.className='sp-cp-tmpl-item';item.textContent=name;
+                const localizedName=t(name);
+                const item=document.createElement('div');item.className='sp-cp-tmpl-item';item.textContent=localizedName;
                 item.addEventListener('click',()=>{
                     const _chatPanels=ensureChatPanels();
-                    _chatPanels.push({id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name,enabled:true,fields:structuredClone(fields)});
+                    const localizedFields=structuredClone(fields).map(field=>({...field,label:t(field.label)}));
+                    _chatPanels.push({id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:localizedName,enabled:true,fields:localizedFields});
                     saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
-                    menu.remove();toastr.success(name+' template added');
+                    menu.remove();toastr.success(t('Template added: {template}',{template:localizedName}));
                 });
                 menu.appendChild(item);
             }
@@ -758,9 +797,9 @@ export function createPanel(){
         mgr.appendChild(cpActions);
 
         body.insertBefore(mgr,body.firstChild);
-        } catch(e) { console.error('[ScenePulse] Panel Manager failed to open:', e); btn.classList.remove('sp-tb-active'); }
+        } catch(e) { console.error('[ScenePulse] Panel Manager failed to open:', e); btn.classList.remove('sp-tb-active'); return; }
         // Sync feature dropdown with current dashCard/thoughts state
-        const _dc2=s.dashCards||DEFAULTS.dashCards;const _ft2=s.fieldToggles||{};
+        const _dc2={...DEFAULTS.dashCards,...profileSettings.dashCards};const _ft2=profileSettings.fieldToggles||{};
         const wxItem=document.getElementById('sp-feat-weather');
         if(wxItem&&_dc2.weather===false)wxItem.classList.add('sp-feat-disabled');
         const ttItem=document.getElementById('sp-feat-timetint');
