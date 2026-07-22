@@ -2,6 +2,13 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.0.2] — 2026-07-22
+
+#### Fixed — Tracker validation recovery
+
+- Preserve otherwise-valid tracker generations when models omit `witnesses` for private scenes.
+- Coerce character `inventory` strings into arrays before schema validation so usable snapshots are saved instead of leaving the empty placeholder.
+
 ### [7.0.1] — 2026-07-22
 
 #### Fixed — Fork identity and update routing
