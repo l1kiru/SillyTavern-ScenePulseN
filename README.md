@@ -292,6 +292,12 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 
 ## Installation
 
+> [!WARNING]
+> Do not install ScenePulseN alongside the upstream ScenePulse extension.
+> Both extensions use the same interceptor and persistent-state identifiers,
+> so enabling both can duplicate generation hooks and overwrite shared state.
+> Disable or remove the upstream extension before installing ScenePulseN.
+
 ### Method 1: SillyTavern Extension Installer
 1. Open SillyTavern
 2. Go to **Extensions** → **Install Extension**
@@ -350,7 +356,7 @@ When embedding multiple snapshots in the generation prompt, ScenePulse selects t
 
 ## Architecture
 
-ScenePulse v6.x uses a modular ES module architecture with ~46 focused modules:
+ScenePulseN 7.x retains a modular ES module architecture with focused modules:
 
 ```
 index.js                    ← Thin entry point (~320 lines)
