@@ -37,10 +37,11 @@ import { renderEmptyState } from '../ui/empty-state.js';
 import { t } from '../i18n.js';
 
 async function _changeAndWait(ctx,element,value,eventName,label){
-    if(!element||element.value===value)return;
+    if(!element)return false;
+    if(element.value===value)return true;
     const source=ctx.eventSource;
     if(!eventName||!source?.on||!source?.removeListener){
-        element.value=value;element.dispatchEvent(new Event('change',{bubbles:true}));return;
+        element.value=value;element.dispatchEvent(new Event('change',{bubbles:true}));return element.value===value;
     }
     await new Promise((resolve,reject)=>{
         let timer=null,done=false;
@@ -52,26 +53,46 @@ async function _changeAndWait(ctx,element,value,eventName,label){
             element.dispatchEvent(new Event('change',{bubbles:true}));
         }catch(e){source.removeListener(eventName,finish);reject(e)}
     });
+    return element.value===value;
+}
+
+function _profileElement(){
+    return document.querySelector('#connection_profiles, #connection_profile');
+}
+
+async function _setConnectionProfile(ctx,value,eventName,label){
+    const el=_profileElement();
+    if(!value)return true;
+    if(el?.value===value)return true;
+    if(typeof ctx.setConnectionProfile==='function'){
+        await ctx.setConnectionProfile(value);
+        await new Promise(resolve=>setTimeout(resolve,0));
+        if(!el||el.value===value)return true;
+        warn(label+' API switch did not update selector; falling back to DOM');
+    }
+    return await _changeAndWait(ctx,el,value,eventName,label);
 }
 
 export async function withProfileAndPreset(pid,pre,fn){
     const ctx=SillyTavern.getContext();const events=ctx.eventTypes||ctx.event_types||{};let pp=null,pr=null;
     // Save chat BEFORE switching profile — prevents message loss if switch triggers CHAT_CHANGED
     if(pid||pre)await ensureChatSaved();
-    if(pid){try{const el=document.querySelector('#connection_profiles, #connection_profile');pp=el?.value??null;await _changeAndWait(ctx,el,pid,events.CONNECTION_PROFILE_LOADED,'Profile')}catch(e){warn('Profile:',e)}}
-    // v6.23.7: empty preset is "(Same as current)" — leave the active preset
-    // alone (no switch, no sampler mutation). Pre-v6.23.7 the empty branch
-    // implicitly swapped in GLM-5 sampler values
-    // (temp 0.6, top_p 0.95, etc.), which (a) made user sliders move
-    // unexpectedly during fallback and (b) was inconsistent with the profile
-    // dropdown's clean "(Same as current)" semantics. Users who want
-    // GLM-5 samplers can now save them as an explicit preset and select it.
-    if(pre){try{for(const sel of['#settings_preset_openai','#settings_preset_chat']){const el=document.querySelector(sel);if(el){const has=Array.from(el.options).some(o=>o.value===pre);if(has){pr=el.value;await _changeAndWait(ctx,el,pre,sel==='#settings_preset_openai'?events.OAI_PRESET_CHANGED_AFTER:null,'Preset');break}}}}catch(e){warn('Preset:',e)}}
-    try{return await fn()}finally{
+    try{
+        if(pid){const el=_profileElement();pp=el?.value??null;const ok=await _setConnectionProfile(ctx,pid,events.CONNECTION_PROFILE_LOADED,'Profile');if(!ok)throw new Error('Connection profile switch failed: '+pid)}
+        // v6.23.7: empty preset is "(Same as current)" — leave the active preset
+        // alone (no switch, no sampler mutation). Pre-v6.23.7 the empty branch
+        // implicitly swapped in GLM-5 sampler values
+        // (temp 0.6, top_p 0.95, etc.), which (a) made user sliders move
+        // unexpectedly during fallback and (b) was inconsistent with the profile
+        // dropdown's clean "(Same as current)" semantics. Users who want
+        // GLM-5 samplers can now save them as an explicit preset and select it.
+        if(pre){try{for(const sel of['#settings_preset_openai','#settings_preset_chat']){const el=document.querySelector(sel);if(el){const has=Array.from(el.options).some(o=>o.value===pre);if(has){pr=el.value;const ok=await _changeAndWait(ctx,el,pre,sel==='#settings_preset_openai'?events.OAI_PRESET_CHANGED_AFTER:null,'Preset');if(!ok)throw new Error('Preset switch failed: '+pre);break}}}}catch(e){warn('Preset:',e)}}
+        return await fn()
+    }finally{
         // Save chat BEFORE restoring profile — the generation may have saved new data
-        await ensureChatSaved();
+        if(pid||pre)await ensureChatSaved();
         if(pr){try{for(const sel of['#settings_preset_openai','#settings_preset_chat']){const el=document.querySelector(sel);if(el){await _changeAndWait(ctx,el,pr,sel==='#settings_preset_openai'?events.OAI_PRESET_CHANGED_AFTER:null,'Preset restore');break}}}catch(e){warn('Preset restore:',e)}}
-        if(pp!==null){try{const el=document.querySelector('#connection_profiles, #connection_profile');await _changeAndWait(ctx,el,pp,events.CONNECTION_PROFILE_LOADED,'Profile restore')}catch(e){warn('Profile restore:',e)}}
+        if(pp!==null){try{await _setConnectionProfile(ctx,pp,events.CONNECTION_PROFILE_LOADED,'Profile restore')}catch(e){warn('Profile restore:',e)}}
     }
 }
 
@@ -151,8 +172,7 @@ export async function generateTracker(mesIdx,partKey,opts){
     const _genProfiles=getConnectionProfiles();
     if(profileOverride&&!_genProfiles.some(p=>p.id===profileOverride)){
         const norm=profileOverride.trim().toLowerCase();
-        let match=_genProfiles.find(p=>p.name.trim().toLowerCase()===norm);
-        if(!match)match=_genProfiles.find(p=>p.name.toLowerCase().includes(norm)||norm.includes(p.name.toLowerCase()));
+        const match=_genProfiles.find(p=>p.name.trim().toLowerCase()===norm);
         if(match){log('Generation: resolved profile:',profileOverride,'\u2192',match.id);profileOverride=match.id}
     }
     const _genPresets=getChatPresets();

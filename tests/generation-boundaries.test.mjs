@@ -67,18 +67,22 @@ const aborted=new Error('timeout while stopping');aborted.name='AbortError';
 eq('an aborted timeout is not retried',classifyRequestError(aborted).kind,'cancelled');
 eq('semantic correction contains errors',correctiveInstruction('SEMANTIC_INVALID',['missing time']).includes('missing time'),true);
 
-let rawDataArgs=null,quietCalls=0;
+let rawDataArgs=null,rawDataCalls=0,quietArgs=null;
 const stContext={
-    async generateRawData(args){rawDataArgs=args;return tracker},
-    async generateQuietPrompt(){quietCalls++;return tracker},
+    async generateRawData(args){rawDataCalls++;rawDataArgs=args;return tracker},
+    async generateQuietPrompt(args){quietArgs=args;return tracker},
 };
 const response=await requestTracker({stContext,systemPrompt:'SYSTEM',prompt:'USER',responseLength:4096,jsonSchema:full,promptMode:'native'});
-eq('raw-data transport has priority',response.strategy,'raw-data');
-eq('quiet path is not duplicated',quietCalls,0);
+eq('quiet transport has priority',response.strategy,'quiet');
+eq('raw-data path is not duplicated',rawDataCalls,0);
+eq('quiet prompt carries system text',quietArgs.quietPrompt.includes('SYSTEM'),true);
+eq('quiet prompt carries user text',quietArgs.quietPrompt.includes('USER'),true);
+eq('quiet native schema is forwarded',quietArgs.jsonSchema?.returnInvalid,true);
+eq('quiet response budget is forwarded',quietArgs.responseLength,4096);
+await requestTracker({stContext:{async generateRawData(args){rawDataArgs=args;return tracker}},systemPrompt:'SYSTEM',prompt:'USER',responseLength:4096,jsonSchema:full,promptMode:'native'});
 eq('system prompt is passed separately',rawDataArgs.systemPrompt,'SYSTEM');
 eq('native schema is forwarded',rawDataArgs.jsonSchema?.returnInvalid,true);
 eq('response budget is forwarded',rawDataArgs.responseLength,4096);
-let quietArgs=null;
 await requestTracker({stContext:{async generateQuietPrompt(args){quietArgs=args;return tracker}},systemPrompt:'SYSTEM',prompt:'USER',responseLength:2048});
 eq('legacy quiet transport skips World Info activation',quietArgs.skipWIAN,true);
 
