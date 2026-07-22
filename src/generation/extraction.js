@@ -9,6 +9,7 @@ import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '.
 export const SP_MARKER_START='<!--SP_TRACKER_START-->';
 export const SP_MARKER_END='<!--SP_TRACKER_END-->';
 export const KNOWN_KEYS=['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','characters','relationships','northStar','plotBranches','mainQuests','sideQuests'];
+const KNOWN_WRAPPER_KEYS=['environment','scene','sceneDetails','sceneInfo','sceneAnalysis','questJournal','quests'];
 
 function _codedError(code,message){const e=new Error(message);e.code=code;return e}
 
@@ -109,8 +110,13 @@ function _candidateScore(value,candidate,knownKeys){
     if(!value||typeof value!=='object'||Array.isArray(value))return-1;
     const keys=Object.keys(value);
     const known=knownKeys.filter(key=>Object.hasOwn(value,key)).length;
+    const wrappedKnown=KNOWN_WRAPPER_KEYS.reduce((count,wrapperKey)=>{
+        const wrapper=value[wrapperKey];
+        if(!wrapper||typeof wrapper!=='object'||Array.isArray(wrapper))return count;
+        return count+knownKeys.filter(key=>Object.hasOwn(wrapper,key)).length;
+    },0);
     const schemaKeys=['properties','required','$schema','@schema','$defs','definitions'].filter(key=>Object.hasOwn(value,key)).length;
-    return known*10000+keys.length*100+Math.min(candidate.length,9999)-schemaKeys*5000;
+    return known*10000+wrappedKnown*9000+keys.length*100+Math.min(candidate.length,9999)-schemaKeys*5000;
 }
 
 export function cleanJson(raw,{knownKeys=KNOWN_KEYS}={}){
@@ -153,7 +159,12 @@ export function parseTrackerCandidate(raw,{mode,knownKeys}={}){
     const keys=Object.keys(parsed);const requestMode=mode||(shouldUseDelta()?'delta':'full');
     const minKeys=requestMode==='full'?Math.max(1,Math.min(5,expectedKeys.length)):1;
     if(keys.length<minKeys)throw _codedError('TOO_SMALL','Tracker JSON contains too few fields ('+keys.length+'/'+minKeys+')');
-    if(!expectedKeys.some(k=>k in parsed))throw _codedError('UNKNOWN_SCHEMA','JSON does not contain fields from the active ScenePulse schema');
+    const hasExpectedKey=expectedKeys.some(k=>k in parsed);
+    const hasExpectedWrapper=KNOWN_WRAPPER_KEYS.some(wrapperKey=>{
+        const wrapper=parsed[wrapperKey];
+        return wrapper&&typeof wrapper==='object'&&!Array.isArray(wrapper)&&expectedKeys.some(k=>k in wrapper);
+    });
+    if(!hasExpectedKey&&!hasExpectedWrapper)throw _codedError('UNKNOWN_SCHEMA','JSON does not contain fields from the active ScenePulse schema');
     return parsed;
 }
 

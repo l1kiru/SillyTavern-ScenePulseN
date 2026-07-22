@@ -504,7 +504,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.0.3** — Saves valid tracker generations when providers nest quest, environment, or scene fields under wrapper objects.
+**Latest: v7.0.4** — Improves separate-mode tracker recovery when providers nest valid fields under wrapper objects or relationship meters.
 
 ## Contributing
 

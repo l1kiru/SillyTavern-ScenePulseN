@@ -40,19 +40,23 @@ eq('valid section passes',valid.valid,true);
 const nearMiss={
     environment:{time:'14:32:15',date:'03/17/2025 (Monday)',location:'Recovery room'},
     elapsed:'00:07:23',
-    sceneSummary:'Alex is alone in the recovery room.',
-    charactersPresent:[],
+    sceneAnalysis:{sceneSummary:'Alex is alone in the recovery room.',sceneMood:'quiet',charactersPresent:[]},
     characters:[{name:'Mash Kyrielight',inventory:'Medical tablet'}],
-    questJournal:{northStar:'Recover safely',mainQuests:[],sideQuests:[]},
+    quests:{northStar:'Recover safely',mainQuests:[],sideQuests:[]},
+    relationships:[{name:'Mash Kyrielight',relType:'Partner',relPhase:'Cordial',timeTogether:'Several missions',milestone:'Stayed nearby',meters:{affection:50,affectionLabel:'Warm care',trust:60,trustLabel:'Trusted',desire:0,desireLabel:'',stress:40,stressLabel:'Concerned',compatibility:70,compatibilityLabel:'Good team'}}],
 };
-const nearMissSchema={type:'object',properties:{time:{type:'string'},date:{type:'string'},elapsed:{type:'string'},location:{type:'string'},sceneSummary:{type:'string'},charactersPresent:{type:'array',items:{type:'string'}},witnesses:{type:'array',items:{type:'string'}},northStar:{type:'string'},mainQuests:{type:'array'},sideQuests:{type:'array'},characters:{type:'array',items:{type:'object',properties:{name:{type:'string'},inventory:{type:'array',items:{type:'string'}}},required:['name','inventory']}}},required:['time','date','elapsed','location','sceneSummary','charactersPresent','witnesses','northStar','mainQuests','sideQuests','characters']};
-const nearMissValidation=validateExtraction(nearMiss,{schema:nearMissSchema});
+const nearMissSchema={type:'object',properties:{time:{type:'string'},date:{type:'string'},elapsed:{type:'string'},location:{type:'string'},sceneSummary:{type:'string'},sceneMood:{type:'string'},charactersPresent:{type:'array',items:{type:'string'}},witnesses:{type:'array',items:{type:'string'}},northStar:{type:'string'},mainQuests:{type:'array'},sideQuests:{type:'array'},characters:{type:'array',items:{type:'object',properties:{name:{type:'string'},inventory:{type:'array',items:{type:'string'}}},required:['name','inventory']}},relationships:{type:'array',items:{type:'object',properties:{name:{type:'string'},relType:{type:'string'},relPhase:{type:'string'},timeTogether:{type:'string'},milestone:{type:'string'},affection:{type:'integer'},affectionLabel:{type:'string'},trust:{type:'integer'},trustLabel:{type:'string'},desire:{type:'integer'},desireLabel:{type:'string'},stress:{type:'integer'},stressLabel:{type:'string'},compatibility:{type:'integer'},compatibilityLabel:{type:'string'}},required:['name','relType','relPhase','timeTogether','milestone','affection','affectionLabel','trust','trustLabel','desire','desireLabel','stress','stressLabel','compatibility','compatibilityLabel']}}},required:['time','date','elapsed','location','sceneSummary','sceneMood','charactersPresent','witnesses','northStar','mainQuests','sideQuests','characters','relationships']};
+const parsedNearMiss=parseTrackerCandidate(JSON.stringify(nearMiss),{mode:'full',knownKeys:Object.keys(nearMissSchema.properties)});
+eq('wrapped root wins over nested sceneAnalysis',Object.hasOwn(parsedNearMiss,'environment'),true);
+const nearMissValidation=validateExtraction(parsedNearMiss,{schema:nearMissSchema});
 eq('full tracker hoists known wrappers',nearMissValidation.valid,true);
-eq('environment time becomes root field',nearMiss.time,'14:32:15');
-eq('questJournal northStar becomes root field',nearMiss.northStar,'Recover safely');
-eq('questJournal mainQuests becomes root field',nearMiss.mainQuests,[]);
-eq('missing witnesses becomes empty array',nearMiss.witnesses,[]);
-eq('string inventory becomes array',nearMiss.characters[0].inventory,['Medical tablet']);
+eq('environment time becomes root field',parsedNearMiss.time,'14:32:15');
+eq('quests northStar becomes root field',parsedNearMiss.northStar,'Recover safely');
+eq('quests mainQuests becomes root field',parsedNearMiss.mainQuests,[]);
+eq('sceneAnalysis sceneSummary becomes root field',parsedNearMiss.sceneSummary,'Alex is alone in the recovery room.');
+eq('relationship meters become root fields',parsedNearMiss.relationships[0].affection,50);
+eq('missing witnesses becomes empty array',parsedNearMiss.witnesses,[]);
+eq('string inventory becomes array',parsedNearMiss.characters[0].inventory,['Medical tablet']);
 eq('JSON Schema integer accepts a JS integer',validateExtraction({score:42},{schema:{type:'object',properties:{score:{type:'integer'}},required:['score']}}).valid,true);
 eq('JSON Schema integer rejects a fraction',validateExtraction({score:4.2},{schema:{type:'object',properties:{score:{type:'integer'}},required:['score']}}).valid,false);
 const intentSchema={type:'object',properties:{temporalIntent:{type:'string',enum:['continue','flashback','timeSkip','parallel']}}};
