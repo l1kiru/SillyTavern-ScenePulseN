@@ -9,7 +9,8 @@ import { normalizeTracker } from '../normalize.js';
 import {
     getSettings, saveSettings,
     getConnectionProfiles, getChatPresets,
-    getLatestSnapshot, clearAllSnapshots, buildProfileView
+    getLatestSnapshot, clearAllSnapshots, buildProfileView,
+    canGenerateScene, getLastAssistantMessageIndex
 } from '../settings.js';
 import { genNonce, genMeta, setLastGenSource } from '../state.js';
 import { customPanelSectionKey, getActiveProfile, updateActiveProfile, createProfile, duplicateProfile, renameProfile, deleteProfile, setActiveProfile, validateImportedProfile, validateImportedConfigSettings, importProfile, exportProfile, migrateLegacySettingsToProfile } from '../profiles.js';
@@ -409,14 +410,14 @@ export function bindUI(){const s=getSettings();
         let fp='<option value="">'+t('(Same as current)')+'</option>';for(const p of _rpr)fp+=`<option value="${esc(p.id)}">${esc(p.name)}</option>`;$('#sp-fallback-preset').html(fp).val(s.fallbackPreset||'');
         toastr.info(t('Fallback profiles refreshed'));
     });
-    $('#sp-btn-gen').on('click',async()=>{const{chat}=SillyTavern.getContext();if(!chat.length)return;toastr.info(t('Generating…'));
+    $('#sp-btn-gen').on('click',async()=>{const ctx=SillyTavern.getContext();const mesIdx=getLastAssistantMessageIndex(ctx);if(!canGenerateScene(ctx,mesIdx)){toastr.info(t('Open a chat and send a message before generating ScenePulse.'));return}toastr.info(t('Generating…'));
         const body=document.getElementById('sp-panel-body');
         showLoadingOverlay(body,t('Generating Scene'),t('From settings'));
         setLastGenSource('manual:settings');
         spAutoShow();showStopButton();startElapsedTimer();
         showThoughtLoading(t('Updating thoughts'),t('Analyzing context'));
         const preNonce=genNonce;
-        const r=await generateTracker(chat.length-1);
+        const r=await generateTracker(mesIdx);
         if(genNonce>preNonce+1){log('Settings gen: stale caller');return}
         hideStopButton();stopElapsedTimer();
         clearLoadingOverlay(body);clearThoughtLoading();

@@ -1,6 +1,7 @@
 // Empty panel state. Keep state-independent tools reachable even when there
 // is no current scene snapshot.
 import { t } from '../i18n.js';
+import { canGenerateScene } from '../settings.js';
 
 function addAction(container, action, label, handler, primary = false) {
     const button = document.createElement('button');
@@ -42,10 +43,15 @@ export function renderEmptyState({
 
     const actions = document.createElement('div');
     actions.className = 'sp-empty-actions';
-    addAction(actions, 'regenerate', 'Regenerate', () => {
-        if (onRegenerate) return onRegenerate();
-        document.getElementById('sp-tb-regen')?.click();
-    }, true);
+    const canRegenerate = canGenerateScene();
+    const toolbarRegen = document.getElementById('sp-tb-regen');
+    if (toolbarRegen) toolbarRegen.disabled = !canRegenerate;
+    if (onRegenerate || canRegenerate) {
+        addAction(actions, 'regenerate', 'Regenerate', () => {
+            if (onRegenerate) return onRegenerate();
+            document.getElementById('sp-tb-regen')?.click();
+        }, true);
+    }
     addAction(actions, 'debug', 'Debug Inspector', () => {
         import('./debug-inspector.js').then(module => module.openDebugInspector()).catch(() => {});
     });

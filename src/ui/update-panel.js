@@ -8,7 +8,7 @@ import { relPhaseFamily } from '../rel-phase.js';
 import { markStart as _spPmStart, markEnd as _spPmEnd } from '../perf-monitor.js';
 import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, buildProfileView, getActivePanels } from '../settings.js';
+import { getSettings, buildProfileView, getActivePanels, canGenerateScene } from '../settings.js';
 import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
 import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
@@ -254,6 +254,8 @@ function _ensurePortraitDelegate(){
 }
 
 export function updatePanel(d,_force=false){
+    const toolbarRegen=document.getElementById('sp-tb-regen');
+    if(toolbarRegen)toolbarRegen.disabled=!canGenerateScene();
     _spPmStart('sp:panel-update');
     try { return _updatePanelInner(d, _force); }
     finally { _spPmEnd('sp:panel-update'); }

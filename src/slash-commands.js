@@ -4,7 +4,7 @@
 import { log, warn } from './logger.js';
 import { t } from './i18n.js';
 import { spConfirm } from './utils.js';
-import { getSettings, saveSettings, getLatestSnapshot, getTrackerData, clearAllSnapshots, anyPanelsActive, forceFullStateRefresh, clearForceFullState, buildProfileView } from './settings.js';
+import { getSettings, saveSettings, getLatestSnapshot, getTrackerData, clearAllSnapshots, anyPanelsActive, forceFullStateRefresh, clearForceFullState, buildProfileView, canGenerateScene, getLastAssistantMessageIndex } from './settings.js';
 import { getActiveProfile, setActiveProfile } from './profiles.js';
 import { normalizeTracker, clearNormCache } from './normalize.js';
 import { generating } from './state.js';
@@ -232,12 +232,9 @@ async function _spRegen(args, value) {
     const { updatePanel } = await import('./ui/update-panel.js');
     const { showPanel } = await import('./ui/panel.js');
 
-    const { chat } = SillyTavern.getContext();
-    let mesIdx = -1;
-    for (let i = chat.length - 1; i >= 0; i--) {
-        if (!chat[i].is_user) { mesIdx = i; break; }
-    }
-    if (mesIdx < 0) return 'No assistant message found to analyze.';
+    const ctx = SillyTavern.getContext();
+    const mesIdx = getLastAssistantMessageIndex(ctx);
+    if (!canGenerateScene(ctx, mesIdx)) return 'Open a chat and send a user message before generating ScenePulse.';
 
     const VALID_SECTIONS = { dashboard: 'dashboard', scene: 'scene', quests: 'quests', relationships: 'relationships', characters: 'characters', branches: 'branches', storyideas: 'branches' };
     const partKey = section ? VALID_SECTIONS[section] : null;
@@ -294,12 +291,9 @@ async function _spRefresh() {
         const { spAutoShow } = await import('./ui/mobile.js');
         setLastGenSource('slash:refresh');
 
-        const { chat } = SillyTavern.getContext();
-        let mesIdx = -1;
-        for (let i = chat.length - 1; i >= 0; i--) {
-            if (!chat[i].is_user) { mesIdx = i; break; }
-        }
-        if (mesIdx < 0) { clearForceFullState(); return 'No assistant message found to analyze.'; }
+        const ctx = SillyTavern.getContext();
+        const mesIdx = getLastAssistantMessageIndex(ctx);
+        if (!canGenerateScene(ctx, mesIdx)) { clearForceFullState(); return 'Open a chat and send a user message before generating ScenePulse.'; }
 
         const panel = document.getElementById('sp-panel');
         if (panel) { spAutoShow(); showLoadingOverlay(document.getElementById('sp-panel-body'), t('Full Refresh'), t('Re-establishing ground truth')); showStopButton(); startElapsedTimer(); }
