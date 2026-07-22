@@ -6,7 +6,7 @@ export const MODULE_NAME='scenepulse';
 // v6.12.3 — every release bumped manifest.json but missed this. Activity
 // log + diagnostic version field were misreporting. Keep in sync with
 // manifest.json on every version bump going forward.
-export const VERSION = '7.0.4';
+export const VERSION = '7.0.5';
 
 export const LOG='[ScenePulse]';
 export const DEFAULT_EXTENSION_NAME='SillyTavern-ScenePulseN';

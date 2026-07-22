@@ -1,6 +1,6 @@
 // src/ui/section.js — Collapsible section builder for the panel
 import { esc } from '../utils.js';
-import { getSettings, saveSettings } from '../settings.js';
+import { getSettings, saveSettings, canGenerateScene, getLastAssistantMessageIndex } from '../settings.js';
 import { setLastGenSource } from '../state.js';
 import { generateTracker } from '../generation/engine.js';
 import { guardRegenIfBusy } from '../generation/regen-guard.js';
@@ -39,7 +39,9 @@ export function mkSection(key,title,badge,fn,s){
         e.stopPropagation();
         // v6.27.17: was a hard block + toast. Now offers cancel-and-restart.
         if (!(await guardRegenIfBusy())) return;
-        const{chat}=SillyTavern.getContext();if(!chat.length)return;
+        const ctx=SillyTavern.getContext();
+        const mesIdx=getLastAssistantMessageIndex(ctx);
+        if(!canGenerateScene(ctx,mesIdx)){toastr.info(t('Open a chat and send a message before generating ScenePulse.'));return}
         const btn=e.target.closest('.sp-section-refresh');btn.classList.add('sp-spinning');
         // Show loading overlay on section content -- existing content visible behind
         const content=sec.querySelector('.sp-section-content');
@@ -48,7 +50,7 @@ export function mkSection(key,title,badge,fn,s){
         if(!sec.classList.contains('sp-open'))sec.classList.add('sp-open');
         setLastGenSource('manual:section:'+key);
         showStopButton();
-        await generateTracker(chat.length-1,key);
+        await generateTracker(mesIdx,key);
         hideStopButton();
         btn.classList.remove('sp-spinning');
         clearLoadingOverlay(content);

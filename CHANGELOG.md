@@ -2,6 +2,13 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.0.5] — 2026-07-22
+
+#### Fixed — No-chat generation guard
+
+- Disable ScenePulse regeneration actions when no chat is selected.
+- Add a shared generation guard for toolbar, empty-state, section, thought, settings, slash-command, and engine entry points so empty or greeting-only screens cannot start tracker generation.
+
 ### [7.0.4] — 2026-07-22
 
 #### Fixed — Separate-mode wrapper extraction

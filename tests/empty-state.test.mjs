@@ -37,15 +37,32 @@ assert.equal(body.children[0], state);
 const actions = state.children.find(child => child.className === 'sp-empty-actions');
 assert.ok(actions, 'empty state exposes its actions');
 assert.deepEqual(actions.children.map(button => button.dataset.action), [
-    'regenerate', 'debug', 'analytics', 'panels', 'wiki',
+    'debug', 'analytics', 'panels', 'wiki',
 ]);
+assert.equal(nodes.get('sp-tb-regen').disabled, true, 'toolbar regen disabled without an active chat');
 
-actions.children.find(button => button.dataset.action === 'regenerate').click();
 actions.children.find(button => button.dataset.action === 'panels').click();
 actions.children.find(button => button.dataset.action === 'wiki').click();
-assert.equal(nodes.get('sp-tb-regen').clicks, 1);
 assert.equal(nodes.get('sp-tb-panels').clicks, 1);
 assert.equal(nodes.get('sp-tb-wiki').clicks, 1);
+
+globalThis.SillyTavern = {
+    getContext: () => ({
+        chatId: 'empty-state-chat',
+        chat: [
+            { is_user: true, mes: 'Hello' },
+            { is_user: false, mes: 'Hi' },
+        ],
+    }),
+};
+const activeChat = renderEmptyState();
+const activeActions = activeChat.children.find(child => child.className === 'sp-empty-actions');
+assert.deepEqual(activeActions.children.map(button => button.dataset.action), [
+    'regenerate', 'debug', 'analytics', 'panels', 'wiki',
+]);
+assert.equal(nodes.get('sp-tb-regen').disabled, false, 'toolbar regen enabled for an active chat');
+activeActions.children.find(button => button.dataset.action === 'regenerate').click();
+assert.equal(nodes.get('sp-tb-regen').clicks, 1);
 
 let customRegenerations = 0;
 const stale = renderEmptyState({ onRegenerate: () => { customRegenerations++; } });

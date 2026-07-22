@@ -1150,6 +1150,32 @@ export function getConnectionProfiles(){try{const o=document.querySelectorAll('#
 
 export function getChatPresets(){try{for(const sel of['#settings_preset_openai','#preset_openai_select','#settings_preset_chat']){const o=document.querySelectorAll(`${sel} option`);if(o.length>1)return Array.from(o).filter(x=>x.value).map(x=>({id:x.value,name:x.textContent.trim()}))}}catch(e){warn('Presets:',e)}return[]}
 
+function _getContextSafe(){
+    try{return typeof SillyTavern!=='undefined'?SillyTavern.getContext():null}catch{return null}
+}
+
+export function hasSelectedChat(ctx=_getContextSafe()){
+    try{return !!(ctx?.chatId||ctx?.chat_id||ctx?.groupId||ctx?.selected_group)}catch{return false}
+}
+
+export function getLastAssistantMessageIndex(ctx=_getContextSafe()){
+    const chat=ctx?.chat;
+    if(!Array.isArray(chat))return-1;
+    for(let i=chat.length-1;i>=0;i--){if(chat[i]&&!chat[i].is_user&&!chat[i].is_system)return i}
+    return-1;
+}
+
+export function canGenerateScene(ctx=_getContextSafe(),mesIdx=undefined,{requireSelectedChat=true}={}){
+    if(mesIdx===undefined)mesIdx=getLastAssistantMessageIndex(ctx);
+    const chat=ctx?.chat;
+    if(requireSelectedChat&&!hasSelectedChat(ctx))return false;
+    const id=Number(mesIdx);
+    if(!Array.isArray(chat)||!Number.isInteger(id)||id<0||id>=chat.length)return false;
+    const target=chat[id];
+    if(!target||target.is_user||target.is_system)return false;
+    return chat.some((message,index)=>index<=id&&message?.is_user);
+}
+
 // Save chat to disk -- prevents message loss when profile switches trigger CHAT_CHANGED reload.
 // Coalescing: if called rapidly (e.g. by extraction + GENERATION_ENDED + other extensions like
 // MemoryBooks all saving metadata concurrently), concurrent callers share a single save promise.
