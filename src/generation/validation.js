@@ -61,6 +61,26 @@ function normalizeOptionalTemporalIntent(data,schema,warnings){
     warnings.push('root.temporalIntent: ignored unsupported optional value');
 }
 
+function coerceKnownProviderShapes(data,schema,warnings){
+    if(!data||typeof data!=='object'||Array.isArray(data)||!schema?.properties)return;
+    const props=schema.properties;
+    if(Object.hasOwn(props,'witnesses')&&!Object.hasOwn(data,'witnesses')&&Array.isArray(data.charactersPresent)){
+        data.witnesses=[];
+        warnings.push('root.witnesses: defaulted missing array to []');
+    }
+    const invSpec=props.characters?.items?.properties?.inventory;
+    if(!invSpec||!Array.isArray(data.characters))return;
+    for(let i=0;i<data.characters.length;i++){
+        const ch=data.characters[i];
+        if(!ch||typeof ch!=='object'||Array.isArray(ch))continue;
+        if(typeof ch.inventory==='string'){
+            const item=ch.inventory.trim();
+            ch.inventory=item?[item]:[];
+            warnings.push(`root.characters[${i}].inventory: coerced string to array`);
+        }
+    }
+}
+
 /** @returns {{valid:boolean,errors:string[],warnings:string[]}} */
 export function validateExtraction(data,{schema}={}){
     const errors=[];const warnings=[];
@@ -68,6 +88,7 @@ export function validateExtraction(data,{schema}={}){
     if(!active){try{active=getActiveSchema()?.value}catch{}}
     if(active?.value)active=active.value;
     normalizeOptionalTemporalIntent(data,active,warnings);
+    coerceKnownProviderShapes(data,active,warnings);
     if(!active?.properties){
         if(!data||typeof data!=='object'||Array.isArray(data))errors.push('root: expected object');
     }else check(data,active,'root',errors,warnings);

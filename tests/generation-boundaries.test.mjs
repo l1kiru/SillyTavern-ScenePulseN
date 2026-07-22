@@ -37,6 +37,17 @@ eq('missing section field blocks persistence',invalid.valid,false);
 eq('missing section field is an error',invalid.errors.some(item=>item.includes('witnesses')),true);
 const valid=validateExtraction({sceneSummary:'Complete',witnesses:[]},{schema:section.value});
 eq('valid section passes',valid.valid,true);
+const nearMiss={
+    time:'14:32:15',date:'03/17/2025 (Monday)',elapsed:'00:07:23',
+    sceneSummary:'Alex is alone in the recovery room.',
+    charactersPresent:[],
+    characters:[{name:'Mash Kyrielight',inventory:'Medical tablet'}],
+};
+const nearMissSchema={type:'object',properties:{time:{type:'string'},date:{type:'string'},elapsed:{type:'string'},sceneSummary:{type:'string'},charactersPresent:{type:'array',items:{type:'string'}},witnesses:{type:'array',items:{type:'string'}},characters:{type:'array',items:{type:'object',properties:{name:{type:'string'},inventory:{type:'array',items:{type:'string'}}},required:['name','inventory']}}},required:['time','date','elapsed','sceneSummary','charactersPresent','witnesses','characters']};
+const nearMissValidation=validateExtraction(nearMiss,{schema:nearMissSchema});
+eq('full tracker defaults missing witnesses',nearMissValidation.valid,true);
+eq('missing witnesses becomes empty array',nearMiss.witnesses,[]);
+eq('string inventory becomes array',nearMiss.characters[0].inventory,['Medical tablet']);
 eq('JSON Schema integer accepts a JS integer',validateExtraction({score:42},{schema:{type:'object',properties:{score:{type:'integer'}},required:['score']}}).valid,true);
 eq('JSON Schema integer rejects a fraction',validateExtraction({score:4.2},{schema:{type:'object',properties:{score:{type:'integer'}},required:['score']}}).valid,false);
 const intentSchema={type:'object',properties:{temporalIntent:{type:'string',enum:['continue','flashback','timeSkip','parallel']}}};
