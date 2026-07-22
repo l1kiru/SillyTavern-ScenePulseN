@@ -6,10 +6,25 @@ export const MODULE_NAME='scenepulse';
 // v6.12.3 — every release bumped manifest.json but missed this. Activity
 // log + diagnostic version field were misreporting. Keep in sync with
 // manifest.json on every version bump going forward.
-export const VERSION = '7.0.0';
+export const VERSION = '7.0.1';
 
 export const LOG='[ScenePulse]';
-export const EXTENSION_NAME='SillyTavern-ScenePulse';
+export const DEFAULT_EXTENSION_NAME='SillyTavern-ScenePulseN';
+
+function detectExtensionName(){
+ try{
+  const extensionRoot=new URL('../',import.meta.url);
+  const segments=extensionRoot.pathname.split('/').filter(Boolean);
+  return decodeURIComponent(segments.at(-1)||DEFAULT_EXTENSION_NAME);
+ }catch{
+  return DEFAULT_EXTENSION_NAME;
+ }
+}
+
+// SillyTavern's extension update/version endpoints expect the installed folder
+// name. Deriving it keeps updates working when the repository or folder is
+// renamed instead of silently targeting the upstream ScenePulse directory.
+export const EXTENSION_NAME=detectExtensionName();
 export const SP_LS_KEY='scenepulse_config';
 
 export const MASCOT_SVG=`<svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="1.2" opacity="0.25" class="sp-mascot-pulse"/><circle cx="12" cy="12" r="6.5" stroke="currentColor" stroke-width="1" opacity="0.4" class="sp-mascot-pulse"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="0.8" opacity="0.6"/><circle cx="12" cy="12" r="1.4" fill="currentColor" opacity="0.9"/><line x1="12" y1="2" x2="12" y2="5.5" stroke="currentColor" stroke-width="0.8" opacity="0.3"/><line x1="12" y1="18.5" x2="12" y2="22" stroke="currentColor" stroke-width="0.8" opacity="0.3"/><line x1="2" y1="12" x2="5.5" y2="12" stroke="currentColor" stroke-width="0.8" opacity="0.3"/><line x1="18.5" y1="12" x2="22" y2="12" stroke="currentColor" stroke-width="0.8" opacity="0.3"/><path d="M12 5.5 L14 10 L12 8.5 L10 10 Z" fill="currentColor" opacity="0.5"><animateTransform attributeName="transform" type="rotate" from="0 12 12" to="360 12 12" dur="8s" repeatCount="indefinite"/></path></svg>`;

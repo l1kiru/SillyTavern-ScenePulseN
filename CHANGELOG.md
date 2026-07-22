@@ -2,6 +2,20 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.0.1] — 2026-07-22
+
+#### Fixed — Fork identity and update routing
+
+- Point installation, issue, badge, homepage, and automatic-update metadata at `l1kiru/SillyTavern-ScenePulseN`.
+- Derive the installed extension directory from `import.meta.url` before calling SillyTavern's extension version/update endpoints.
+- Distinguish ScenePulseN in the manifest while retaining explicit upstream attribution.
+
+#### Security and maintenance
+
+- Require SillyTavern 1.18.0 or newer.
+- Add CI on supported Node.js LTS/current lines.
+- Add regression checks for fork metadata and remove the manually hard-coded expected release number from the release consistency test.
+
 ### [7.0.0] — 2026-07-22
 
 #### Major release — Fork baseline
