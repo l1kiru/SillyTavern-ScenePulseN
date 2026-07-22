@@ -9,7 +9,7 @@ const readme = readFileSync(join(root, 'README.md'), 'utf8');
 const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
 const bindUi = readFileSync(join(root, 'src/settings-ui/bind-ui.js'), 'utf8');
 
-const expected = '7.0.0';
+const expected = manifest.version;
 
 function assert(condition, message) {
     if (!condition) throw new Error(message);

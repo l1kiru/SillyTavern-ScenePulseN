@@ -1,9 +1,22 @@
 {
-  "name": "sillytavern-scenepulse",
+  "name": "sillytavern-scenepulsen",
   "private": true,
   "type": "module",
   "scripts": {
     "test": "node tests/run-all.mjs",
     "sync-locales": "node tools/sync-locales.mjs"
+  },
+  "version": "7.0.1",
+  "description": "Community-maintained ScenePulse fork for SillyTavern",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/l1kiru/SillyTavern-ScenePulseN.git"
+  },
+  "homepage": "https://github.com/l1kiru/SillyTavern-ScenePulseN#readme",
+  "bugs": {
+    "url": "https://github.com/l1kiru/SillyTavern-ScenePulseN/issues"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }
