@@ -2,8 +2,11 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
+      - 'fix/**'
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -11,19 +14,24 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
         node-version: [20, 22]
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+
       - name: Use Node.js ${{ matrix.node-version }}
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: npm
+
       - name: Install
         run: npm ci
+
       - name: Test
         run: npm test
