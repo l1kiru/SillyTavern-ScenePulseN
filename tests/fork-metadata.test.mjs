@@ -7,7 +7,7 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
 const constants = readFileSync(join(root, 'src/constants.js'), 'utf8');
-const readme = readFileSync(join(root, 'README.md'), 'utf8');
+const readme = readFileSync(join(root, 'README.md'), 'utf8').replace(/\r\n/g, '\n');
 
 const forkRepo = 'https://github.com/l1kiru/SillyTavern-ScenePulseN';
 const upstreamRepo = 'https://github.com/xenofei/SillyTavern-ScenePulse';
