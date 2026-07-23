@@ -43,6 +43,7 @@ import {
 } from '../state.js';
 import { spSetGenerating } from '../ui/mobile.js';
 import { cleanupGenUI } from '../ui/loading.js';
+import { stopStreamingHider } from './streaming.js';
 
 const POLL_INTERVAL_MS = 3000;
 const GRACE_PERIOD_MS = 5000;          // ignore the first 5s; ST may not have started yet
@@ -99,6 +100,7 @@ function _check() {
         setPendingInlineIdx(-1);
         setInlineGenerationContext(null);
         setCancelRequested(false);
+        try { stopStreamingHider({abort:true}); } catch {}
         try { cleanupGenUI(); } catch {}
         try {
             toastr.warning(

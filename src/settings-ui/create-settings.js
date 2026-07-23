@@ -42,13 +42,13 @@ export function createSettings(){
      the prompt editor surfaces a banner pointing at the migration. -->
 <!-- v6.23.0: ONE primary button for the whole prompt configuration surface.
      Opens a modal with two tabs: Slots (per-slot editor) and Templates
-     (30 bundled model presets). Replaces v6.21's pair of side-by-side
+     (39 bundled model presets). Replaces v6.21's pair of side-by-side
      buttons that were "two big buttons doing related things" per user
      feedback. -->
 <div class="sp-prompt-primary">
     <button class="sp-btn sp-btn-primary sp-prompt-configure" id="sp-sysprompt-configure" title="${t('Open the unified prompt configuration modal. Edit individual prompt slots (role, critical rules, language, etc.) or apply a bundled model template.')}">⚙ ${t('Configure Prompts')}</button>
 </div>
-<div class="sp-hint sp-prompt-primary-hint">${t('Edit individual prompt sections, or apply one of 30 bundled model templates (Claude, GPT, Gemini, DeepSeek, Cydonia, Magnum, etc.) tuned to your model.')}</div>
+<div class="sp-hint sp-prompt-primary-hint">${t('Edit individual prompt sections, or apply one of 39 bundled model templates (Claude, GPT, Gemini, DeepSeek, Cydonia, Magnum, etc.) tuned to your model.')}</div>
 <!-- v6.22.0: JSON Schema editor collapsed into <details>. Auto-built from
      panel settings; manual edit rarely needed and easy to break. -->
 <details class="sp-prompt-legacy">

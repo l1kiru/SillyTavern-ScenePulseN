@@ -296,7 +296,7 @@
   "Duplicate panel": "Duplicate panel",
   "Duplicated as": "Duplicated as",
   "Each embedded snapshot adds ~1.9K tokens to your narrative prompt. Set to 0 to eliminate this overhead — the tracker API call still receives previous state independently. Set to 1 for narrative continuity (AI remembers scene details). Values above 1 are rarely beneficial.": "各スナップショット~1.9K追加。0でオーバーヘッド排除。1で連続性。1以上はほぼ不要。",
-  "Edit individual prompt sections, or apply one of 30 bundled model templates (Claude, GPT, Gemini, DeepSeek, Cydonia, Magnum, etc.) tuned to your model.": "Edit individual prompt sections, or apply one of 30 bundled model templates (Claude, GPT, Gemini, DeepSeek, Cydonia, Magnum, etc.) tuned to your model.",
+  "Edit individual prompt sections, or apply one of 39 bundled model templates (Claude, GPT, Gemini, DeepSeek, Cydonia, Magnum, etc.) tuned to your model.": "Edit individual prompt sections, or apply one of 39 bundled model templates (Claude, GPT, Gemini, DeepSeek, Cydonia, Magnum, etc.) tuned to your model.",
   "Edit JSON": "Edit JSON",
   "Edit Mode Off": "編集モードOFF",
   "Edit Mode On": "編集モードON",

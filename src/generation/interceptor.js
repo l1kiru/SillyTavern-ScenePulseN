@@ -62,7 +62,7 @@ function _onStallFire(genStart){
     setInlineExtractionDone(false);
     setPendingInlineIdx(-1);
     setInlineGenerationContext(null);
-    try { stopStreamingHider(); } catch {}
+    try { stopStreamingHider({abort:true}); } catch {}
     try { cleanupGenUI(); } catch {}
     try {
         toastr.warning(
