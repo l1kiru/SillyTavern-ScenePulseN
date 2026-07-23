@@ -525,7 +525,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.3** — Restores the chat bubble after cancel/failed Together extract, and syncs README/settings copy with the real 7.x UI.
+**Latest: v7.1.4** — Skips auto scene recovery after SillyTavern Stop so truncated replies do not spawn broken tracker generations.
 
 ## Contributing
 

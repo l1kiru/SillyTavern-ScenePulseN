@@ -2,6 +2,14 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.4] — 2026-07-23
+
+#### Fixed — Skip auto scene after user Stop
+
+- Mark `cancelRequested` on SillyTavern `GENERATION_STOPPED` even when Together is still streaming (`generating === false`), so truncated replies do not trigger continuation/fallback or Separate auto-gen.
+- Keep `inlineGenStartMs` so a complete tracker JSON can still be extracted after Stop; clear the skip flag on the next interceptor cycle.
+- Guard Separate-mode delayed auto-gen with `shouldSkipAutoSceneRecovery()`.
+
 ### [7.1.3] — 2026-07-23
 
 #### Fixed — Cancel / fail display restore

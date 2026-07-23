@@ -7,7 +7,9 @@
 // caused the v6.23.x Together-mode skip regression chain. Termination
 // paths that clear the tuple correctly:
 //   - GENERATION_ENDED handler (success or extraction-failure deferral)
-//   - GENERATION_STOPPED handler (user-initiated abort)
+//   - GENERATION_STOPPED handler (user-initiated abort — sets cancelRequested
+//     so auto-fallback/separate auto-gen skip; keeps inlineGenStartMs so a
+//     complete tracker JSON can still be extracted)
 //   - 180s watchdog below (catches network drops where ST never fires
 //     a termination event, e.g. ECONNRESET on overloaded providers)
 //   - Stuck-detection guard at the top of the interceptor (last-resort
@@ -23,6 +25,7 @@ import { getGroupMemberNames } from '../normalize.js';
 import {
     generating, inlineGenStartMs, inlineExtractionDone, pendingInlineIdx, inlineGenerationContext,
     setGenerating, setInlineGenStartMs, setInlineExtractionDone, setPendingInlineIdx, setInlineGenerationContext,
+    setCancelRequested,
     _inlineWaitTimerId, set_inlineWaitTimerId
 } from '../state.js';
 import { spSetGenerating } from '../ui/mobile.js';
@@ -259,6 +262,9 @@ MANDATORY OUTPUT \u2014 append this exact format after your narrative (the marke
 export const scenePulseInterceptor=async function(chat,cs,abort,type){
     const s=getSettings();
     if(!s.enabled||type==='quiet')return;
+    // New ST generation cycle — prior user Stop must not block this turn's
+    // auto-recovery / separate auto-gen.
+    setCancelRequested(false);
     if(generating){
         // v6.27.13: widen stuck-detection. Previously only (startMs > 0
         // AND > 60s old) reset. But `generating === true` with

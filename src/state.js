@@ -87,6 +87,9 @@ export function setGenerating(v) { generating = state.generating = v; }
 
 export let cancelRequested = state.cancelRequested;
 export function setCancelRequested(v) { cancelRequested = state.cancelRequested = v; }
+// User Stop (GENERATION_STOPPED): skip auto fallback / separate auto-gen for
+// this turn. Extract of an already-complete tracker JSON remains allowed.
+export function shouldSkipAutoSceneRecovery() { return !!state.cancelRequested; }
 
 export let genNonce = state.genNonce;
 export function setGenNonce(v) { genNonce = state.genNonce = v; }
