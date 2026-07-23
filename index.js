@@ -12,6 +12,7 @@ import {
     inlineGenStartMs,
     inlineExtractionDone,
     inlineGenerationContext,
+    pendingInlineIdx,
     setGenerating, setGenNonce, setCancelRequested,
     setInlineGenStartMs,
     setPendingInlineIdx, setInlineExtractionDone, setInlineGenerationContext,
@@ -272,29 +273,39 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
     catch (e) { warn('GENERATION_ENDED save failed:', e); }
 });
 
-// If user clicks ST's own stop button, cancel our generation too
+// If user clicks ST's own stop button, cancel ScenePulse auto-recovery for
+// this turn. Together mode often has generating===false while ST streams the
+// narrative (only inlineGenStartMs is set), so we must mark cancel even then —
+// otherwise onCharMsg starts continuation/fallback on a truncated reply.
+// Keep inlineGenStartMs so a complete tracker JSON can still be extracted;
+// only auto-fallback / separate-after-message are skipped via cancelRequested.
 eventSource.on(event_types.GENERATION_STOPPED, () => {
     // v6.27.16: user-initiated stop — disarm the stall watchdog regardless
     // of whether `generating` is true (defensive: guards against a
     // late-firing watchdog after manual stop already cleared state).
     try { clearStallWatchdog(); } catch {}
-    if (generating) {
-        log('ST generation_stopped event — cancelling ScenePulse generation');
+    const hadInline = inlineGenStartMs > 0 || pendingInlineIdx >= 0;
+    const hadEngine = generating;
+    setCancelRequested(true);
+    if (hadEngine) {
         const oldNonce = genNonce;
         setGenNonce(genNonce + 1);
-        setCancelRequested(true);
-        setGenerating(false); spSetGenerating(false);
-        // Defensive: clear inline generation ownership state so a subsequent
-        // message from another extension (e.g. MemoryBooks) does not get
-        // misattributed to our cancelled generation.
-        setInlineGenStartMs(0); setInlineExtractionDone(false); setPendingInlineIdx(-1); setInlineGenerationContext(null);
+        setGenerating(false);
         log('CANCEL (ST stop): nonce', oldNonce, '→', genNonce);
+    }
+    if (hadEngine || hadInline) {
+        log('ST generation_stopped — skip auto scene recovery for this turn');
+        spSetGenerating(false);
         try { stopStreamingHider({abort:true}); } catch {}
         cleanupGenUI();
         const snap = getLatestSnapshot();
         const body = document.getElementById('sp-panel-body');
         if (snap) { const norm = normalizeTracker(snap); updatePanel(norm); }
         else if (body) renderEmptyState();
+    } else {
+        // Separate-mode narrative stop: no SP engine lock yet, but mark cancel
+        // so the delayed onCharMsg auto-gen does not analyze a truncated reply.
+        log('ST generation_stopped — marked cancel for pending auto-gen');
     }
 });
 

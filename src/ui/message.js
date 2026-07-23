@@ -15,7 +15,7 @@ import {
     inlineGenStartMs, setInlineGenStartMs,
     pendingInlineIdx, setPendingInlineIdx,
     _inlineWaitTimerId, set_inlineWaitTimerId,
-    cancelRequested, getLastExtractionFailure
+    getLastExtractionFailure, shouldSkipAutoSceneRecovery
 } from '../state.js';
 import { generateTracker, continuationReprompt } from '../generation/engine.js';
 import { stopStreamingHider } from '../generation/streaming.js';
@@ -181,7 +181,7 @@ export async function onCharMsg(idx){
             const _failureKind=_markersPresent?'markers found, JSON unparseable':'no SP markers';
             log('onCharMsg [inline]: no tracker found in message',idx,'('+msgLen+' chars,',_failureKind+')');
             // If the AI wrote content but omitted the tracker, recover.
-            if(msgLen>100&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!cancelRequested){
+            if(msgLen>100&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!shouldSkipAutoSceneRecovery()){
                 const fbProfile=s.fallbackProfile||s.connectionProfile||'';
                 const fbPreset=s.fallbackPreset||s.chatPreset||'';
                 // v6.23.9: removed the `if(!fbProfile && !fbPreset) showRecoveryCard`
@@ -250,7 +250,7 @@ export async function onCharMsg(idx){
                     // withProfileAndPreset, which the user reasonably read as "I
                     // cancelled but it kept going AND swapped my preset." Treat
                     // a manual cancel as a hard stop on the whole recovery chain.
-                    if(!result && cancelRequested){
+                    if(!result && shouldSkipAutoSceneRecovery()){
                         log('Together fallback: Tier 2 skipped — user cancelled during Tier 1');
                         result=null;
                     } else if(!result){
@@ -272,7 +272,7 @@ export async function onCharMsg(idx){
                     hideStopButton();stopElapsedTimer();
                     clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
                 }
-            } else if(msgLen>100&&cancelRequested){
+            } else if(msgLen>100&&shouldSkipAutoSceneRecovery()){
                 log('Together mode: recovery skipped — user stopped generation');
                 stopStreamingHider();
             } else if(msgLen>100&&!s.fallbackEnabled){
@@ -298,6 +298,10 @@ export async function onCharMsg(idx){
     // ── SEPARATE MODE: Auto-generate via separate API call ──
     let snap=getTrustedSnapshotFor(idx);
     if(!snap&&s.autoGenerate){
+        if(shouldSkipAutoSceneRecovery()){
+            log('onCharMsg [separate]: skipping auto-gen — user stopped generation');
+            return;
+        }
         // CRITICAL: Save the chat to disk FIRST, then wait for ST to finish all post-save hooks.
         // withProfileAndPreset triggers connection_profile_loaded -> CHAT_CHANGED -> chat reload.
         // If the message isn't saved to disk yet, it gets lost in the reload.
@@ -310,6 +314,7 @@ export async function onCharMsg(idx){
         // Re-check the exact chat/message/swipe after the delay. A swipe, edit,
         // deletion or chat switch must not let this old timer generate into the
         // new branch. Also avoid a duplicate call if another path already saved it.
+        if(shouldSkipAutoSceneRecovery()){log('onCharMsg [separate]: user stopped during delay, aborting');return}
         const{chat:freshChat}=SillyTavern.getContext();
         if(!freshChat[idx]){log('onCharMsg: message gone after delay, aborting');return}
         const ownerCheck=validateOperationOwner(scheduledOwner,{requireSource:true});
