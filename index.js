@@ -289,6 +289,7 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
         // misattributed to our cancelled generation.
         setInlineGenStartMs(0); setInlineExtractionDone(false); setPendingInlineIdx(-1); setInlineGenerationContext(null);
         log('CANCEL (ST stop): nonce', oldNonce, '→', genNonce);
+        try { stopStreamingHider({abort:true}); } catch {}
         cleanupGenUI();
         const snap = getLatestSnapshot();
         const body = document.getElementById('sp-panel-body');

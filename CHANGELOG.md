@@ -2,6 +2,18 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.3] — 2026-07-23
+
+#### Fixed — Cancel / fail display restore
+
+- Clear the streaming-hider lock (`data-sp-has-tracker`) on cancel, ST stop, and stall abort so the narrative bubble is not left collapsed after a failed or aborted Together extract.
+- Extend streaming-hider tests for abort cleanup and mark clear on default stop.
+
+#### Changed — README accuracy sync
+
+- Align README Features, Configuration, Architecture, Compatibility, and Known Issues with the real 7.x UI (no Active Tasks, 6 themes, Story Ideas toggle, Debug Inspector tabs, delta always-on).
+- Correct bundled preset count copy from 30 to 39 in settings UI and Russian locale.
+
 ### [7.1.2] — 2026-07-23
 
 #### Changed — Mainline rollback

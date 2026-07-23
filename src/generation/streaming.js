@@ -215,21 +215,46 @@ export function startStreamingHider(){
     },20);
     set_streamHiderInterval(interval);
 }
-export function stopStreamingHider(){
+function _clearStreamingHiderMarks(){
+    try{
+        document.querySelectorAll('.mes_text[data-sp-has-tracker]').forEach(el=>{
+            try{delete el.dataset.spHasTracker}catch{try{el.removeAttribute('data-sp-has-tracker')}catch{}}
+        });
+    }catch{}
+}
+
+function _removeStreamingHiderStyle(styleElRef){
+    if(!styleElRef)return;
+    try{styleElRef.remove()}catch{}
+    // A delayed cleanup from generation N must not clear generation N+1.
+    if(_streamHiderStyleEl===styleElRef)set_streamHiderStyleEl(null);
+}
+
+/**
+ * Tear down the streaming tracker hider.
+ * @param {{abort?:boolean}} [options]
+ *   abort:true — cancel/stop/watchdog: remove injected style immediately
+ *   (visibility:hidden locks must not linger). Default keeps the 600ms
+ *   delay so successful extraction can finish stripping tracker text first.
+ * Always clears data-sp-has-tracker immediately so permanent CSS collapse
+ * cannot survive failed extract or cancel.
+ */
+export function stopStreamingHider({abort=false}={}){
     _lockFromStreamEvent=null;
     if(_streamHiderInterval){
         const elapsed=_streamHiderStart?Math.round((Date.now()-_streamHiderStart)/1000):0;
-        log('StreamHider: stopped after',elapsed+'s');
+        log('StreamHider: stopped after',elapsed+'s',abort?'(abort)':'');
         clearInterval(_streamHiderInterval);set_streamHiderInterval(null);
     }
     // Disconnect MutationObserver
     if(_streamHiderObserver){try{_streamHiderObserver.disconnect()}catch(e){}set_streamHiderObserver(null)}
-    // Remove the CSS rule after a delay — gives extraction time to clean the DOM
+    // Unlock display immediately — permanent style.css collapses marked bubbles.
+    _clearStreamingHiderMarks();
     const styleElRef=_streamHiderStyleEl;
-    setTimeout(()=>{
-        if(!styleElRef)return;
-        styleElRef.remove();
-        // A delayed cleanup from generation N must not clear generation N+1.
-        if(_streamHiderStyleEl===styleElRef)set_streamHiderStyleEl(null);
-    },600);
+    if(abort){
+        _removeStreamingHiderStyle(styleElRef);
+        return;
+    }
+    // Remove the CSS rule after a delay — gives extraction time to clean the DOM
+    setTimeout(()=>_removeStreamingHiderStyle(styleElRef),600);
 }
