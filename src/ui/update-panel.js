@@ -53,72 +53,6 @@ export function restoreGenerationMeta(d){
     if(m.source)setLastGenSource(m.source);
 }
 
-export function _renderSceneSourceTrace(d, settings){
-    const meta=d?._spMeta||{};
-    const trace=meta.sceneSourceTrace||null;
-    const mode=trace?.mode||meta.injectionMethod||settings.injectionMethod||'inline';
-    const source=meta.source||lastGenSource||'';
-    const root=document.createElement('section');
-    root.className='sp-source-trace';
-    root.setAttribute('aria-label',t('Scene source trace'));
-    const saved=trace?.capturedAt||'';
-    const genMode=mode==='inline'?t('Together'):t('Separate');
-    const sourceLabel=source||t('Unknown');
-    const deltaLabel=meta.deltaMode?t('Delta'):t('Full');
-    root.innerHTML=`<div class="sp-source-trace-head">
-        <div><div class="sp-source-trace-title">${t('Scene Source Trace')}</div><div class="sp-source-trace-sub">${t('Experimental, read-only')}</div></div>
-    </div>
-    <div class="sp-source-trace-grid">
-        <div><span>${t('Generation')}</span><strong>${esc(genMode)}</strong></div>
-        <div><span>${t('Source')}</span><strong>${esc(sourceLabel)}</strong></div>
-        <div><span>${t('Snapshot')}</span><strong>${esc(deltaLabel)}</strong></div>
-        <div><span>${t('Captured')}</span><strong>${saved?esc(new Date(saved).toLocaleString()):'--'}</strong></div>
-    </div>`;
-    const body=document.createElement('div');
-    body.className='sp-source-trace-body';
-    if(settings.sceneSourceTrace!==true){
-        body.innerHTML=`<div class="sp-source-trace-empty">${t('Scene source trace is disabled. Enable it in Experimental settings to capture lorebook activations for new Together generations.')}</div>`;
-    }else if(mode!=='inline'){
-        body.innerHTML=`<div class="sp-source-trace-empty">${t('Scene source trace is available only in Together mode.')}</div>`;
-    }else if(!trace){
-        body.innerHTML=`<div class="sp-source-trace-empty">${t('No scene source trace was stored for this snapshot. Enable the setting before the next Together generation.')}</div>`;
-    }else{
-        const entries=Array.isArray(trace.lorebook?.entries)?trace.lorebook.entries:[];
-        if(!entries.length){
-            body.innerHTML=`<div class="sp-source-trace-empty">${t('No lorebook activations captured. SillyTavern may not have emitted world info activation data for this generation.')}</div>`;
-        }else{
-            const groups=new Map();
-            for(const entry of entries){
-                const world=entry.world||t('Unknown lorebook');
-                if(!groups.has(world))groups.set(world,[]);
-                groups.get(world).push(entry);
-            }
-            const lore=document.createElement('div');
-            lore.className='sp-source-trace-lore';
-            for(const [world,items] of groups.entries()){
-                const group=document.createElement('div');
-                group.className='sp-source-trace-world';
-                group.innerHTML=`<div class="sp-source-trace-world-title">${esc(world)} <span>${items.length}</span></div>`;
-                for(const item of items){
-                    const card=document.createElement('details');
-                    card.className='sp-source-trace-entry';
-                    const keys=(Array.isArray(item.keys)?item.keys:[]).filter(Boolean);
-                    const title=item.title||item.comment||item.uid||t('Untitled entry');
-                    card.innerHTML=`<summary><span>${esc(title)}</span>${keys.length?`<em>${esc(keys.join(', '))}</em>`:''}</summary>
-                        ${item.uid?`<div class="sp-source-trace-row"><span>UID</span><strong>${esc(item.uid)}</strong></div>`:''}
-                        ${item.comment&&item.comment!==title?`<div class="sp-source-trace-row"><span>${t('Comment')}</span><strong>${esc(item.comment)}</strong></div>`:''}
-                        ${item.excerpt?`<div class="sp-source-trace-excerpt">${esc(item.excerpt)}</div>`:''}`;
-                    group.appendChild(card);
-                }
-                lore.appendChild(group);
-            }
-            body.appendChild(lore);
-        }
-    }
-    root.appendChild(body);
-    return root;
-}
-
 // ── Quest mutation index helper ──────────────────────────────────────────
 // View order can differ from storage order because filterForView's per-tier
 // view cap (_capQuestTier in normalize.js) sorts by urgency when storage
@@ -1470,8 +1404,6 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
 
     // Timeline (always render — footer must come after)
     renderTimeline();
-    const _sourceTrace=_renderSceneSourceTrace(d,rootSettings);
-    if(_sourceTrace)body.appendChild(_sourceTrace);
 
     // Generation stats footer (always last)
     const _meta=d._spMeta||{};

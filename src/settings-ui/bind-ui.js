@@ -147,7 +147,6 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     $('#sp-thought-truncate').prop('checked',s.thoughtPanelTruncate===true);
     $('#sp-thought-fit').prop('checked',s.thoughtPanelFit===true);
     $('#sp-npc-graph').prop('checked',s.npcRelationshipGraph===true);
-    $('#sp-scene-source-trace').prop('checked',s.sceneSourceTrace===true);
     $('#sp-show-weather').prop('checked',s.weatherOverlay!==false);
     $('#sp-show-timetint').prop('checked',s.timeTint!==false);
     $('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);
@@ -286,12 +285,6 @@ export function bindUI(){const s=getSettings();
             // Lazy-import to avoid loading the graph module on every UI rebuild
             import('../ui/relationship-graph.js').then(m=>m.clearCache?.()).catch(()=>{});
         }
-    });
-    $('#sp-scene-source-trace').on('change',function(){
-        s.sceneSourceTrace=this.checked;
-        saveSettings();
-        const snap=getLatestSnapshot();
-        if(snap)updatePanel(normalizeTracker(snap),true);
     });
     $('#sp-show-weather').on('change',function(){s.weatherOverlay=this.checked;saveSettings();_spSaveLS();const cb=document.getElementById('sp-tb-weather');if(cb)cb.checked=this.checked;_syncFeatBadge();if(!this.checked)clearWeatherOverlay();else{const snap=getLatestSnapshot();if(snap){const n=normalizeTracker(snap);updateWeatherOverlay(n.weather)}}});
     $('#sp-show-timetint').on('change',function(){s.timeTint=this.checked;saveSettings();_spSaveLS();const cb=document.getElementById('sp-tb-timeTint');if(cb)cb.checked=this.checked;_syncFeatBadge();if(!this.checked)clearTimeTint();else{const snap=getLatestSnapshot();if(snap){const n=normalizeTracker(snap);updateTimeTint(n.time)}}});

@@ -2,6 +2,13 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.2] — 2026-07-23
+
+#### Changed — Mainline rollback
+
+- Move Scene Source Trace work to the `experemental` branch.
+- Remove Scene Source Trace capture, settings, UI, CSS, and tests from `main` while keeping the other 7.1 mobile, settings, and greeting-only generation changes.
+
 ### [7.1.1] — 2026-07-23
 
 #### Fixed — Scene history and trace visibility
