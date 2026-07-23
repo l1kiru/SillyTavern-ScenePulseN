@@ -50,8 +50,7 @@ globalThis.SillyTavern = {
     getContext: () => ({
         chatId: 'empty-state-chat',
         chat: [
-            { is_user: true, mes: 'Hello' },
-            { is_user: false, mes: 'Hi' },
+            { is_user: false, mes: 'Greeting' },
         ],
     }),
 };
@@ -60,7 +59,7 @@ const activeActions = activeChat.children.find(child => child.className === 'sp-
 assert.deepEqual(activeActions.children.map(button => button.dataset.action), [
     'regenerate', 'debug', 'analytics', 'panels', 'wiki',
 ]);
-assert.equal(nodes.get('sp-tb-regen').disabled, false, 'toolbar regen enabled for an active chat');
+assert.equal(nodes.get('sp-tb-regen').disabled, false, 'toolbar regen enabled for a selected greeting-only chat');
 activeActions.children.find(button => button.dataset.action === 'regenerate').click();
 assert.equal(nodes.get('sp-tb-regen').clicks, 1);
 

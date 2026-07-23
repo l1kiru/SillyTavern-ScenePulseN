@@ -17,30 +17,30 @@
 
 /* ═══ ST-INJECTED RESTORE BUTTON (next to send button) ═══ */
 .sp-st-restore {
-    display: none; width: 34px; height: 34px;
+    --sp-st-restore-size: var(--bottomFormBlockSize, 34px);
+    display: none; width: var(--sp-st-restore-size); height: var(--sp-st-restore-size);
+    min-width: var(--sp-st-restore-size); flex: 0 0 var(--sp-st-restore-size);
     color: #5ce0c8; cursor: pointer;
     align-items: center; justify-content: center;
-    padding: 4px; border-radius: 6px;
-    transition: all 0.2s ease; flex-shrink: 0;
+    padding: 0; border-radius: 6px; box-sizing: border-box; line-height: 1;
+    transition: filter 0.2s ease, color 0.2s ease, background-color 0.2s ease;
 }
-.sp-st-restore svg { width: 26px; height: 26px; }
+.sp-st-restore svg { width: calc(var(--sp-st-restore-size) * 0.76); height: calc(var(--sp-st-restore-size) * 0.76); flex-shrink: 0; pointer-events: none; }
 .sp-st-restore .sp-mascot-pulse { animation: none; }
 .sp-st-restore:hover, .sp-st-restore:active {
     filter: drop-shadow(0 0 6px rgba(77,184,164,0.4));
-    transform: scale(1.15);
 }
 
 @media (max-width: 600px) {
-    .sp-st-restore { width: 44px; height: 44px; padding: 8px; }
-    .sp-st-restore svg { width: 28px; height: 28px; }
+    .sp-st-restore { --sp-st-restore-size: var(--bottomFormBlockSize, 42px); }
 }
 /* Generation pulse animation — subtle, no heavy glow */
 .sp-st-generating {
     animation: sp-gen-pulse 1.2s ease-in-out infinite !important;
 }
 @keyframes sp-gen-pulse {
-    0%,100% { opacity: 0.6; transform: scale(0.95); }
-    50% { opacity: 1; transform: scale(1.15); }
+    0%,100% { opacity: 0.65; filter: drop-shadow(0 0 2px rgba(77,184,164,0.15)); }
+    50% { opacity: 1; filter: drop-shadow(0 0 8px rgba(77,184,164,0.45)); }
 }
 
 /* ═══ MOBILE BANNER (post-generation notification) ═══ */
@@ -136,6 +136,13 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
     width: 42px; height: 42px; min-width: 42px;
     border-radius: 10px; flex-shrink: 0; margin: 0;
 }
+#sp-panel.sp-mode-mobile .sp-toolbar-more-menu .sp-toolbar-menu-btn {
+    width: 100%; min-width: 0; height: auto;
+    justify-content: flex-start; flex-shrink: 1;
+}
+#sp-panel.sp-mode-mobile .sp-toolbar-more-menu .sp-toolbar-menu-label {
+    flex: 1 1 auto; min-width: 0; text-align: left;
+}
 #sp-panel.sp-mode-mobile .sp-toolbar-spacer { display: none; }
 /* Hide the toolbar minimize — the mobile top bar has its own */
 #sp-panel.sp-mode-mobile #sp-tb-minimize { display: none !important; }
@@ -192,12 +199,29 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 #sp-panel.sp-mode-mobile .sp-char-name { font-size: var(--sp-fs-lg); }
 #sp-panel.sp-mode-mobile .sp-char-val { font-size: var(--sp-fs-base); }
 /* Story Ideas */
-#sp-panel.sp-mode-mobile .sp-idea-header { padding: 10px 12px; min-height: 48px; }
-#sp-panel.sp-mode-mobile .sp-idea-name { font-size: var(--sp-fs-md); }
+#sp-panel.sp-mode-mobile .sp-idea-header {
+    display: grid;
+    grid-template-columns: auto auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+        "chevron icon type paste inject"
+        ". name name name name";
+    gap: 5px 7px; align-items: center;
+    padding: 10px 12px; min-height: 48px;
+}
+#sp-panel.sp-mode-mobile .sp-idea-chevron { grid-area: chevron; }
+#sp-panel.sp-mode-mobile .sp-idea-icon { grid-area: icon; }
+#sp-panel.sp-mode-mobile .sp-idea-type {
+    grid-area: type; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#sp-panel.sp-mode-mobile .sp-idea-name { grid-area: name; font-size: var(--sp-fs-md); }
 #sp-panel.sp-mode-mobile .sp-idea-name {
     white-space: normal; display: -webkit-box; -webkit-box-orient: vertical;
     -webkit-line-clamp: 2; line-height: 1.25;
 }
+#sp-panel.sp-mode-mobile .sp-idea-spacer { display: none; }
+#sp-panel.sp-mode-mobile .sp-idea-paste { grid-area: paste; }
+#sp-panel.sp-mode-mobile .sp-idea-inject { grid-area: inject; }
 #sp-panel.sp-mode-mobile .sp-idea-inject,
 #sp-panel.sp-mode-mobile .sp-idea-paste { opacity: 0.85; }
 #sp-panel.sp-mode-mobile .sp-idea-hook { font-size: var(--sp-fs-base); padding: 8px 12px; }
