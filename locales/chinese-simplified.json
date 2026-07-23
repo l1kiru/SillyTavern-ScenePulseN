@@ -840,6 +840,7 @@
   "Scene source trace": "Scene source trace",
   "Scene Source Trace": "Scene Source Trace",
   "Scene source trace is available only in Together mode.": "Scene source trace is available only in Together mode.",
+  "Scene source trace is disabled. Enable it in Experimental settings to capture lorebook activations for new Together generations.": "Scene source trace is disabled. Enable it in Experimental settings to capture lorebook activations for new Together generations.",
   "Scene tension has been low for several messages. Consider introducing conflict, a revelation, or a time-sensitive event.": "Scene tension has been low for several messages. Consider introducing conflict, a revelation, or a time-sensitive event.",
   "Scene Transitions": "Scene Transitions",
   "Scene updated": "场景已更新",

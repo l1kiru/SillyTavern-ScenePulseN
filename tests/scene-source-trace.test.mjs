@@ -58,7 +58,9 @@ assert.equal(trace.mode, 'inline');
 assert.equal(trace.lorebook.count, 20);
 assert.equal(trace.lorebook.entries.at(-1).uid, '19');
 
-assert.equal(_renderSceneSourceTrace({ _spMeta: {} }, { sceneSourceTrace: false }), null);
+const disabled = _renderSceneSourceTrace({ _spMeta: {} }, { sceneSourceTrace: false });
+assert.equal(disabled.className, 'sp-source-trace');
+assert.match(disabled.children[0].innerHTML, /disabled/);
 const unavailable = _renderSceneSourceTrace({ _spMeta: { injectionMethod: 'separate', source: 'auto:separate' } }, { sceneSourceTrace: true });
 assert.equal(unavailable.className, 'sp-source-trace');
 assert.match(unavailable.children[0].innerHTML, /Together mode/);
