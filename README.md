@@ -39,7 +39,7 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 > **How to contribute (pick whichever is easier):**
 > - 💬 **Quick suggestion** → [open an issue](https://github.com/l1kiru/SillyTavern-ScenePulseN/issues/new) describing your model + the change that worked. Even one-line tips are valuable.
 > - 📁 **Tested preset** → submit a PR adding a `.json` file to [`presets/`](presets/) — see [`presets/README.md`](presets/README.md) for the schema and [`presets/_examples/`](presets/_examples/) for working examples.
-> - 🛠️ **Built-in tuning improvement** → if you'd improve one of the 30 bundled presets, open a PR against [`src/presets/built-in.js`](src/presets/built-in.js) with the model id and the rationale.
+> - 🛠️ **Built-in tuning improvement** → if you'd improve one of the 39 bundled presets, open a PR against [`src/presets/built-in.js`](src/presets/built-in.js) with the model id and the rationale.
 >
 > Your contributions ship to every user. The more real-world tunings we collect, the better ScenePulse works out-of-the-box for everyone.
 
@@ -63,6 +63,7 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 ### Live Dashboard
 - **Environment cards** — time, date, weather, temperature, location with animated weather icons
 - **Scene details** — mood, tension, topic, interaction style, sound environment
+- **Witnesses** — dimmed chips for background observers not in `characters[]` (bystanders, unnamed staff, crowd)
 - **Real-time updates** every AI message
 <img width="857" height="390" alt="image" src="https://github.com/user-attachments/assets/7740dada-d740-49d8-8ae3-1ae6d72767d5" />
 
@@ -81,7 +82,7 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 
 ### Quest Journal
 - **North Star** — overarching life purpose
-- **Main Quests, Side Quests, Active Tasks** — tiered and collapsible
+- **Main Quests and Side Quests** — tiered and collapsible (legacy `activeTasks` is stripped if present in old snapshots)
 - **Quest lifecycle** — NEW (teal badge), UPDATED (amber badge), RESOLVED (green badge, strikethrough)
 - Urgency indicators (critical/high/moderate/low/resolved) and detailed descriptions
 - User quest management — complete (✓), remove (✕), undo, and add quests directly
@@ -113,6 +114,7 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 ### Story Ideas
 - 5 AI-generated plot directions per update (dramatic, intense, comedic, twist, exploratory)
 - One-click **paste to edit** or **inject directly** into chat
+- Toggle **Generate and show story ideas** in Settings → General — when off, `plotBranches` is omitted from the tracker prompt and hidden from the panel
 <img width="860" height="445" alt="image" src="https://github.com/user-attachments/assets/e2614c4c-0b1c-42db-9761-5f3efbc8dd2a" />
 
 
@@ -131,7 +133,7 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 - Accessible from the stats footer
 
 ### Theme Presets
-- **5 themes**: Default, Midnight, Fantasy, Cyberpunk, Minimal
+- **6 themes**: Default, SillyTavern, Midnight, Fantasy, Cyberpunk, Minimal
 - Live CSS variable switching — changes instantly, no reload
 - Theme selector in Settings > General
 
@@ -150,10 +152,14 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 - **Combined crash log** — captures errors from both ScenePulse AND the host SillyTavern via `window.error`, `window.unhandledrejection`, and ScenePulse-internal `err()` calls. Tagged by source.
 - **Persistent across reloads** — hybrid storage (in-memory ring buffer + localStorage mirror + server file flush to `data/<user>/user/files/scenepulse-crash-log.json`)
 - **Privacy-conscious** — only stack + metadata + version, no message content by default
-- **Debug Inspector overlay** (Settings → Advanced → Debug → 🔍 Debug Inspector) with three tabs:
+- **Debug Inspector overlay** (Settings → Advanced → Debug → 🔍 Debug Inspector) with tabs:
+  - **Overview** — current-session health summary and quick jumps into the other tabs
+  - **Issues** — severity + source filters, expand-for-stack rows, copy entry, copy all, clear, **"Report on GitHub"** per row that pre-fills a new-issue template with the captured stack
   - **Activity** — chronological logger.js debug log with level filter, search, live refresh, copy, export
   - **Last Response** — pretty-printed raw LLM JSON from the most recent generation
-  - **Crashes** — severity + source filters, expand-for-stack rows, copy entry, copy all, clear, **"Report on GitHub"** per row that pre-fills a new-issue template with the captured stack
+  - **Network** — metadata-only fetch capture for tracker requests
+  - **Performance** — FPS / paint attribution for ScenePulse components
+  - **Config** — effective settings dump for bug reports
 
 ### Performance / Reduce Visual Effects
 - One-click **"Reduce visual effects"** toggle in Settings → General disables the animated dashboard canvas, particles, shimmers, and decorative blend modes — recommended for laptops or integrated GPUs
@@ -203,7 +209,7 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 
 ### Timeline & Snapshot Browser
 - Every AI message creates a snapshot (unlimited storage by default, configurable)
-- **Timeline scrubber** — click any dot to load historical scene data and scroll to the message
+- **Timeline scrubber** — visible from the first snapshot; click any dot to load historical scene data and scroll to the message
 - **"Browse All" button** — paginated snapshot list (10 per page) with time, location, tension, character count, token usage
 - Click any row to jump to that snapshot and scroll to the message in chat
 - **Historical message navigation** — automatically loads lazy-loaded messages via ST's `showMoreMessages` API
@@ -226,11 +232,12 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 
 
 ### Delta Mode (Token Saving)
+- Enabled by default since v6.9.0 (no General-tab toggle — always on unless forced off internally)
 - LLM returns only changed fields instead of echoing the full snapshot
 - Client-side delta merge preserves unchanged data from previous snapshot
 - Reduces output tokens by ~70–90% on subsequent messages
+- Periodic full-state refresh (default every 15 delta turns); use `/sp-refresh` if data looks stale
 - Delta savings displayed in stats footer with hover tooltip
-- Experimental — may not work with all models
 
 ### Temporal Validator *(v6.24.0)*
 - **Auto-corrects** LLM time regressions and implausible jumps before they reach the timeline (no more #60 16:15 → #62 14:52 → #64 15:00 surprises)
@@ -349,7 +356,7 @@ If the AI omits the tracker, ScenePulse can **automatically fall back** to a sep
 Alternatively, ScenePulse can run a completely separate quiet API call after each message — useful for models that struggle with inline instructions.
 
 ### Delta Mode
-When enabled, the LLM returns only fields that changed since the last snapshot. The client merges the delta with the previous snapshot, reducing output tokens by ~70–90%. Entity arrays (characters, relationships, quests) are merged by name at the field level.
+By default (since v6.9.0), the LLM returns only fields that changed since the last snapshot. The client merges the delta with the previous snapshot, reducing output tokens by ~70–90%. Entity arrays (characters, relationships, quests) are merged by name at the field level. Periodic full-state refresh runs every 15 delta turns; `/sp-refresh` forces a full output immediately.
 
 ### Smart Snapshot Selection
 When embedding multiple snapshots in the generation prompt, ScenePulse selects the most significant state changes (location changes, new characters, quest completions, tension shifts) rather than just the N most recent.
@@ -359,7 +366,7 @@ When embedding multiple snapshots in the generation prompt, ScenePulse selects t
 ScenePulseN 7.x retains a modular ES module architecture with focused modules:
 
 ```
-index.js                    ← Thin entry point (~320 lines)
+index.js                    ← Thin entry point
 style.css                   ← @import directives only
 src/
   constants.js              ← Defaults, schemas, prompts, panel definitions
@@ -371,26 +378,35 @@ src/
   color.js                  ← Character color assignment with fuzzy matching
   normalize.js              ← Data normalization with WeakMap caching
   i18n.js                   ← Internationalization loader (29 languages in locales/*.json)
+  profiles.js               ← Prompt/schema profile bundles
+  crash-log.js              ← Persistent crash / issue log
+  network-log.js            ← Metadata-only fetch capture for Debug Inspector
+  temporal-check.js         ← Temporal validator (time regression / jump guards)
   update-check.js           ← Update check + one-click updater via ST's extension API
   story-ideas.js            ← Story idea injection
-  slash-commands.js          ← Slash command registration (/sp)
-  macros.js                  ← Custom macro registration ({{sp_*}})
-  themes.js                  ← Theme presets (5 themes)
-  stagnation.js              ← Scene stagnation detection
+  slash-commands.js         ← Slash command registration (/sp)
+  macros.js                 ← Custom macro registration ({{sp_*}})
+  themes.js                 ← Theme presets (6 themes)
+  stagnation.js             ← Scene stagnation detection
+  presets/                  ← Built-in model presets (39) + OpenRouter discovery glue
   generation/
     extraction.js           ← Inline tracker extraction with JSON repair
-    streaming.js            ← Streaming hider (MutationObserver + 20ms polling)
+    streaming.js            ← Streaming hider (MutationObserver + polling)
     engine.js               ← Generation engine with retry/fallback
+    request.js              ← Tracker request transport
     delta-merge.js          ← Delta response merging
     interceptor.js          ← SillyTavern generate interceptor
-    pipeline.js              ← Shared extraction→normalize→save→update pipeline
-    validation.js            ← Post-extraction schema validation
+    pipeline.js             ← Shared extraction→normalize→save→update pipeline
+    validation.js           ← Post-extraction schema validation
+    st-watchdog.js          ← ST generation-stopped / stall recovery
+    regen-guard.js          ← Generation re-entry guard
   ui/
     mobile.js               ← Device detection, FAB, responsive layout
     panel.js                ← Side panel creation, toolbar, tablet/auto-condense
     update-panel.js         ← Dashboard rendering with leak-safe canvas animation
+    debug-inspector.js      ← Tabbed Debug Inspector overlay
     section.js              ← Collapsible section builder
-    weather.js              ← Weather particle system (9 types)
+    weather.js              ← Weather particle system
     time-tint.js            ← Time-of-day ambient overlays
     scene-transition.js     ← Location change animations
     timeline.js             ← Timeline scrubber + snapshot browser
@@ -403,27 +419,27 @@ src/
     analytics.js            ← Token usage analytics panel
     character-wiki.js       ← Historical character browser overlay
     relationship-web.js     ← SVG circular relationship graph
+    …                       ← Additional UI modules (presets, portraits, dialogs, etc.)
   settings-ui/
     create-settings.js      ← Settings panel HTML template (tabbed)
     bind-ui.js              ← Settings form bindings with live language switch
     custom-panels.js        ← Custom panel manager
+    profiles-manager.js     ← Profile manager overlay
     setup-guide.js          ← First-run wizard
     guided-tour.js          ← Interactive feature tour
   vendor/
     jsonrepair.mjs          ← ScenePulse wrapper for vendored jsonrepair
-    jsonrepair.bundle.mjs   ← Vendored jsonrepair v3.15.0 (ISC)
+    jsonrepair.bundle.mjs   ← Vendored jsonrepair (ISC)
     jsonrepair.LICENSE      ← Full ISC license text
     README.md               ← Provenance, upgrade procedure, validation pointer
 css/
-  29 modular stylesheets    ← Split by component, loaded via @import
+  34 modular stylesheets    ← Split by component, loaded via @import
 tests/
   run-all.mjs               ← Recursive runner for all test files
   vendor/                   ← Validation scripts for the vendored library
-    jsonrepair.test.mjs     ← 106-case smoke suite
-    compare.test.mjs        ← Old regex repair vs jsonrepair head-to-head
   *.test.mjs                ← Regression suite (delta, profiles, slash,
-                              macros, normalize, group chat, character aliases,
-                              wiki persistence, crash log, temporal validation, etc.)
+                              macros, normalize, streaming hider, temporal
+                              validation, etc.)
 ```
 
 No bundler required — SillyTavern loads extensions as `<script type="module">`, so native ES imports work out of the box.
@@ -434,7 +450,7 @@ No bundler required — SillyTavern loads extensions as `<script type="module">`
 - **Tested models**: GLM-4/5/5.1, Claude, GPT-4o, Gemini, Llama 3, Mistral, Qwen
 - **API providers**: OpenAI-compatible, Anthropic, Google AI, any provider SillyTavern supports
 - **Browsers**: Chrome, Firefox, Safari (mobile & desktop)
-- **Languages**: 29 languages with full UI + LLM output localization
+- **Languages**: 29 languages with UI dictionaries + LLM output localization (Russian UI complete; other locales partial with English fallback)
 
 > **Note:** Together mode works best with instruction-following models that reliably append structured data. Smaller or older models may need Separate mode or a fallback profile.
 
@@ -446,12 +462,17 @@ Access settings via **Extensions** → **ScenePulse** in SillyTavern's settings 
 | Setting | Description |
 |---------|-------------|
 | **Enable ScenePulse** | Master toggle |
-| **Delta mode** | Enabled by default — LLM returns only changed fields, saving 66-77% output tokens. Auto-refreshes every 15 turns. Use `/sp-refresh` if data seems stale |
 | **Auto-generate** | Update tracker on every AI message |
+| **Generate and show story ideas** | When off, story ideas (`plotBranches`) are removed from the tracker prompt and hidden from the panel |
+| **Show thought bubbles** | Floating inner-thoughts panel (with optional truncate / auto-fit sub-options) |
+| **Show developer tools** | Extra debug controls in the UI |
 | **Reduce visual effects** | Disables the animated dashboard canvas, particles, and decorative blend modes. Recommended on laptops or integrated GPUs |
-| **Language** | UI + LLM output language (29 options, auto-detect) |
-| **Theme** | Visual theme preset (5 options) |
+| **Language** | UI + LLM output language (29 options, auto-detect). Russian UI is complete; other locales are partial with English fallback |
+| **Theme** | Visual theme preset (6 options: Default, SillyTavern, Midnight, Fantasy, Cyberpunk, Minimal) |
 | **Font scale** | Adjust text size (0.7x–1.5x) |
+| **Experimental** *(Advanced tab)* | NPC relationship graph, weather overlay effects, time-of-day ambience. Scene Source Trace lives on the `experemental` branch only — not on `main` |
+
+Delta mode is always on by default (since v6.9.0) and is **not** a General-tab checkbox. Use `/sp-refresh` if snapshot data looks stale.
 
 ### Generation Tab
 | Setting | Description |
@@ -474,7 +495,7 @@ Access settings via **Extensions** → **ScenePulse** in SillyTavern's settings 
 | **Max snapshots** | Maximum scene snapshots stored per chat (0 = unlimited) |
 | **Generate / Clear / Reset** | Manual generation, data clearing, settings reset |
 | **Export / Import Config** | Save/load ScenePulse configuration as JSON (includes profiles + per-chat panels) |
-| **Debug Inspector** | Tabbed overlay: Activity (live debug log), Last Response (raw LLM JSON), Crashes (persistent error log with "Report on GitHub") |
+| **Debug Inspector** | Tabbed overlay: Overview, Issues, Activity, Last Response, Network, Performance, Config |
 | **Development** *(collapsed + locked by default)* | Manual triggers for one-time popups: Setup Guide, OR Connector Prompt, Preset Suggestion, Update Banner. Plus a Reset all one-time popup state button that clears every "already shown" flag so popups behave as if you were a fresh install on next reload. Section auto-relocks every settings open |
 
 ## Custom Panels
@@ -494,8 +515,8 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 ## Known Issues
 
 - **Model compliance** — Some models intermittently skip the tracker block or output mangled markers; the fallback system handles this with a separate API call, and extraction supports multiple marker variants
-- **Delta mode** — Enabled by default since v6.9.0. If you see incomplete or stale data after many turns, use `/sp-refresh` to force a full-state regeneration. The system auto-refreshes every 15 delta turns
-- **Payload visibility** — The regex filter and streaming hider work together to hide tracker JSON during streaming. In rare cases with very fast token rates, a brief flash may occur before the hider locks
+- **Delta mode** — Enabled by default since v6.9.0 (no UI toggle). If you see incomplete or stale data after many turns, use `/sp-refresh` to force a full-state regeneration. The system auto-refreshes every 15 delta turns
+- **Payload visibility** — The regex filter and streaming hider work together to hide tracker JSON during streaming. In rare cases with very fast token rates, a brief flash may occur before the hider locks. Cancel and failed-extract paths clear the hider lock so the narrative bubble is not left collapsed (fixed in 7.1.3)
 - **Mobile** — Weather effects, time-of-day tint, inner thoughts panel, and condense view are disabled on mobile to optimize performance
 - **GPU on integrated graphics** — If the panel feels heavy on a laptop or low-power GPU, toggle **Reduce visual effects** in Settings → General. The animated dashboard canvas alone can be expensive on weaker hardware
 - **Translations** — Russian currently has complete UI-dictionary coverage. Other languages use explicit English fallback for untranslated entries; exact counts are published in [`locales/_coverage.json`](locales/_coverage.json). Community corrections are welcome in [`locales/`](locales/).
@@ -504,7 +525,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.2** — Moves Scene Source Trace to the `experemental` branch and keeps the 7.1 mobile/settings/greeting-only fixes on main.
+**Latest: v7.1.3** — Restores the chat bubble after cancel/failed Together extract, and syncs README/settings copy with the real 7.x UI.
 
 ## Contributing
 

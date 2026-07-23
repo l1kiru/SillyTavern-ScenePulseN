@@ -35,6 +35,7 @@ import { updatePanel } from '../ui/update-panel.js';
 import { cleanupGenUI } from '../ui/loading.js';
 import { setBrandState } from '../ui/panel.js';
 import { renderEmptyState } from '../ui/empty-state.js';
+import { stopStreamingHider } from './streaming.js';
 import { t } from '../i18n.js';
 
 async function _changeAndWait(ctx,element,value,eventName,label){
@@ -109,6 +110,9 @@ export function cancelGeneration(){
     // ANOTHER extension (MemoryBooks memory insertion, etc.) would be misattributed
     // to our still-pending generation and extraction would run on foreign content.
     setInlineGenStartMs(0);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenerationContext(null);
+    // Unlock chat display immediately — streaming hider may have left
+    // data-sp-has-tracker / visibility locks that collapse the bubble.
+    try { stopStreamingHider({abort:true}); } catch {}
     // v6.27.18: also tear down the visible regen UI (loading overlay,
     // elapsed timer, Stop button). Previously this only fired when doGen
     // completed naturally, so a user-initiated cancel left the loading
