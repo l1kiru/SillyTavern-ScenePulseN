@@ -16,7 +16,7 @@ export function renderTimeline(){
     if(tl)tl.remove();
     const all=getTrackerData();const sorted=Object.keys(all.snapshots).map(Number).sort((a,b)=>a-b);
     const provenance=new Map(getSnapshotProvenance().map(p=>[p.id,p]));
-    if(sorted.length<2)return;
+    if(sorted.length<1)return;
     const latest=sorted[sorted.length-1];
     let selectedKey=currentSnapshotMesIdx>=0?currentSnapshotMesIdx:latest;
     // Display max 8 nodes on scrubber (sampled), but all snapshots remain stored for graphs/analytics

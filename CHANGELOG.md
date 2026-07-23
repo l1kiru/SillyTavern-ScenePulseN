@@ -2,6 +2,13 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.1] — 2026-07-23
+
+#### Fixed — Scene history and trace visibility
+
+- Show the scene history timeline as soon as one snapshot exists instead of waiting for two snapshots.
+- Keep the Scene Source Trace block visible with a clear disabled/unavailable state when tracing is off, unavailable, or not yet captured.
+
 ### [7.1.0] — 2026-07-23
 
 #### Added — Scene Source Trace

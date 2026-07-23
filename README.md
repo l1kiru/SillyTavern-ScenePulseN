@@ -504,7 +504,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.0** — Adds an experimental Together-mode Scene Source Trace, mobile UI fixes, visible Story Ideas settings, collapsed settings by default, and greeting-only scene generation.
+**Latest: v7.1.1** — Restores scene history visibility from the first snapshot and keeps the Scene Source Trace panel visible with clear unavailable states.
 
 ## Contributing
 

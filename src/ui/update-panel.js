@@ -54,7 +54,6 @@ export function restoreGenerationMeta(d){
 }
 
 export function _renderSceneSourceTrace(d, settings){
-    if(settings.sceneSourceTrace!==true)return null;
     const meta=d?._spMeta||{};
     const trace=meta.sceneSourceTrace||null;
     const mode=trace?.mode||meta.injectionMethod||settings.injectionMethod||'inline';
@@ -77,7 +76,9 @@ export function _renderSceneSourceTrace(d, settings){
     </div>`;
     const body=document.createElement('div');
     body.className='sp-source-trace-body';
-    if(mode!=='inline'){
+    if(settings.sceneSourceTrace!==true){
+        body.innerHTML=`<div class="sp-source-trace-empty">${t('Scene source trace is disabled. Enable it in Experimental settings to capture lorebook activations for new Together generations.')}</div>`;
+    }else if(mode!=='inline'){
         body.innerHTML=`<div class="sp-source-trace-empty">${t('Scene source trace is available only in Together mode.')}</div>`;
     }else if(!trace){
         body.innerHTML=`<div class="sp-source-trace-empty">${t('No scene source trace was stored for this snapshot. Enable the setting before the next Together generation.')}</div>`;
