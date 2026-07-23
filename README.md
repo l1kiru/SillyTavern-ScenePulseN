@@ -504,7 +504,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.1** — Restores scene history visibility from the first snapshot and keeps the Scene Source Trace panel visible with clear unavailable states.
+**Latest: v7.1.2** — Moves Scene Source Trace to the `experemental` branch and keeps the 7.1 mobile/settings/greeting-only fixes on main.
 
 ## Contributing
 

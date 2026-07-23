@@ -6,7 +6,7 @@
     "test": "node tests/run-all.mjs",
     "sync-locales": "node tools/sync-locales.mjs"
   },
-  "version": "7.1.1",
+  "version": "7.1.2",
   "description": "Community-maintained ScenePulse fork for SillyTavern",
   "repository": {
     "type": "git",
