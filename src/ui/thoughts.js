@@ -93,7 +93,7 @@ export function createThoughtPanel(){
         btn.classList.add('sp-spinning');
         const ctx=SillyTavern.getContext();
         const mesIdx=getLastAssistantMessageIndex(ctx);
-        if(!canGenerateScene(ctx,mesIdx)){btn.classList.remove('sp-spinning');toastr.info(t('Open a chat and send a message before generating ScenePulse.'));return}
+        if(!canGenerateScene(ctx,mesIdx)){btn.classList.remove('sp-spinning');toastr.info(t('Open a chat before generating ScenePulse.'));return}
         // Show loading overlay inside thought body -- existing content visible behind
         showThoughtLoading(t('Regenerating thoughts'),t('Analyzing context'));
         showStopButton();

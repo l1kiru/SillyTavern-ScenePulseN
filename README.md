@@ -504,7 +504,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.0.5** — Disables ScenePulse regeneration when no chat is selected and blocks empty/greeting-only screens from starting tracker generation.
+**Latest: v7.1.0** — Adds an experimental Together-mode Scene Source Trace, mobile UI fixes, visible Story Ideas settings, collapsed settings by default, and greeting-only scene generation.
 
 ## Contributing
 

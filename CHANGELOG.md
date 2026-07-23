@@ -2,6 +2,22 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.0] — 2026-07-23
+
+#### Added — Scene Source Trace
+
+- Add an experimental Together-mode Scene Source Trace panel below the timeline.
+- Capture bounded lorebook/world-info activation metadata when SillyTavern emits it, without scanning lorebooks or storing full entry text.
+- Store trace provenance on snapshots under `_spMeta.sceneSourceTrace` and render generation mode, source, delta/full state, capture time, and grouped lorebook entries.
+
+#### Changed — Mobile and settings polish
+
+- Fix mobile toolbar menu item width so labels are readable.
+- Keep the mobile ScenePulse restore button at a fixed SillyTavern-control size during generation animation.
+- Show the Story Ideas toggle in settings and collapse the ScenePulse settings drawer by default.
+- Let greeting-only chats generate an initial scene snapshot.
+- Improve mobile story idea cards so long idea names wrap below the type badge.
+
 ### [7.0.5] — 2026-07-22
 
 #### Fixed — No-chat generation guard

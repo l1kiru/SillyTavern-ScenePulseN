@@ -35,6 +35,7 @@ import { noteStreamingText, stopStreamingHider } from './src/generation/streamin
 import { cancelGeneration } from './src/generation/engine.js';
 import { scenePulseInterceptor, noteStreamProgress, clearStallWatchdog } from './src/generation/interceptor.js';
 import { processExtraction } from './src/generation/pipeline.js';
+import { recordWorldInfoActivation, cancelSceneSourceTrace } from './src/scene-source-trace.js';
 
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
@@ -189,6 +190,16 @@ eventSource.on(event_types.STREAM_TOKEN_RECEIVED, text => {
     try { noteStreamingText(text); } catch {}
 });
 
+if (event_types.WORLD_INFO_ACTIVATED) {
+    eventSource.on(event_types.WORLD_INFO_ACTIVATED, payload => {
+        try {
+            const s=getSettings();
+            if(!s.enabled||s.injectionMethod!=='inline'||s.sceneSourceTrace!==true||inlineGenStartMs<=0||!inlineGenerationContext)return;
+            recordWorldInfoActivation(payload);
+        } catch {}
+    });
+}
+
 // CRITICAL: Save chat the INSTANT generation ends, BEFORE other extensions
 // can trigger profile switches that cause CHAT_CHANGED → chat reload → message loss.
 eventSource.on(event_types.GENERATION_ENDED, async () => {
@@ -212,6 +223,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             const _inlineCtx=inlineGenerationContext;
             if(_inlineCtx&&(_inlineCtx.mesIdx!==targetIdx||getActiveSwipeId(targetIdx)!==_inlineCtx.swipeId)){
                 warn('GENERATION_ENDED: target swipe changed; discarding inline tracker for',targetIdx);
+                cancelSceneSourceTrace();
                 setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
                 return;
             }
@@ -263,10 +275,12 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             // delayed renderer pushes the message in.
             spSetGenerating(false);
             stopStreamingHider();
+            cancelSceneSourceTrace();
         }
     } else {
         spSetGenerating(false);
         stopStreamingHider();
+        cancelSceneSourceTrace();
     }
     try { await ensureChatSaved(); log('GENERATION_ENDED: chat saved preemptively'); }
     catch (e) { warn('GENERATION_ENDED save failed:', e); }
@@ -287,6 +301,7 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
         // Defensive: clear inline generation ownership state so a subsequent
         // message from another extension (e.g. MemoryBooks) does not get
         // misattributed to our cancelled generation.
+        cancelSceneSourceTrace();
         setInlineGenStartMs(0); setInlineExtractionDone(false); setPendingInlineIdx(-1); setInlineGenerationContext(null);
         log('CANCEL (ST stop): nonce', oldNonce, '→', genNonce);
         cleanupGenUI();
@@ -300,6 +315,7 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
 eventSource.on(event_types.CHAT_CHANGED, async () => {
     try { await ensureChatSaved(); } catch (e) { warn('CHAT_CHANGED save:', e); }
     if (generating) cancelGeneration();
+    cancelSceneSourceTrace();
     const tp = document.getElementById('sp-thought-panel');
     if (tp) { tp.classList.remove('sp-tp-visible'); const tpb = document.getElementById('sp-tp-body'); if (tpb) tpb.innerHTML = ''; }
     clearWeatherOverlay();
