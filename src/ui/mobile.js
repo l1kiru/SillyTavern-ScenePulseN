@@ -73,7 +73,7 @@ export function spUpdateFab(){
             ||document.querySelector('#form_sheld');
         if(anchor){
             btn=document.createElement('div');btn.id='sp-st-restore';btn.title=t('Open ScenePulse');
-            btn.className='sp-st-restore';
+            btn.className='sp-st-restore interactable';
             btn.innerHTML=MASCOT_SVG;
             btn.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();spRestorePanel()});
             anchor.appendChild(btn);
@@ -83,6 +83,7 @@ export function spUpdateFab(){
         }
     }
     if(btn){
+        btn.classList.add('sp-st-restore','interactable');
         btn.style.display=shouldShow?'flex':'none';
         console.log(LOG,'FAB:','mode='+mode,'panelVis='+panelVis,'show='+shouldShow,'btnDisplay='+btn.style.display);
     }

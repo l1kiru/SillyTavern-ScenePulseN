@@ -234,7 +234,7 @@ async function _spRegen(args, value) {
 
     const ctx = SillyTavern.getContext();
     const mesIdx = getLastAssistantMessageIndex(ctx);
-    if (!canGenerateScene(ctx, mesIdx)) return 'Open a chat and send a user message before generating ScenePulse.';
+    if (!canGenerateScene(ctx, mesIdx)) return 'Open a chat with an assistant message before generating ScenePulse.';
 
     const VALID_SECTIONS = { dashboard: 'dashboard', scene: 'scene', quests: 'quests', relationships: 'relationships', characters: 'characters', branches: 'branches', storyideas: 'branches' };
     const partKey = section ? VALID_SECTIONS[section] : null;
@@ -293,7 +293,7 @@ async function _spRefresh() {
 
         const ctx = SillyTavern.getContext();
         const mesIdx = getLastAssistantMessageIndex(ctx);
-        if (!canGenerateScene(ctx, mesIdx)) { clearForceFullState(); return 'Open a chat and send a user message before generating ScenePulse.'; }
+        if (!canGenerateScene(ctx, mesIdx)) { clearForceFullState(); return 'Open a chat with an assistant message before generating ScenePulse.'; }
 
         const panel = document.getElementById('sp-panel');
         if (panel) { spAutoShow(); showLoadingOverlay(document.getElementById('sp-panel-body'), t('Full Refresh'), t('Re-establishing ground truth')); showStopButton(); startElapsedTimer(); }

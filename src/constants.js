@@ -6,7 +6,7 @@ export const MODULE_NAME='scenepulse';
 // v6.12.3 — every release bumped manifest.json but missed this. Activity
 // log + diagnostic version field were misreporting. Keep in sync with
 // manifest.json on every version bump going forward.
-export const VERSION = '7.0.5';
+export const VERSION = '7.1.0';
 
 export const LOG='[ScenePulse]';
 export const DEFAULT_EXTENSION_NAME='SillyTavern-ScenePulseN';
@@ -34,7 +34,7 @@ export const MES_ICON_SVG=`<svg viewBox="0 0 18 18" fill="none" width="16" heigh
 // turns, force one full-state generation to re-establish ground truth
 // and flush stale scalars, phantom entities, and fossilized meters.
 // Set to 0 to disable periodic refresh entirely.
-export const DEFAULTS=Object.freeze({enabled:true,autoGenerate:true,maxRetries:2,contextMessages:8,promptMode:'json',embedSnapshots:1,embedRole:'system',injectionMethod:'inline',deltaMode:true,deltaRefreshInterval:15,maxSnapshots:0,connectionProfile:'',chatPreset:'',fallbackProfile:'',fallbackPreset:'',fallbackEnabled:true,setupDismissed:false,openSections:{scene:true,quests:true,relationships:true,characters:true,branches:false},schema:null,systemPrompt:null,showThoughts:true,thoughtPanelTruncate:false,thoughtPanelFit:false,showEmptyFields:false,thoughtPos:{x:10,y:80},devButtons:false,fontScale:1,language:'',theme:'default',sceneTransitions:true,reduceVisualEffects:false,panels:{dashboard:true,scene:true,quests:true,relationships:true,characters:true,storyIdeas:true},dashCards:{date:true,time:true,weather:true,temperature:true,location:true},fieldToggles:{},customPanels:[],charPortraits:{},npcRelationshipGraph:false,profiles:[],activeProfileId:'',orConnectorEnabled:false,_spOrConnectorPromptShown:false});
+export const DEFAULTS=Object.freeze({enabled:true,autoGenerate:true,maxRetries:2,contextMessages:8,promptMode:'json',embedSnapshots:1,embedRole:'system',injectionMethod:'inline',deltaMode:true,deltaRefreshInterval:15,maxSnapshots:0,connectionProfile:'',chatPreset:'',fallbackProfile:'',fallbackPreset:'',fallbackEnabled:true,setupDismissed:false,openSections:{scene:true,quests:true,relationships:true,characters:true,branches:false},schema:null,systemPrompt:null,showThoughts:true,thoughtPanelTruncate:false,thoughtPanelFit:false,showEmptyFields:false,thoughtPos:{x:10,y:80},devButtons:false,fontScale:1,language:'',theme:'default',sceneTransitions:true,reduceVisualEffects:false,panels:{dashboard:true,scene:true,quests:true,relationships:true,characters:true,storyIdeas:true},dashCards:{date:true,time:true,weather:true,temperature:true,location:true},fieldToggles:{},customPanels:[],charPortraits:{},npcRelationshipGraph:false,sceneSourceTrace:false,profiles:[],activeProfileId:'',orConnectorEnabled:false,_spOrConnectorPromptShown:false});
 export function normalizePromptMode(value){return value==='native'?'native':'json'}
 
 // Mobile/Tablet detection

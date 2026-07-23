@@ -218,7 +218,7 @@ export function createPanel(){
         if (!(await guardRegenIfBusy())) return;
         const ctx=SillyTavern.getContext();
         const mesIdx=getLastAssistantMessageIndex(ctx);
-        if(!canGenerateScene(ctx,mesIdx)){toastr.info(t('Open a chat and send a message before generating ScenePulse.'));renderEmptyState();return}
+        if(!canGenerateScene(ctx,mesIdx)){toastr.info(t('Open a chat before generating ScenePulse.'));renderEmptyState();return}
         const body=document.getElementById('sp-panel-body');
         showLoadingOverlay(body,t('Generating Scene'),t('Analyzing context'));
         setLastGenSource('manual:full');

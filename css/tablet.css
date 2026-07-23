@@ -16,6 +16,13 @@
     width: 42px; height: 42px; min-width: 42px;
     border-radius: 10px; flex-shrink: 0; margin: 0;
 }
+#sp-panel.sp-mode-tablet .sp-toolbar-more-menu .sp-toolbar-menu-btn {
+    width: 100%; min-width: 0; height: auto;
+    justify-content: flex-start; flex-shrink: 1;
+}
+#sp-panel.sp-mode-tablet .sp-toolbar-more-menu .sp-toolbar-menu-label {
+    flex: 1 1 auto; min-width: 0; text-align: left;
+}
 #sp-panel.sp-mode-tablet .sp-toolbar-btn svg { width: 18px; height: 18px; }
 #sp-panel.sp-mode-tablet .sp-toolbar-spacer { display: none; }
 #sp-panel.sp-mode-tablet #sp-tb-minimize { display: none !important; }

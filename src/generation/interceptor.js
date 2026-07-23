@@ -32,6 +32,7 @@ import { startStWatchdog } from './st-watchdog.js';
 import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { getActivePromptRole, promptRoleFlags } from '../prompts/role.js';
 import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
+import { startSceneSourceTrace, cancelSceneSourceTrace } from '../scene-source-trace.js';
 
 // ── Stall watchdog (v6.27.16) ─────────────────────────────────────
 //
@@ -271,6 +272,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         if(_stuck){
             log('Interceptor: generating flag stuck (startMs='+inlineGenStartMs+') — force resetting');
             setGenerating(false);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenStartMs(0);setInlineGenerationContext(null);
+            cancelSceneSourceTrace();
         } else {
             log('Interceptor: skipped \u2014 manual/partial generation in progress');return;
         }
@@ -284,14 +286,17 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _targetMesIdx=_lastIsAssistant?_lastIdx:_liveChat.length;
         const _targetSwipeId=_lastIsAssistant?getActiveSwipeId(_targetMesIdx):0;
         const _baseSnapshot=_lastIsAssistant?getPrevSnapshot(_targetMesIdx):getLatestSnapshot();
-        setInlineGenerationContext({
+        const _owner=captureOperationOwner(_targetMesIdx,_targetSwipeId);
+        const _inlineCtx={
             mesIdx:_targetMesIdx,
             swipeId:_targetSwipeId,
             baseSnapshot:_baseSnapshot,
             chatKey:currentChatKey(),
             parentFingerprint:currentChatFingerprint(_targetMesIdx-1),
-            owner:captureOperationOwner(_targetMesIdx,_targetSwipeId)
-        });
+            owner:_owner
+        };
+        setInlineGenerationContext(_inlineCtx);
+        startSceneSourceTrace(_owner,{enabled:s.sceneSourceTrace===true});
         const _genStart = Date.now();
         setInlineGenStartMs(_genStart);
         setInlineExtractionDone(false);

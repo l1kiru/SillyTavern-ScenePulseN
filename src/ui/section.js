@@ -41,7 +41,7 @@ export function mkSection(key,title,badge,fn,s){
         if (!(await guardRegenIfBusy())) return;
         const ctx=SillyTavern.getContext();
         const mesIdx=getLastAssistantMessageIndex(ctx);
-        if(!canGenerateScene(ctx,mesIdx)){toastr.info(t('Open a chat and send a message before generating ScenePulse.'));return}
+        if(!canGenerateScene(ctx,mesIdx)){toastr.info(t('Open a chat before generating ScenePulse.'));return}
         const btn=e.target.closest('.sp-section-refresh');btn.classList.add('sp-spinning');
         // Show loading overlay on section content -- existing content visible behind
         const content=sec.querySelector('.sp-section-content');

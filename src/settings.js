@@ -1173,7 +1173,7 @@ export function canGenerateScene(ctx=_getContextSafe(),mesIdx=undefined,{require
     if(!Array.isArray(chat)||!Number.isInteger(id)||id<0||id>=chat.length)return false;
     const target=chat[id];
     if(!target||target.is_user||target.is_system)return false;
-    return chat.some((message,index)=>index<=id&&message?.is_user);
+    return true;
 }
 
 // Save chat to disk -- prevents message loss when profile switches trigger CHAT_CHANGED reload.

@@ -35,7 +35,7 @@ const greetingOnly = {
     chatId: 'chat-2',
     chat: [{ is_user: false, mes: 'Greeting' }],
 };
-eq('greeting-only chat cannot generate', canGenerateScene(greetingOnly), false);
+eq('greeting-only selected chat can generate', canGenerateScene(greetingOnly), true);
 
 const userOnly = {
     chatId: 'chat-3',
