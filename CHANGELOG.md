@@ -2,6 +2,14 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.7] — 2026-07-24
+
+#### Fixed — SceneBuild stub UX
+
+- Mount status stub after `.mes_text` and only after the reply is on screen (Together waits until parsing).
+- Soft “Taking longer than usual…” after 40s from reply-ready (manual: from start).
+- Clear prior error/expired stubs when a new build starts for the same message/swipe (no stacked cards).
+
 ### [7.1.6] — 2026-07-24
 
 #### Fixed — Mobile panel viewport
