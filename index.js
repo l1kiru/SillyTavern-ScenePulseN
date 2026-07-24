@@ -275,7 +275,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 // stay locked while it waits.
                 spSetGenerating(false);
                 stopStreamingHider();
-                cancelSceneSourceTrace();
+                // Keep active source-trace for deferred onCharMsg finish.
             }
         } else {
             log('GENERATION_ENDED: no assistant message found, deferring to onCharMsg');
@@ -284,7 +284,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             // delayed renderer pushes the message in.
             spSetGenerating(false);
             stopStreamingHider();
-            cancelSceneSourceTrace();
+            // Keep active source-trace for deferred onCharMsg finish.
         }
     } else {
         spSetGenerating(false);
@@ -301,6 +301,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
 // otherwise onCharMsg starts continuation/fallback on a truncated reply.
 // Keep inlineGenStartMs so a complete tracker JSON can still be extracted;
 // only auto-fallback / separate-after-message are skipped via cancelRequested.
+// Keep active source-trace until finish/discard, same as inlineGenStartMs.
 eventSource.on(event_types.GENERATION_STOPPED, () => {
     // v6.27.16: user-initiated stop — disarm the stall watchdog regardless
     // of whether `generating` is true (defensive: guards against a
@@ -310,7 +311,7 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
     const hadEngine = generating;
     setCancelRequested(true);
     try { cancelTogetherSceneBuilds('reply-stopped'); } catch {}
-    try { cancelSceneSourceTrace(); } catch {}
+
     if (hadEngine) {
         const oldNonce = genNonce;
         setGenNonce(genNonce + 1);
