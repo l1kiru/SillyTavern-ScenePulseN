@@ -75,7 +75,7 @@
 
 .sp-scene-build-toast {
     position: fixed;
-    z-index: 10050;
+    z-index: 100050;
     right: 16px;
     bottom: 16px;
     display: flex;
@@ -94,7 +94,7 @@
 .sp-scene-build-toast-mobile {
     left: 12px;
     right: 12px;
-    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    bottom: calc(88px + env(safe-area-inset-bottom, 0px));
     max-width: none;
     width: auto;
 }

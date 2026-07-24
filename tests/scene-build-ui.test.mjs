@@ -75,7 +75,7 @@ globalThis.document = {
     _stubs: [],
     _toast: null,
 };
-globalThis.window = { addEventListener() {}, innerWidth: 1280, innerHeight: 720 };
+globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1280, innerHeight: 720 };
 globalThis.SillyTavern = {
     getContext: () => ({
         chat: [{ is_user: true, mes: 'hi' }, { is_user: false, mes: 'hello', swipe_id: 0 }],
@@ -125,10 +125,21 @@ assertTrue('toast restored after reconcile', !!document.getElementById('sp-scene
 
 ctrl.cancelSceneBuild(op.operationId, 'user');
 assertTrue('active cleared', ctrl.getActiveSceneBuilds().length === 0);
+assertTrue('cancelled stub still visible', !!document.getElementById(`sp-scene-build-${op.operationId}`));
+ui.reconcileSceneBuildUi();
+assertTrue('cancelled stub kept after reconcile', !!document.getElementById(`sp-scene-build-${op.operationId}`));
+
+const readyOp = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:ready', chatKey: currentChatKey() });
+ctrl.updateSceneBuild(readyOp.operationId, { status: 'generating' });
+ctrl.settleSceneBuild(readyOp.operationId, 'ready');
+assertTrue('ready stub visible', !!document.getElementById(`sp-scene-build-${readyOp.operationId}`));
+ui.reconcileSceneBuildUi();
+assertTrue('ready stub kept after reconcile', !!document.getElementById(`sp-scene-build-${readyOp.operationId}`));
 
 const failed = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:fail', chatKey: currentChatKey() });
 ctrl.failSceneBuild(failed.operationId, new Error('Scene build returned no data'));
 assertTrue('error stub shown', !!document.getElementById(`sp-scene-build-${failed.operationId}`));
+assertTrue('error stub has Close', String(document.getElementById(`sp-scene-build-${failed.operationId}`)?.innerHTML || '').includes('data-sp-close'));
 const retry = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:retry', chatKey: currentChatKey() });
 ctrl.updateSceneBuild(retry.operationId, { status: 'generating' });
 assertTrue('error stub removed on retry', !document.getElementById(`sp-scene-build-${failed.operationId}`));

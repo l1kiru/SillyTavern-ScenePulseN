@@ -42,7 +42,7 @@ import {
     supersedeSceneBuildsForMessageExceptSwipe,
 } from './src/generation/scene-build-controller.js';
 import { currentChatKey } from './src/message-fingerprint.js';
-import { initSceneBuildUi, reconcileSceneBuildUi, runManualSceneBuild, disposeSceneBuildUi } from './src/ui/scene-build-ui.js';
+import { initSceneBuildUi, reconcileSceneBuildUi, runManualSceneBuild } from './src/ui/scene-build-ui.js';
 
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
