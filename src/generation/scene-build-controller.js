@@ -5,7 +5,7 @@ import { log, warn } from '../logger.js';
 import { currentChatKey } from '../message-fingerprint.js';
 import { getActiveSwipeId } from '../settings.js';
 
-export const SCENE_BUILD_SOFT_MS = 18000;
+export const SCENE_BUILD_SOFT_MS = 40000;
 export const SCENE_BUILD_EXPIRED_MS = 90000;
 export const SCENE_BUILD_WATCHDOG_MS = 5000;
 
@@ -79,6 +79,15 @@ export function startSceneBuild(opts = {}) {
     const prevId = _targetIndex.get(key);
     if (prevId) supersedeSceneBuild(prevId, 'replaced');
 
+    // Error/expired leave the targetIndex, so a retry would stack stubs.
+    // Drop those same-target terminals now and notify UI to remove their DOM.
+    for (const [id, existing] of [..._ops.entries()]) {
+        if (existing.chatKey !== chatKey || existing.messageId !== messageId || existing.swipeId !== swipeId) continue;
+        if (existing.status !== 'error' && existing.status !== 'expired') continue;
+        _ops.delete(id);
+        _emit(existing, 'replace-terminal');
+    }
+
     const abortController = typeof AbortController !== 'undefined' ? new AbortController() : { signal: { aborted: false }, abort() {} };
     const op = {
         operationId: _newId(),
@@ -93,6 +102,9 @@ export function startSceneBuild(opts = {}) {
         cancellationReason: '',
         error: null,
         softNotified: false,
+        // Soft "longer than usual" clock: from start for manual; for Together,
+        // from first parsing/saving (reply already on screen).
+        softBaseAt: (source.startsWith('manual') || source.includes('recover') || source.includes('fallback')) ? now : null,
         requestInFlight: false,
         stopStOnAbort: opts.stopStOnAbort === true,
     };
@@ -137,7 +149,12 @@ export function updateSceneBuild(operationId, patch = {}) {
     const op = _ops.get(operationId);
     if (!op || isTerminalStatus(op.status)) return op;
     const now = _nowFn();
-    if (patch.status != null) op.status = patch.status;
+    if (patch.status != null) {
+        op.status = patch.status;
+        if ((patch.status === 'parsing' || patch.status === 'saving') && op.softBaseAt == null) {
+            op.softBaseAt = now;
+        }
+    }
     if (patch.error !== undefined) op.error = patch.error;
     if (patch.cancellationReason != null) op.cancellationReason = patch.cancellationReason;
     if (patch.requestInFlight != null) op.requestInFlight = !!patch.requestInFlight;
@@ -282,7 +299,7 @@ export function tickSceneBuildWatchdog() {
     const stBusy = !!_stGeneratingFn();
     for (const op of [..._ops.values()]) {
         if (!isActiveStatus(op.status)) continue;
-        if (!op.softNotified && now - op.startedAt >= SCENE_BUILD_SOFT_MS) {
+        if (!op.softNotified && op.softBaseAt != null && now - op.softBaseAt >= SCENE_BUILD_SOFT_MS) {
             op.softNotified = true;
             op.updatedAt = now;
             _emit(op, 'soft');

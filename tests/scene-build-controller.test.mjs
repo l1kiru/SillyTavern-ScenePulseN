@@ -88,6 +88,17 @@ ctrl.tickSceneBuildWatchdog();
 eq('expired when idle long enough', ctrl.getSceneBuild(soft.operationId)?.status, 'expired');
 
 ctrl._resetSceneBuildRegistryForTests();
+fakeNow = 1_500_000;
+const softTogether = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'auto:together', chatKey });
+fakeNow += ctrl.SCENE_BUILD_SOFT_MS + 1;
+ctrl.tickSceneBuildWatchdog();
+assertTrue('together soft waits for reply', !ctrl.getSceneBuild(softTogether.operationId)?.softNotified);
+ctrl.updateSceneBuild(softTogether.operationId, { status: 'parsing' });
+fakeNow += ctrl.SCENE_BUILD_SOFT_MS + 1;
+ctrl.tickSceneBuildWatchdog();
+assertTrue('together soft after parsing', !!ctrl.getSceneBuild(softTogether.operationId)?.softNotified);
+
+ctrl._resetSceneBuildRegistryForTests();
 fakeNow = 2_000_000;
 const busy = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual', chatKey });
 ctrl.updateSceneBuild(busy.operationId, { status: 'generating', requestInFlight: true });
@@ -105,6 +116,15 @@ eq('manual survives ST stop', ctrl.getSceneBuild(man.operationId)?.status, 'pend
 
 ctrl.disposeSceneBuilds();
 eq('dispose clears registry', ctrl.getAllSceneBuilds().length, 0);
+
+ctrl._resetSceneBuildRegistryForTests();
+const failed = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:retry', chatKey });
+ctrl.failSceneBuild(failed.operationId, new Error('Scene build returned no data'));
+eq('failed terminal', ctrl.getSceneBuild(failed.operationId)?.status, 'error');
+const retry = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:retry', chatKey });
+assertTrue('error op pruned on restart', !ctrl.getSceneBuild(failed.operationId));
+assertTrue('retry is current', ctrl.isOperationCurrent(retry.operationId));
+eq('only retry remains for target', ctrl.getAllSceneBuilds().filter(o => o.messageId === 1).length, 1);
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (fail) process.exit(1);
