@@ -65,6 +65,7 @@ ctx.chat[1].mes = ctx.chat[1].swipes[2];
     eq('swipe type rebinds frozen+1 to active', next?.swipeId, 2);
     eq('state stores rebound swipe', state.inlineGenerationContext?.swipeId, 2);
     assertTrue('owner retargeted to active swipe', next?.owner?.swipeId === 2);
+    eq('rebind owner skips source fingerprint', next?.owner?.sourceFingerprint, '');
     assertTrue('guard would pass after rebind', next.mesIdx === 1 && next.swipeId === 2);
 }
 

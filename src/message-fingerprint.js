@@ -71,14 +71,15 @@ export function fingerprintChat(chat, endIdx, targetSwipeId) {
     return _step(previous,last,messageFingerprintPayload(message,requested));
 }
 
-export function captureOperationOwner(targetMessageId,swipeId){
+export function captureOperationOwner(targetMessageId,swipeId,{trackSource=true}={}){
     const id=Number(targetMessageId);const ctx=SillyTavern.getContext();
     const exists=Array.isArray(ctx.chat)&&!!ctx.chat[id];
     const selected=exists?Math.max(0,Number(swipeId??ctx.chat[id]?.swipe_id??0)||0):Math.max(0,Number(swipeId)||0);
     return{
         chatKey:currentChatKey(),targetMessageId:id,swipeId:selected,
         parentFingerprint:currentChatFingerprint(id-1),
-        sourceFingerprint:exists?currentChatFingerprint(id,selected):''
+        // Together/inline mutates the target reply (stream + strip tracker); skip source there.
+        sourceFingerprint:exists&&trackSource?currentChatFingerprint(id,selected):''
     };
 }
 
