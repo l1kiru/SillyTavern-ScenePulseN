@@ -291,7 +291,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _targetMesIdx=_lastIsAssistant?_lastIdx:_liveChat.length;
         const _targetSwipeId=_lastIsAssistant?getActiveSwipeId(_targetMesIdx):0;
         const _baseSnapshot=_lastIsAssistant?getPrevSnapshot(_targetMesIdx):getLatestSnapshot();
-        const _owner=captureOperationOwner(_targetMesIdx,_targetSwipeId);
+        const _owner=captureOperationOwner(_targetMesIdx,_targetSwipeId,{trackSource:false});
         const _sceneOp=startSceneBuild({
             messageId:_targetMesIdx,
             swipeId:_targetSwipeId,
