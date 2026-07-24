@@ -18,7 +18,7 @@ import { pushPair, markLastPairParseFailed } from '../raw-pairs.js';
 import { record as recordNetwork } from '../network-log.js';
 import {
     getSettings, getActiveSchema, getActivePrompt, getTrackerData,
-    getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, saveSnapshot, getTrustedSnapshotFor, ensureChatSaved,
+    getLatestSnapshot, getLatestSnapshotEntry, getPrevSnapshot, getActiveSwipeId, saveSnapshot, getTrustedSnapshotFor, ensureChatSaved,
     getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore, buildProfileView,
     canGenerateScene
 } from '../settings.js';
@@ -136,13 +136,18 @@ export function cancelGeneration(){
     }catch(e){warn('CANCEL: ST abort attempt failed:',e?.message)}
 
     cleanupGenUI();
-    // Restore panel from latest snapshot
-    const snap=getLatestSnapshot();
+    // Restore panel from latest snapshot — scrub must match what we paint
+    // (otherwise timeline thinks we are still on the cancelled message).
+    const entry=getLatestSnapshotEntry();
+    const snap=entry?.status==='stale'?null:(entry?.snapshot??null);
     const body=document.getElementById('sp-panel-body');
     if(snap){
-        const norm=normalizeTracker(snap);
-        updatePanel(norm);
-    }else if(body)renderEmptyState();
+        setCurrentSnapshotMesIdx(entry.id);
+        updatePanel(normalizeTracker(snap));
+    }else{
+        setCurrentSnapshotMesIdx(entry?.status==='stale'&&Number.isFinite(entry.id)?entry.id:-1);
+        if(body)renderEmptyState();
+    }
 }
 
 

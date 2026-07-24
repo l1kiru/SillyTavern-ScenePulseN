@@ -624,6 +624,27 @@ export function getLatestSnapshotEntry(){
     return{id,swipeId,snapshot,status:getSnapshotStatus(id,swipeId,snapshot)};
 }
 
+/**
+ * Timeline scrub = which *stored* scene is open — never a chat message that
+ * has no active-swipe snapshot (cancel + new swipe used to set scrub to that
+ * id and trigger a false "not the current scene" Jump-to-older-message).
+ *
+ * @param {{entry?: {id?: number, snapshot?: object|null, status?: string}|null, mirrorIds: number[], currentScrub: number}} args
+ * @returns {number} message id, or -1 when nothing is open
+ */
+export function resolveScrubMesIdx({entry,mirrorIds,currentScrub}){
+    const ids=Array.isArray(mirrorIds)?mirrorIds.filter(Number.isFinite):[];
+    const idSet=new Set(ids);
+    const status=entry?.status??'missing';
+    if(status==='stale'&&Number.isFinite(entry?.id))return entry.id;
+    if(entry?.snapshot&&status!=='missing'&&Number.isFinite(entry.id))return entry.id;
+    const cur=Number(currentScrub);
+    // Preserve intentional historical scrub when the swipe target itself is missing.
+    if(Number.isFinite(cur)&&idSet.has(cur)&&(entry==null||cur!==entry.id))return cur;
+    if(ids.length)return ids[ids.length-1];
+    return -1;
+}
+
 // ── v6.8.18: manual character merge across all snapshots ───────────────────
 // Walks every stored snapshot in the current chat and merges `srcName` into
 // `tgtName`: renames the source character entry, unions aliases, preserves
