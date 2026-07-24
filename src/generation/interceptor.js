@@ -36,6 +36,7 @@ import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { getActivePromptRole, promptRoleFlags } from '../prompts/role.js';
 import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
 import { startSceneBuild, updateSceneBuild } from './scene-build-controller.js';
+import { startSceneSourceTrace, cancelSceneSourceTrace } from '../scene-source-trace.js';
 
 // ── Stall watchdog (v6.27.16) ─────────────────────────────────────
 //
@@ -278,6 +279,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         if(_stuck){
             log('Interceptor: generating flag stuck (startMs='+inlineGenStartMs+') — force resetting');
             setGenerating(false);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenStartMs(0);setInlineGenerationContext(null);
+            cancelSceneSourceTrace();
         } else {
             log('Interceptor: skipped \u2014 manual/partial generation in progress');return;
         }
@@ -310,6 +312,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             sceneBuildOperationId:_sceneOp.operationId,
         };
         setInlineGenerationContext(_inlineCtx);
+        startSceneSourceTrace(_owner,{enabled:s.sceneSourceTrace===true});
         const _genStart = Date.now();
         setInlineGenStartMs(_genStart);
         setInlineExtractionDone(false);
