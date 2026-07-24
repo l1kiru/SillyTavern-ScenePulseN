@@ -2,6 +2,13 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.8] — 2026-07-24
+
+#### Fixed — Together swipe SOURCE_CHANGED
+
+- Together/inline owners no longer track the target message source fingerprint (`trackSource: false`), so stripping the tracker block after extract does not discard a valid swipe result.
+- Manual/separate generation still validates source fingerprint.
+
 ### [7.1.7] — 2026-07-24
 
 #### Fixed — SceneBuild stub UX
