@@ -35,6 +35,7 @@ import { startStWatchdog } from './st-watchdog.js';
 import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { getActivePromptRole, promptRoleFlags } from '../prompts/role.js';
 import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
+import { startSceneBuild, updateSceneBuild } from './scene-build-controller.js';
 
 // ── Stall watchdog (v6.27.16) ─────────────────────────────────────
 //
@@ -291,6 +292,13 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _targetSwipeId=_lastIsAssistant?getActiveSwipeId(_targetMesIdx):0;
         const _baseSnapshot=_lastIsAssistant?getPrevSnapshot(_targetMesIdx):getLatestSnapshot();
         const _owner=captureOperationOwner(_targetMesIdx,_targetSwipeId);
+        const _sceneOp=startSceneBuild({
+            messageId:_targetMesIdx,
+            swipeId:_targetSwipeId,
+            source:type==='swipe'?'auto:together:swipe':'auto:together',
+            chatKey:currentChatKey(),
+        });
+        updateSceneBuild(_sceneOp.operationId,{status:'generating'});
         const _inlineCtx={
             mesIdx:_targetMesIdx,
             swipeId:_targetSwipeId,
@@ -298,7 +306,8 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             baseSnapshot:_baseSnapshot,
             chatKey:currentChatKey(),
             parentFingerprint:currentChatFingerprint(_targetMesIdx-1),
-            owner:_owner
+            owner:_owner,
+            sceneBuildOperationId:_sceneOp.operationId,
         };
         setInlineGenerationContext(_inlineCtx);
         const _genStart = Date.now();

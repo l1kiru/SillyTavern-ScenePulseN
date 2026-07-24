@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
 import { SP_MARKER_START, extractInlineTracker } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
-import { getTrackerData, getLatestSnapshot, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
+import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
@@ -17,9 +17,10 @@ import {
     _inlineWaitTimerId, set_inlineWaitTimerId,
     getLastExtractionFailure, shouldSkipAutoSceneRecovery
 } from '../state.js';
-import { generateTracker, continuationReprompt } from '../generation/engine.js';
+import { continuationReprompt } from '../generation/engine.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
+import { processTogetherExtraction, discardTogetherSceneBuild } from '../generation/together-scene-build.js';
 import { rebindInlineCtxForExpectedSwipe } from '../generation/inline-ctx.js';
 import { ensureChatSaved, anyPanelsActive } from '../settings.js';
 import { spAutoShow, spPostGenShow, spSetGenerating } from './mobile.js';
@@ -30,6 +31,12 @@ import { createPanel, hidePanel } from './panel.js';
 import { renderTimeline } from './timeline.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
 import { renderEmptyState } from './empty-state.js';
+import { runManualSceneBuild, reconcileSceneBuildUi } from './scene-build-ui.js';
+import {
+    cancelSceneBuildsForMessage, supersedeSceneBuildsForMessageExceptSwipe,
+    getActiveSceneBuilds,
+} from '../generation/scene-build-controller.js';
+import { runSceneBuild } from '../generation/scene-build-runner.js';
 
 /** Prefer this message+swipe snapshot after manual gen fails — never a foreign latest. */
 function restorePanelAfterManualFail(mesIdx){
@@ -58,17 +65,29 @@ function _queueChatMutation(work){
 // SillyTavern passes the new chat length here, not the deleted message id.
 export function spOnMessageDeleted(){
     return _queueChatMutation(async()=>{
+        try{
+            const chat=SillyTavern.getContext().chat||[];
+            // Cancel ops whose message no longer exists
+            for(const op of getActiveSceneBuilds()){
+                if(!chat[op.messageId])cancelSceneBuildsForMessage(op.messageId,op.chatKey,'message-deleted');
+            }
+        }catch{}
         const summary=reconcileSnapshotsAfterChatMutation({type:'message-delete'});
         await _refreshAfterChatMutation(summary,'Message deletion');
+        reconcileSceneBuildUi();
     });
 }
 
 export function spOnSwipeDeleted(payload,activeChanged){
     return _queueChatMutation(async()=>{
+        if(Number.isFinite(Number(payload?.messageId))){
+            cancelSceneBuildsForMessage(Number(payload.messageId),undefined,'swipe-deleted');
+        }
         const summary=reconcileSnapshotsAfterChatMutation({
             type:'swipe-delete',messageId:payload?.messageId,swipeId:payload?.swipeId,activeChanged
         });
         await _refreshAfterChatMutation(summary,'Swipe deletion');
+        reconcileSceneBuildUi();
     });
 }
 
@@ -83,25 +102,20 @@ export function addMesButton(el){
         const mes=this.closest('.mes');if(!mes){warn('No .mes parent found');return}
         const id=Number(mes.getAttribute('mesid'));
         log('Mes button clicked for id:',id);
-        setLastGenSource('manual:message');
-
-        if(this.classList.contains('sp-generating')){log('Already generating');return}
-        this.classList.add('sp-generating');
+        if(this.classList.contains('sp-generating')||this.getAttribute('aria-busy')==='true'){log('Already generating');return}
         const panel=document.getElementById('sp-panel');
         if(panel){spAutoShow();const body=document.getElementById('sp-panel-body');showLoadingOverlay(body,t('Generating Scene'),t('Analyzing context'));showStopButton();startElapsedTimer()}
         showThoughtLoading(t('Generating Scene'),t('Analyzing context'));
         const preNonce=genNonce;
         try{
-            const r=await generateTracker(id);
-            if(genNonce>preNonce+1){log('Mes-btn: stale caller');this.classList.remove('sp-generating');return}
+            const r=await runManualSceneBuild(id,'manual:message');
+            if(genNonce>preNonce+1){log('Mes-btn: stale caller');return}
             hideStopButton();stopElapsedTimer();
             clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
-            this.classList.remove('sp-generating');
             if(!r)restorePanelAfterManualFail(id);
         }catch(ex){
             err('Mes button gen error:',ex);
             hideStopButton();clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
-            this.classList.remove('sp-generating');
         }
     });
     btns.appendChild(btn);
@@ -123,6 +137,7 @@ export async function onCharMsg(idx){
         const _inlineCtx=rebindInlineCtxForExpectedSwipe(inlineGenerationContext,idx);
         if(_inlineCtx&&(_inlineCtx.mesIdx!==idx||getActiveSwipeId(idx)!==_inlineCtx.swipeId)){
             warn('onCharMsg [inline]: target swipe changed; discarding tracker for',idx);
+            discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
             setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
             return;
         }
@@ -171,14 +186,9 @@ export async function onCharMsg(idx){
             log('onCharMsg [inline]: extracted tracker from message',idx,'keys=',Object.keys(extracted).length,'~tokens:',_compTokens);
             setInlineExtractionDone(true);setPendingInlineIdx(-1);
             stopStreamingHider();
-            await processExtraction(idx, extracted, 'auto:together', {
+            await processTogetherExtraction(idx, extracted, 'auto:together', _inlineCtx, {
                 promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed,
                 stopHider:false, unlockGen:true,
-                swipeId:_inlineCtx?.swipeId,expectedSwipeId:_inlineCtx?.swipeId,
-                baseSnapshot:_inlineCtx?.baseSnapshot??null,
-                expectedChatKey:_inlineCtx?.chatKey,
-                expectedParentFingerprint:_inlineCtx?.parentFingerprint,
-                owner:_inlineCtx?.owner
             });
             setInlineGenerationContext(null);
             log('onCharMsg [inline]: pipeline complete');
@@ -225,24 +235,22 @@ export async function onCharMsg(idx){
                         warn('Together mode: tracker extraction failed ('+msgLen+' chars, '+_failureKind+'). Attempting continuation re-prompt...');
                         setLastGenSource('auto:together:continuation');
                         try{
-                            const cont=await continuationReprompt(msgText,{profile:fbProfile,preset:fbPreset,mesIdx:idx,swipeId:_inlineCtx?.swipeId,baseSnapshot:_inlineCtx?.baseSnapshot??null,owner:_inlineCtx?.owner});
+                            const cont=await continuationReprompt(msgText,{
+                                profile:fbProfile,preset:fbPreset,mesIdx:idx,swipeId:_inlineCtx?.swipeId,
+                                baseSnapshot:_inlineCtx?.baseSnapshot??null,owner:_inlineCtx?.owner,
+                                sceneBuildOperationId:_inlineCtx?.sceneBuildOperationId,
+                                stopStOnAbort:false,
+                            });
                             if(cont){
-                                // Forward through the normal pipeline so save/normalize/update
-                                // are identical to every other extraction path.
                                 const meta=cont._spContinuationMeta||{};
                                 delete cont._spContinuationMeta;
-                                await processExtraction(idx, cont, 'auto:together:continuation', {
+                                await processTogetherExtraction(idx, cont, 'auto:together:continuation', _inlineCtx, {
                                     promptTokens:meta.promptTokens||0,
                                     completionTokens:meta.completionTokens||0,
                                     elapsed:meta.elapsed||0,
                                     stopHider:false, unlockGen:false,
-                                    swipeId:_inlineCtx?.swipeId,expectedSwipeId:_inlineCtx?.swipeId,
-                                    baseSnapshot:_inlineCtx?.baseSnapshot??null,
-                                    expectedChatKey:_inlineCtx?.chatKey,
-                                    expectedParentFingerprint:_inlineCtx?.parentFingerprint,
-                                    owner:_inlineCtx?.owner
                                 });
-                                result=cont; // signal success to skip the full fallback
+                                result=cont;
                                 log('Together continuation: succeeded in',(meta.elapsed||0).toFixed(1)+'s — skipped full separate generation');
                             } else {
                                 log('Together continuation: failed, escalating to full separate generation');
@@ -266,16 +274,18 @@ export async function onCharMsg(idx){
                         result=null;
                     } else if(!result){
                         warn('Together mode: falling back to full separate generation ('+msgLen+' chars, '+_failureKind+')');
-                        setLastGenSource('auto:together:fallback');
-                        result=await generateTracker(idx,null,{profile:fbProfile,preset:fbPreset});
+                        result=await runManualSceneBuild(idx,'auto:together:fallback',null,{profile:fbProfile,preset:fbPreset});
                         if(result){
                             const norm=normalizeTracker(result);
                             updatePanel(norm);spPostGenShow();
                             log('Together fallback: separate generation succeeded via profile=',fbProfile||'(current)');
                         } else {
                             warn('Together fallback: separate generation also failed');
+                            discardTogetherSceneBuild(_inlineCtx,'fallback-failed');
                             _showRecoveryCard(idx);
-                            const prev=getLatestSnapshot();
+                            const failure=getLastExtractionFailure();
+                            if(failure)warn('Together fallback failure:',failure.code,failure.message||'');
+                            const prev=getTrustedSnapshotFor(idx);
                             if(prev){const norm=normalizeTracker(prev);updatePanel(norm);spPostGenShow()}
                         }
                     }
@@ -285,13 +295,15 @@ export async function onCharMsg(idx){
                 }
             } else if(msgLen>100&&shouldSkipAutoSceneRecovery()){
                 log('Together mode: recovery skipped — user stopped generation');
+                discardTogetherSceneBuild(_inlineCtx,'reply-stopped');
                 stopStreamingHider();
             } else if(msgLen>100&&!s.fallbackEnabled){
                 log('Together mode: AI omitted tracker, fallback disabled by user');
+                discardTogetherSceneBuild(_inlineCtx,'no-fallback');
                 stopStreamingHider();
             }
-            // Always show existing data if we didn't successfully generate new data
-            const prev=getLatestSnapshot();
+            // Always show existing data for this message+swipe if we didn't generate
+            const prev=getTrustedSnapshotFor(idx);
             if(prev){const norm=normalizeTracker(prev);updatePanel(norm);spPostGenShow()}
             // Defensive: clear inline generation ownership state on ALL recovery exit
             // paths — continuation success, continuation→tier2 success, tier2 failure,
@@ -337,14 +349,16 @@ export async function onCharMsg(idx){
         if(panel){spAutoShow();showLoadingOverlay(document.getElementById('sp-panel-body'),t('Generating Scene'),t('Analyzing context'));showStopButton();startElapsedTimer()}
         showChatBanner(t('Generating Scene'));
         const preNonce=genNonce;
-        snap=await generateTracker(idx);
+        snap=await runManualSceneBuild(idx,'auto:separate');
         if(genNonce>preNonce+1){log('Auto-gen: stale caller, cancel handled UI');return}
         hideStopButton();stopElapsedTimer();
         clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
         if(snap)updateThoughts(snap);
         else{
-            // Cancelled or failed -- restore previous or show empty
-            const prev=getLatestSnapshot();const body=document.getElementById('sp-panel-body');
+            // Cancelled or failed -- restore this message+swipe, not a foreign latest
+            const failure=getLastExtractionFailure();
+            if(failure)warn('Auto-gen failed:',failure.code,failure.message||'','mesIdx=',failure.mesIdx,'swipe=',failure.swipeId);
+            const prev=getTrustedSnapshotFor(idx);const body=document.getElementById('sp-panel-body');
             if(prev){const norm=normalizeTracker(prev);updatePanel(norm)}
             else if(body)renderEmptyState({icon:'⟳'});
         }
@@ -359,6 +373,7 @@ export async function onMessageSwiped(idx){
     if(trusted){
         try{updateThoughts(normalizeTracker(trusted))}catch{}
         setTimeout(()=>renderExisting(id),0);
+        reconcileSceneBuildUi();
         return;
     }
     const s=getSettings();
@@ -369,13 +384,28 @@ export async function onMessageSwiped(idx){
                 const swipeId=getActiveSwipeId(id);
                 const owner=captureOperationOwner(id,swipeId);
                 log('MESSAGE_SWIPED: recovering inline tracker for',id,'swipe',swipeId);
-                await processExtraction(id,extracted,'auto:together:swipe-recover',{
-                    swipeId,expectedSwipeId:swipeId,
-                    baseSnapshot:getPrevSnapshot(id),
-                    expectedChatKey:owner.chatKey,
-                    expectedParentFingerprint:owner.parentFingerprint,
-                    owner,
-                    stopHider:false,unlockGen:true,
+                await runSceneBuild({
+                    messageId:id,
+                    swipeId,
+                    source:'auto:together:swipe-recover',
+                    run:async({operation,setStatus,isCurrent,markRequest})=>{
+                        markRequest(true);
+                        try{
+                            setStatus('parsing');
+                            setStatus('saving');
+                            const result=await processExtraction(id,extracted,'auto:together:swipe-recover',{
+                                swipeId,expectedSwipeId:swipeId,
+                                baseSnapshot:getPrevSnapshot(id),
+                                expectedChatKey:owner.chatKey,
+                                expectedParentFingerprint:owner.parentFingerprint,
+                                owner,
+                                stopHider:false,unlockGen:true,
+                                sceneBuildOperationId:operation.operationId,
+                            });
+                            if(!isCurrent())return null;
+                            return result;
+                        }finally{markRequest(false)}
+                    },
                 });
                 const snap=getTrustedSnapshotFor(id);
                 try{updateThoughts(snap?normalizeTracker(snap):null)}catch{}
@@ -386,6 +416,7 @@ export async function onMessageSwiped(idx){
     }
     try{updateThoughts(null)}catch{}
     setTimeout(()=>renderExisting(id),0);
+    reconcileSceneBuildUi();
 }
 
 export async function renderExisting(targetMessageId){
@@ -474,8 +505,7 @@ export async function renderExisting(targetMessageId){
             message:t('The chat text or swipe branch changed. Regenerate ScenePulse before using this state.'),
             className:'sp-stale-state',
             onRegenerate:async()=>{
-                setLastGenSource('manual:stale-recovery');
-                await generateTracker(latestKey);
+                await runManualSceneBuild(latestKey,'manual:stale-recovery');
             },
         });
         log('renderExisting: latest snapshot is stale for message',latestKey);
@@ -494,5 +524,5 @@ export async function renderExisting(targetMessageId){
 async function _showRecoveryCard(mesIdx) {
     const failure=getLastExtractionFailure();
     const{showJsonRecovery}=await import('./json-recovery.js');
-    showJsonRecovery({mesIdx,failure,stripInline:true,onRetry:async()=>{setLastGenSource('manual:recovery');await generateTracker(mesIdx)}});
+    showJsonRecovery({mesIdx,failure,stripInline:true,onRetry:async()=>{await runManualSceneBuild(mesIdx,'manual:recovery')}});
 }

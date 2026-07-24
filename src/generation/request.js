@@ -42,11 +42,12 @@ export function correctiveInstruction(code,errors=[]){
     return'Return exactly one valid ScenePulse tracker JSON object and no other text.';
 }
 
-export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true}){
+export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true,stopStOnAbort=true}){
     const routed=applyPromptRole({systemPrompt,prompt});
     let stopped=false;
     const stop=()=>{
         if(stopped)return;stopped=true;
+        if(stopStOnAbort===false)return;
         try{if(typeof stContext.stopGeneration==='function')stContext.stopGeneration()}catch{}
     };
     const throwIfAborted=()=>{if(signal?.aborted)throw signal.reason||new DOMException('Aborted','AbortError')};

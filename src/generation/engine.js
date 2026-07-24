@@ -36,6 +36,7 @@ import { cleanupGenUI } from '../ui/loading.js';
 import { setBrandState } from '../ui/panel.js';
 import { renderEmptyState } from '../ui/empty-state.js';
 import { stopStreamingHider } from './streaming.js';
+import { isOperationCurrent, getActiveSceneBuilds, cancelSceneBuild } from './scene-build-controller.js';
 import { t } from '../i18n.js';
 
 async function _changeAndWait(ctx,element,value,eventName,label){
@@ -101,6 +102,9 @@ export async function withProfileAndPreset(pid,pre,fn){
 // Cancel: synchronous, instant. Restores UI immediately AND aborts ST's in-flight HTTP request.
 export function cancelGeneration(){
     if(!generating)return;
+    try{
+        for(const op of getActiveSceneBuilds())cancelSceneBuild(op.operationId,'cancelGeneration');
+    }catch{}
     const oldNonce=genNonce;
     setGenNonce(genNonce+1); // invalidate in-flight generation
     setCancelRequested(true);
@@ -197,6 +201,16 @@ export async function generateTracker(mesIdx,partKey,opts){
     let successfulRequestMeta=null;
     let successfulValidationWarnings=[];
     const requestAbort=new AbortController();
+    const externalSignal=opts?.signal;
+    const stopStOnAbort=opts?.stopStOnAbort!==false;
+    if(externalSignal){
+        if(externalSignal.aborted){
+            setGenerating(false);spSetGenerating(false);setBrandState('idle');
+            return null;
+        }
+        externalSignal.addEventListener('abort',()=>{try{requestAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
+    }
+    const sceneOpId=opts?.sceneBuildOperationId||opts?.operationId||null;
     const doGen=async()=>{
         const stContext=SillyTavern.getContext();
         const{chat}=stContext;
@@ -231,7 +245,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 log('Attempt',a+1,': mode=',attemptPromptMode,'outputBudget=',responseLength,'nonce=',myNonce);
                 let quietError=null;
                 try{
-                    const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true});
+                    const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true,stopStOnAbort});
                     raw=response.value;strategy=response.strategy;
                 }catch(e){quietError=e}
                 if(quietError){
@@ -373,6 +387,11 @@ export async function generateTracker(mesIdx,partKey,opts){
     if(myNonce!==genNonce){
         log('POST-GEN: stale nonce',myNonce,'(current',genNonce+') \u2014 result discarded, state untouched');
         return null; // Don't reset generating — the newer cancel/gen already did
+    }
+    if(sceneOpId&&!isOperationCurrent(sceneOpId)){
+        log('POST-GEN: scene build not current',sceneOpId,'— result discarded');
+        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        return null;
     }
     if(getActiveSwipeId(mesIdx)!==targetSwipeId){
         log('POST-GEN: active swipe changed for message',mesIdx,'— result discarded');
@@ -527,6 +546,16 @@ export async function continuationReprompt(narrativeText, opts){
     const continuationMode=isDelta?'delta':'full';
     const continuationSchema=buildRequestSchema(getActiveSchema(),{mode:continuationMode});
     const continuationAbort=new AbortController();
+    const externalSignal=opts?.signal;
+    const stopStOnAbort=opts?.stopStOnAbort!==false;
+    if(externalSignal){
+        if(externalSignal.aborted){
+            setGenerating(false);spSetGenerating(false);setBrandState('idle');
+            return null;
+        }
+        externalSignal.addEventListener('abort',()=>{try{continuationAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
+    }
+    const sceneOpId=opts?.sceneBuildOperationId||opts?.operationId||null;
     let prevState='';
     if(lastSnap){
         const _cleanSnap=(s)=>{const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(settings.panels?.storyIdeas===false)delete c.plotBranches;if(Array.isArray(c.charactersPresent)){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c};
@@ -555,13 +584,13 @@ Output the JSON object now:`;
             const requestPrompt=prompt;
             const responseLength=computeResponseLength({mode:continuationMode,previousSnapshot:lastSnap});
             let promptMode=settings.promptMode==='native'?'native':'json';
-            let response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt,responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true});
+            let response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt,responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true,stopStOnAbort});
             continuationStrategy=response.strategy;
             let provider=normalizeProviderResponse(response.value);rawStr=provider.text;finishReason=provider.finishReason;
             if((!rawStr||rawStr.trim()==='{}')&&promptMode==='native'){
                 if(myNonce!==genNonce){log('CONTINUATION: native retry cancelled');return null}
                 promptMode='json';
-                response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt+'\n\nReturn strict JSON, not prose.',responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true});
+                response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt+'\n\nReturn strict JSON, not prose.',responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true,stopStOnAbort});
                 continuationStrategy=response.strategy+'+json-retry';provider=normalizeProviderResponse(response.value);rawStr=provider.text;finishReason=provider.finishReason;
             }
             if(!rawStr||rawStr.trim()==='{}'){const empty=new Error('Provider returned an empty response');empty.code='NO_JSON_OBJECT';throw empty}
@@ -608,6 +637,11 @@ Output the JSON object now:`;
     catch(e){err('Continuation:',e)}finally{if(continuationTimeoutId)clearTimeout(continuationTimeoutId)}
     if(myNonce!==genNonce){
         log('CONTINUATION POST: stale nonce',myNonce,'(current',genNonce+') — discarded');
+        return null;
+    }
+    if(sceneOpId&&!isOperationCurrent(sceneOpId)){
+        log('CONTINUATION POST: scene build not current',sceneOpId,'— discarded');
+        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         return null;
     }
     setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');

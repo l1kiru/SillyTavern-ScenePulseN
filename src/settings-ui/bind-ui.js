@@ -238,7 +238,21 @@ export function bindUI(){const s=getSettings();
             if(panel)panel.classList.add('sp-tab-active');
         });
     });
-    $('#sp-enabled').on('change',function(){s.enabled=this.checked;saveSettings();updateBadge();$('#scenepulse-settings .inline-drawer-content').toggleClass('sp-disabled',!this.checked);if(!this.checked){hidePanel();const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.remove('sp-tp-visible')}else{renderExisting()}});
+    $('#sp-enabled').on('change',function(){
+        s.enabled=this.checked;saveSettings();updateBadge();
+        $('#scenepulse-settings .inline-drawer-content').toggleClass('sp-disabled',!this.checked);
+        if(!this.checked){
+            hidePanel();
+            const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.remove('sp-tp-visible');
+            try{
+                import('../generation/scene-build-controller.js').then(m=>m.disposeSceneBuilds());
+                import('../ui/scene-build-ui.js').then(m=>{m.disposeSceneBuildUi();});
+            }catch{}
+        }else{
+            renderExisting();
+            try{import('../ui/scene-build-ui.js').then(m=>m.initSceneBuildUi())}catch{}
+        }
+    });
     $('#sp-auto-gen').on('change',function(){s.autoGenerate=this.checked;saveSettings()});
     $('#sp-story-ideas').on('change',function(){
         const view=buildProfileView(s,getActiveProfile(s));
