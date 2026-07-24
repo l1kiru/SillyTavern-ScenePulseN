@@ -108,6 +108,13 @@ export function startSceneSourceTrace(owner, { enabled = false } = {}) {
     };
 }
 
+/** Keep capture keyed to the final swipe when Together rebinds expected advance. */
+export function rebindSceneSourceTraceOwner(owner) {
+    if (!_activeTrace || !owner) return false;
+    _activeTrace.ownerKey = _ownerKey(owner);
+    return true;
+}
+
 export function recordWorldInfoActivation(payload) {
     if (!_activeTrace) return;
     _activeTrace.totalEvents++;
