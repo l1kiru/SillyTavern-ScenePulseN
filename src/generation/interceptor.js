@@ -294,6 +294,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _inlineCtx={
             mesIdx:_targetMesIdx,
             swipeId:_targetSwipeId,
+            generationType:type,
             baseSnapshot:_baseSnapshot,
             chatKey:currentChatKey(),
             parentFingerprint:currentChatFingerprint(_targetMesIdx-1),
@@ -371,6 +372,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             extra: _extra,
         });
         log('Interceptor [inline/together]: injected tracker prompt (~'+Math.round(prompt.length/4)+' tokens) + head/tail anchors as role='+_spRole,
+            'type=',type,'mesIdx=',_targetMesIdx,'swipeId=',_targetSwipeId,
             'state: extDone=',inlineExtractionDone,'pendingIdx=',pendingInlineIdx,'generating=',generating);
         startStreamingHider();
         }

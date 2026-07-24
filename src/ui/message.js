@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
 import { SP_MARKER_START, extractInlineTracker } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
-import { getTrackerData, getLatestSnapshot, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
+import { getTrackerData, getLatestSnapshot, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
@@ -20,6 +20,7 @@ import {
 import { generateTracker, continuationReprompt } from '../generation/engine.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
+import { rebindInlineCtxForExpectedSwipe } from '../generation/inline-ctx.js';
 import { ensureChatSaved, anyPanelsActive } from '../settings.js';
 import { spAutoShow, spPostGenShow, spSetGenerating } from './mobile.js';
 import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, showChatBanner, clearThoughtLoading } from './loading.js';
@@ -29,6 +30,16 @@ import { createPanel, hidePanel } from './panel.js';
 import { renderTimeline } from './timeline.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
 import { renderEmptyState } from './empty-state.js';
+
+/** Prefer this message+swipe snapshot after manual gen fails — never a foreign latest. */
+function restorePanelAfterManualFail(mesIdx){
+    const failure=getLastExtractionFailure();
+    if(failure)warn('Manual generation failed:',failure.code,failure.message||'','mesIdx=',failure.mesIdx,'swipe=',failure.swipeId);
+    const trusted=Number.isFinite(mesIdx)?getTrustedSnapshotFor(mesIdx):null;
+    const body=document.getElementById('sp-panel-body');
+    if(trusted){updatePanel(normalizeTracker(trusted));return}
+    if(body)body.innerHTML='<div class="sp-error"><div style="font-weight:700;margin-bottom:4px">'+t('Generation Failed')+'</div><div style="font-size:10px">'+t('Network timeout or API issue. Try \u27F3 Regen or check debug log.')+'</div></div>';
+}
 
 async function _refreshAfterChatMutation(summary,label){
     log(label+': removed=',summary.removed,'restamped=',summary.restamped,'cutoff=',summary.cutoff);
@@ -86,7 +97,7 @@ export function addMesButton(el){
             hideStopButton();stopElapsedTimer();
             clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
             this.classList.remove('sp-generating');
-            if(!r){const snap=getLatestSnapshot();const body=document.getElementById('sp-panel-body');if(snap){const norm=normalizeTracker(snap);updatePanel(norm)}else if(body)body.innerHTML='<div class="sp-error"><div style="font-weight:700;margin-bottom:4px">'+t('Generation Failed')+'</div><div style="font-size:10px">'+t('Network timeout or API issue. Try \u27F3 Regen or check debug log.')+'</div></div>'}
+            if(!r)restorePanelAfterManualFail(id);
         }catch(ex){
             err('Mes button gen error:',ex);
             hideStopButton();clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
@@ -109,7 +120,7 @@ export async function onCharMsg(idx){
 
     // ── INLINE/TOGETHER MODE: Extract tracker from AI response ──
     if(s.injectionMethod==='inline'){
-        const _inlineCtx=inlineGenerationContext;
+        const _inlineCtx=rebindInlineCtxForExpectedSwipe(inlineGenerationContext,idx);
         if(_inlineCtx&&(_inlineCtx.mesIdx!==idx||getActiveSwipeId(idx)!==_inlineCtx.swipeId)){
             warn('onCharMsg [inline]: target swipe changed; discarding tracker for',idx);
             setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
@@ -340,6 +351,41 @@ export async function onCharMsg(idx){
     }else if(snap){
         const norm=normalizeTracker(snap);updatePanel(norm);
     }
+}
+
+export async function onMessageSwiped(idx){
+    const id=Number(idx);
+    const trusted=Number.isFinite(id)?getTrustedSnapshotFor(id):null;
+    if(trusted){
+        try{updateThoughts(normalizeTracker(trusted))}catch{}
+        setTimeout(()=>renderExisting(id),0);
+        return;
+    }
+    const s=getSettings();
+    if(s.enabled&&s.injectionMethod==='inline'&&Number.isFinite(id)&&anyPanelsActive()){
+        try{
+            const extracted=extractInlineTracker(id);
+            if(extracted){
+                const swipeId=getActiveSwipeId(id);
+                const owner=captureOperationOwner(id,swipeId);
+                log('MESSAGE_SWIPED: recovering inline tracker for',id,'swipe',swipeId);
+                await processExtraction(id,extracted,'auto:together:swipe-recover',{
+                    swipeId,expectedSwipeId:swipeId,
+                    baseSnapshot:getPrevSnapshot(id),
+                    expectedChatKey:owner.chatKey,
+                    expectedParentFingerprint:owner.parentFingerprint,
+                    owner,
+                    stopHider:false,unlockGen:true,
+                });
+                const snap=getTrustedSnapshotFor(id);
+                try{updateThoughts(snap?normalizeTracker(snap):null)}catch{}
+                setTimeout(()=>renderExisting(id),0);
+                return;
+            }
+        }catch(e){warn('MESSAGE_SWIPED swipe recover:',e)}
+    }
+    try{updateThoughts(null)}catch{}
+    setTimeout(()=>renderExisting(id),0);
 }
 
 export async function renderExisting(targetMessageId){
