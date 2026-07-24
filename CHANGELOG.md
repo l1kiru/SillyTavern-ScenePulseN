@@ -2,6 +2,14 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.5] — 2026-07-24
+
+#### Fixed — Timeline scrub after cancel + swipe
+
+- Stop pointing `currentSnapshotMesIdx` at messages with no active-swipe snapshot (cancel then new swipe no longer shows a false “not the current scene” banner that Jump sends to an older message).
+- Sync scrub to the restored snapshot on cancel / `GENERATION_STOPPED`.
+- Show the historical disclaimer only when the selected scrub id exists in the active snapshot mirror; clamp phantom scrub locally in the timeline render.
+
 ### [7.1.4] — 2026-07-23
 
 #### Fixed — Skip auto scene after user Stop

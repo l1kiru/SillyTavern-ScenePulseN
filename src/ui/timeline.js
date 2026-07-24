@@ -18,7 +18,10 @@ export function renderTimeline(){
     const provenance=new Map(getSnapshotProvenance().map(p=>[p.id,p]));
     if(sorted.length<1)return;
     const latest=sorted[sorted.length-1];
+    // Scrub may briefly point at a message with no active mirror (cancel/swipe).
+    // Clamp locally for display — do not write state during render.
     let selectedKey=currentSnapshotMesIdx>=0?currentSnapshotMesIdx:latest;
+    if(!sorted.includes(selectedKey))selectedKey=latest;
     // Display max 8 nodes on scrubber (sampled), but all snapshots remain stored for graphs/analytics
     const MAX_DISPLAY=8;
     let displayKeys=sorted;

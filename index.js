@@ -13,7 +13,7 @@ import {
     inlineExtractionDone,
     inlineGenerationContext,
     pendingInlineIdx,
-    setGenerating, setGenNonce, setCancelRequested,
+    setGenerating, setGenNonce, setCancelRequested, setCurrentSnapshotMesIdx,
     setInlineGenStartMs,
     setPendingInlineIdx, setInlineExtractionDone, setInlineGenerationContext,
     set_cachedNormData,
@@ -23,7 +23,7 @@ import {
 } from './src/state.js';
 import {
     getSettings, anyPanelsActive,
-    getLatestSnapshot, getActiveSwipeId, getTrustedSnapshotFor,
+    getLatestSnapshot, getLatestSnapshotEntry, getActiveSwipeId, getTrustedSnapshotFor,
     ensureChatSaved, invalidateSettingsCache, forceFullStateRefresh
 } from './src/settings.js';
 import { normalizeTracker, clearNormCache } from './src/normalize.js';
@@ -298,10 +298,16 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
         spSetGenerating(false);
         try { stopStreamingHider({abort:true}); } catch {}
         cleanupGenUI();
-        const snap = getLatestSnapshot();
+        const entry = getLatestSnapshotEntry();
+        const snap = entry?.status === 'stale' ? null : (entry?.snapshot ?? null);
         const body = document.getElementById('sp-panel-body');
-        if (snap) { const norm = normalizeTracker(snap); updatePanel(norm); }
-        else if (body) renderEmptyState();
+        if (snap) {
+            setCurrentSnapshotMesIdx(entry.id);
+            updatePanel(normalizeTracker(snap));
+        } else {
+            setCurrentSnapshotMesIdx(entry?.status === 'stale' && Number.isFinite(entry.id) ? entry.id : -1);
+            if (body) renderEmptyState();
+        }
     } else {
         // Separate-mode narrative stop: no SP engine lock yet, but mark cancel
         // so the delayed onCharMsg auto-gen does not analyze a truncated reply.
