@@ -4,12 +4,12 @@ import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
 import { SP_MARKER_START, extractInlineTracker } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
-import { getTrackerData, getLatestSnapshot, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, reconcileSnapshotsAfterChatMutation, saveSnapshot } from '../settings.js';
+import { getTrackerData, getLatestSnapshot, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
     genMeta, setGenMeta,
-    setCurrentSnapshotMesIdx,
+    currentSnapshotMesIdx, setCurrentSnapshotMesIdx,
     inlineExtractionDone, setInlineExtractionDone,
     inlineGenerationContext, setInlineGenerationContext,
     inlineGenStartMs, setInlineGenStartMs,
@@ -354,13 +354,16 @@ export async function renderExisting(targetMessageId){
     for(const k of sorted){
         const el=document.querySelector(`.mes[mesid="${k}"]`);
         if(el){try{addMesButton(el)}catch(e){warn('addMesButton:',e)}}
-        setCurrentSnapshotMesIdx(k);
     }
     const targetId=Number(targetMessageId);
     const latestEntry=Number.isFinite(targetId)?getSnapshotEntryForMessage(targetId):getLatestSnapshotEntry();
     const latestStatus=latestEntry?.status??'missing';
-    latestRaw=latestStatus==='stale'?null:(latestEntry?.snapshot??null);latestKey=latestEntry?.id??null;
-    if(latestKey!=null)setCurrentSnapshotMesIdx(latestKey);
+    latestRaw=latestStatus==='stale'?null:(latestEntry?.snapshot??null);
+    latestKey=latestEntry?.id??null;
+    // Scrub tracks the open *stored* scene. Never point it at a missing swipe
+    // target — that falsely triggers "not the current scene" → Jump to older msg.
+    const scrubTo=resolveScrubMesIdx({entry:latestEntry,mirrorIds:sorted,currentScrub:currentSnapshotMesIdx});
+    setCurrentSnapshotMesIdx(scrubTo);
     let latest=null;
     if(latestRaw){
         try{
