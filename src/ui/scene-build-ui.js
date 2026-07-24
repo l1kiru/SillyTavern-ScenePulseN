@@ -97,11 +97,34 @@ function _scheduleRemove(operationId, ms) {
     }, ms));
 }
 
+/** Place stub after message body so it never sits above streaming text. */
 function _mountPoint(mes) {
     if (!mes) return null;
-    const buttons = mes.querySelector('.mes_buttons');
-    if (buttons?.parentElement) return { parent: buttons.parentElement, before: buttons.nextSibling };
+    const text = mes.querySelector('.mes_text');
+    if (text?.parentElement) return { parent: text.parentElement, before: text.nextSibling };
     return { parent: mes, before: null };
+}
+
+/**
+ * Together starts the op at inject time; wait until parse/save (reply finished)
+ * so the stub appears under the completed message. Manual/recover: text already there.
+ */
+function _shouldShowStub(op) {
+    if (op.status === 'superseded') return false;
+    const mes = _mesEl(op.messageId);
+    if (!mes?.querySelector('.mes_text')) return false;
+    const src = String(op.source || '');
+    if (src.startsWith('manual') || src.includes('recover') || src.includes('fallback')) return true;
+    return !['pending', 'generating'].includes(op.status);
+}
+
+function _clearSiblingStubs(op) {
+    document.querySelectorAll(`.sp-scene-build[data-sp-mes="${op.messageId}"]`).forEach(el => {
+        if (el.dataset.spOp === op.operationId) return;
+        if (el.dataset.spSwipe != null && el.dataset.spSwipe !== String(op.swipeId)) return;
+        el.remove();
+        _clearDismiss(el.dataset.spOp);
+    });
 }
 
 function _ensureStub(op) {
@@ -123,11 +146,12 @@ function _ensureStub(op) {
     } else if (el.dataset.spSwipe !== String(op.swipeId)) {
         el.dataset.spSwipe = String(op.swipeId);
     }
+    _clearSiblingStubs(op);
     return el;
 }
 
 function _renderStub(op) {
-    if (op.status === 'superseded') {
+    if (!_shouldShowStub(op)) {
         document.getElementById(_stubId(op.operationId))?.remove();
         return;
     }
@@ -270,6 +294,14 @@ function _onChange(op, reason) {
         document.getElementById('sp-scene-build-toast')?.remove();
         _dismissTimers.forEach(clearTimeout);
         _dismissTimers.clear();
+        _syncMesButtons();
+        _syncToolbar();
+        return;
+    }
+    if (reason === 'replace-terminal' && op) {
+        document.getElementById(_stubId(op.operationId))?.remove();
+        _clearDismiss(op.operationId);
+        _syncFloating();
         _syncMesButtons();
         _syncToolbar();
         return;
