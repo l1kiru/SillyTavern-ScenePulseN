@@ -382,7 +382,7 @@ export async function onMessageSwiped(idx){
             const extracted=extractInlineTracker(id);
             if(extracted){
                 const swipeId=getActiveSwipeId(id);
-                const owner=captureOperationOwner(id,swipeId);
+                const owner=captureOperationOwner(id,swipeId,{trackSource:false});
                 log('MESSAGE_SWIPED: recovering inline tracker for',id,'swipe',swipeId);
                 await runSceneBuild({
                     messageId:id,

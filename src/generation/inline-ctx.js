@@ -31,7 +31,7 @@ export function rebindInlineCtxForExpectedSwipe(ctx, targetIdx) {
     const next = {
         ...ctx,
         swipeId: active,
-        owner: captureOperationOwner(targetIdx, active),
+        owner: captureOperationOwner(targetIdx, active, { trackSource: false }),
     };
     setInlineGenerationContext(next);
     if (next.sceneBuildOperationId) {
