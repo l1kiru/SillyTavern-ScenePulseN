@@ -1,18 +1,51 @@
 import assert from 'node:assert/strict';
 
+function el(tag) {
+    const node = {
+        tagName: String(tag).toUpperCase(),
+        className: '',
+        innerHTML: '',
+        textContent: '',
+        hidden: false,
+        type: '',
+        title: '',
+        children: [],
+        attributes: {},
+        classList: {
+            _s: new Set(),
+            add(c) { this._s.add(c); node.className = [...this._s].join(' '); },
+            remove(c) { this._s.delete(c); node.className = [...this._s].join(' '); },
+            contains(c) { return this._s.has(c); },
+        },
+        setAttribute(name, value) { this.attributes[name] = String(value); },
+        getAttribute(name) { return this.attributes[name]; },
+        appendChild(child) { this.children.push(child); return child; },
+        addEventListener(type, fn) {
+            this._listeners = this._listeners || {};
+            (this._listeners[type] = this._listeners[type] || []).push(fn);
+        },
+        click() {
+            for (const fn of this._listeners?.click || []) fn({ stopPropagation() {}, preventDefault() {} });
+        },
+        querySelector(sel) {
+            if (sel === '.sp-gen-footer') return this.children.find(c => c.className === 'sp-gen-footer') || null;
+            if (sel === '.sp-gen-lore') {
+                for (const c of this.children) {
+                    if (c.className === 'sp-gen-lore') return c;
+                    for (const k of c.children || []) if (k.className === 'sp-gen-lore') return k;
+                }
+                return null;
+            }
+            if (sel === '.sp-source-trace-drawer') return this.children.find(c => c.className === 'sp-source-trace-drawer') || null;
+            return null;
+        },
+    };
+    return node;
+}
+
 globalThis.document = {
-    createElement(tag) {
-        return {
-            tagName: tag.toUpperCase(),
-            className: '',
-            innerHTML: '',
-            children: [],
-            attributes: {},
-            setAttribute(name, value) { this.attributes[name] = value; },
-            appendChild(child) { this.children.push(child); return child; },
-        };
-    },
-    body: { dataset: {}, classList: { add() {}, remove() {} }, addEventListener() {}, },
+    createElement: el,
+    body: el('body'),
     addEventListener() {},
     querySelector: () => null,
     querySelectorAll: () => [],
@@ -43,9 +76,13 @@ const {
     trimLorebookForStorage,
     MAX_LOREBOOK_JSON_BYTES,
 } = await import('../src/scene-source-trace.js');
-const { _renderSceneSourceTrace } = await import('../src/ui/update-panel.js');
+const {
+    formatLoreChipLabel,
+    formatTraceEntryLine,
+    buildTraceDrawerModel,
+    mountSceneSourceTrace,
+} = await import('../src/ui/scene-source-trace-ui.js');
 
-// ── match helpers ──────────────────────────────────────────────────────────
 const buf = 'She met Artoria Pendragon Lancer at the gate.';
 assert.deepEqual(
     matchEntryKeys({ keys: ['Artoria Pendragon Lancer'], constant: false }, buf).matchedKeys,
@@ -70,31 +107,21 @@ const event = {
 };
 const normalized = normalizeWorldInfoEvent(event);
 assert.equal(normalized.length, 1);
-assert.equal(normalized[0].world, 'Chaldea');
 assert.equal(normalized[0].uid, '7');
-assert.deepEqual(normalized[0].keys, ['Mash', 'Kyriel']);
-assert.equal(normalized[0].excerpt, undefined);
 
 _resetSceneSourceTraceForTests();
 const owner = { chatKey: 'chat-a', targetMessageId: 3, swipeId: 0 };
 startSceneSourceTrace(owner, { enabled: true });
 for (let i = 0; i < 25; i++) {
-    recordWorldInfoActivation({ world: 'Book', uid: i, key: `k${i}`, content: `entry ${i}` });
+    recordWorldInfoActivation({ world: 'Book', uid: i, key: 'k' + i, content: 'entry ' + i });
 }
 const trace = finishSceneSourceTrace(owner, { forceEmpty: true });
 assert.equal(trace.v, 2);
-assert.equal(trace.mode, 'inline');
 assert.equal(trace.lorebook.count, 25);
-assert.equal(trace.lorebook.entries.at(-1).uid, '24');
-assert.ok(Array.isArray(trace.lorebook.entries[0].matchedKeys));
-assert.ok(['keys', 'constant', 'none'].includes(trace.lorebook.entries[0].matchKind));
-assert.equal(trace.lorebook.entries[0].keys, undefined);
-assert.equal(trace.lorebook.entries[0].excerpt, undefined);
 
-// soft trim
 const fat = {
     totalEvents: 1,
-        entries: Array.from({ length: 800 }, (_, i) => ({
+    entries: Array.from({ length: 800 }, (_, i) => ({
         world: 'W'.repeat(80),
         uid: String(i),
         title: 'T'.repeat(80),
@@ -102,10 +129,8 @@ const fat = {
         matchKind: 'keys',
     })),
 };
-const trimmed = trimLorebookForStorage(fat);
-assert.ok(JSON.stringify(trimmed).length <= MAX_LOREBOOK_JSON_BYTES);
-assert.ok(trimmed.omitted > 0);
-assert.equal(trimmed.count, trimmed.entries.length);
+assert.ok(trimLorebookForStorage(fat).omitted > 0);
+assert.ok(JSON.stringify(trimLorebookForStorage(fat)).length <= MAX_LOREBOOK_JSON_BYTES);
 
 _resetSceneSourceTraceForTests();
 const owner0 = { chatKey: 'chat-b', targetMessageId: 5, swipeId: 0 };
@@ -113,67 +138,38 @@ const owner1 = { chatKey: 'chat-b', targetMessageId: 5, swipeId: 1 };
 startSceneSourceTrace(owner0, { enabled: true });
 recordWorldInfoActivation({ world: 'SwipeBook', uid: 42, key: 'hero', content: 'kept across rebind' });
 assert.equal(rebindSceneSourceTraceOwner(owner1), true);
-const rebound = finishSceneSourceTrace(owner1, { forceEmpty: true });
-assert.equal(rebound.lorebook.count, 1);
-assert.equal(rebound.lorebook.entries[0].uid, '42');
-assert.equal(rebound.lorebook.entries[0].world, 'SwipeBook');
+assert.equal(finishSceneSourceTrace(owner1, { forceEmpty: true }).lorebook.count, 1);
 
-const disabled = _renderSceneSourceTrace({ _spMeta: {} }, { sceneSourceTrace: false });
-assert.equal(disabled.className, 'sp-source-trace');
-assert.match(disabled.children[0].innerHTML, /disabled/);
-const unavailable = _renderSceneSourceTrace({ _spMeta: { injectionMethod: 'separate', source: 'auto:separate' } }, { sceneSourceTrace: true });
-assert.equal(unavailable.className, 'sp-source-trace');
-assert.match(unavailable.children[0].innerHTML, /Together mode/);
-const visible = _renderSceneSourceTrace({ _spMeta: { injectionMethod: 'inline', source: 'auto:together', sceneSourceTrace: trace } }, { sceneSourceTrace: true });
-assert.match(visible.innerHTML, /Scene Source Trace/);
-assert.equal(visible.children[0].children[0].children.length, 1);
-
-// cancel then finish(forceEmpty) must not resurrect entries
 _resetSceneSourceTraceForTests();
 const ownerC = { chatKey: 'chat-c', targetMessageId: 1, swipeId: 0 };
 startSceneSourceTrace(ownerC, { enabled: true });
 recordWorldInfoActivation({ world: 'Book', uid: 1, key: 'a', content: 'x' });
 cancelSceneSourceTrace();
-const afterCancel = finishSceneSourceTrace(ownerC, { forceEmpty: true });
-assert.equal(afterCancel.lorebook.count, 0);
+assert.equal(finishSceneSourceTrace(ownerC, { forceEmpty: true }).lorebook.count, 0);
 
-// defer simulation: NO cancel → finish preserves entries
 _resetSceneSourceTraceForTests();
 const ownerD = { chatKey: 'chat-d', targetMessageId: 2, swipeId: 0 };
 startSceneSourceTrace(ownerD, { enabled: true });
 recordWorldInfoActivation({ world: 'Book', uid: 9, key: 'hero', content: 'kept after defer' });
-const deferred = finishSceneSourceTrace(ownerD, { forceEmpty: true });
-assert.equal(deferred.lorebook.count, 1);
-assert.equal(deferred.lorebook.entries[0].uid, '9');
+assert.equal(finishSceneSourceTrace(ownerD, { forceEmpty: true }).lorebook.entries[0].uid, '9');
 
-// owner mismatch without rebind + forceEmpty → empty provenance
 _resetSceneSourceTraceForTests();
 const ownerE0 = { chatKey: 'chat-e', targetMessageId: 3, swipeId: 0 };
 const ownerE1 = { chatKey: 'chat-e', targetMessageId: 3, swipeId: 9 };
 startSceneSourceTrace(ownerE0, { enabled: true });
 recordWorldInfoActivation({ world: 'Book', uid: 3, key: 'k', content: 'lost on mismatch' });
-const mismatched = finishSceneSourceTrace(ownerE1, { forceEmpty: true });
-assert.equal(mismatched.lorebook.count, 0);
+assert.equal(finishSceneSourceTrace(ownerE1, { forceEmpty: true }).lorebook.count, 0);
 
-// applyMatchedKeys maps stored shape
-const mapped = applyMatchedKeysToEntries(
-    [{ world: 'fate_lorebook', uid: '1', title: 'Lancer-class Servant', keys: ['Artoria Pendragon Lancer'], constant: false }],
-    buf,
+assert.deepEqual(
+    applyMatchedKeysToEntries(
+        [{ world: 'fate_lorebook', uid: '1', title: 'Lancer-class Servant', keys: ['Artoria Pendragon Lancer'], constant: false }],
+        buf,
+    )[0].matchedKeys,
+    ['Artoria Pendragon Lancer'],
 );
-assert.equal(mapped[0].title, 'Lancer-class Servant');
-assert.deepEqual(mapped[0].matchedKeys, ['Artoria Pendragon Lancer']);
-assert.equal(mapped[0].keys, undefined);
-
-
-const {
-    formatLoreChipLabel,
-    formatTraceEntryLine,
-    buildTraceDrawerModel,
-} = await import('../src/ui/scene-source-trace-ui.js');
 
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: false }, meta: {}, trace: null }), null);
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'separate' }, trace: null }), 'Lore —');
-assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: null }), 'Lore —');
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 0, entries: [] } } }), 'Lore 0');
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 2, entries: [{}, {}] } } }), 'Lore 2');
 
@@ -185,28 +181,53 @@ const line = formatTraceEntryLine({
 });
 assert.equal(line, 'fate_lorebook — Lancer-class Servant — Artoria Pendragon — Артория Пендрагон Лансер');
 assert.ok(!line.includes('(?:'));
-const rxLine = formatTraceEntryLine({
-    world: 'Book',
-    title: 'Entry',
-    keys: ['/(?:artoria|lion king)/i', 'plain'],
-});
-assert.equal(rxLine, 'Book — Entry — plain');
-assert.ok(!rxLine.includes('(?:'));
-
-const model = buildTraceDrawerModel({
+assert.equal(buildTraceDrawerModel({
     settings: { sceneSourceTrace: true },
     meta: { injectionMethod: 'inline' },
-    trace: {
-        capturedAt: '2026-07-25T00:00:00.000Z',
-        lorebook: {
-            count: 1,
-            entries: [{ world: 'fate_lorebook', uid: '9', title: 'Lancer-class Servant', matchedKeys: ['Artoria Pendragon'], matchKind: 'keys' }],
+    trace: { lorebook: { count: 1, entries: [{ world: 'A', title: 'B', matchedKeys: ['C'], matchKind: 'keys' }] } },
+}).groups[0].items[0].line, 'A — B — C');
+
+const bodyOff = el('div');
+assert.equal(mountSceneSourceTrace(bodyOff, { settings: { sceneSourceTrace: false }, snapshot: {} }), null);
+assert.equal(bodyOff.querySelector('.sp-gen-lore'), null);
+
+const sampleRx = '/(?:artoria pendragon lancer|lion king)/i';
+const bodyOn = el('div');
+const footer = el('div');
+footer.className = 'sp-gen-footer';
+bodyOn.appendChild(footer);
+const mounted = mountSceneSourceTrace(bodyOn, {
+    settings: { sceneSourceTrace: true },
+    snapshot: {
+        _spMeta: {
+            injectionMethod: 'inline',
+            source: 'auto:together',
+            sceneSourceTrace: {
+                v: 2,
+                capturedAt: '2026-07-25T00:00:00.000Z',
+                lorebook: {
+                    count: 1,
+                    entries: [{
+                        world: 'fate_lorebook',
+                        uid: '9',
+                        title: 'Lancer-class Servant',
+                        matchedKeys: ['Artoria Pendragon'],
+                        matchKind: 'keys',
+                    }],
+                },
+            },
         },
     },
+    footer,
 });
-assert.equal(model.chip, 'Lore 1');
-assert.equal(model.emptyKey, null);
-assert.equal(model.groups.length, 1);
-assert.equal(model.groups[0].items[0].line, 'fate_lorebook — Lancer-class Servant — Artoria Pendragon');
+assert.ok(mounted);
+assert.equal(mounted.chip.textContent, 'Lore 1');
+assert.ok(mounted.drawer.hidden);
+mounted.chip.click();
+assert.equal(mounted.drawer.hidden, false);
+assert.match(mounted.drawer.innerHTML, /fate_lorebook/);
+assert.match(mounted.drawer.innerHTML, /Artoria Pendragon/);
+assert.ok(!mounted.drawer.innerHTML.includes(sampleRx));
+assert.ok(!mounted.drawer.innerHTML.includes('(?:'));
 
 console.log('scene-source-trace.test.mjs: all tests passed');

@@ -1,4 +1,7 @@
-// Pure helpers for Scene Source Trace footer chip + drawer model.
+// Scene Source Trace footer chip + drawer.
+
+import { t } from '../i18n.js';
+import { esc } from '../utils.js';
 
 function _isRegexKey(key) {
     const s = String(key || '').trim();
@@ -27,7 +30,6 @@ function _displayKeys(entry) {
     if (Array.isArray(entry?.matchedKeys) && entry.matchedKeys.length) {
         return entry.matchedKeys.map(String).filter(Boolean);
     }
-    // Legacy v1: show only plain (non-regex) keys
     const keys = Array.isArray(entry?.keys) ? entry.keys : [];
     return keys.map(String).filter(k => k && !_isRegexKey(k));
 }
@@ -76,4 +78,86 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null }
     }
     const groups = [...map.entries()].map(([world, items]) => ({ world, items }));
     return { chip, capturedAt, emptyKey: null, groups, omitted };
+}
+
+const EMPTY_COPY = {
+    no_capture: 'No capture for this snapshot',
+    no_activations: 'No lorebook activations',
+    together_only: 'Together mode only',
+};
+
+function _emptyMessage(emptyKey) {
+    return t(EMPTY_COPY[emptyKey] || emptyKey);
+}
+
+/** Mount Lore chip on footer + inline drawer under it. Returns null if setting off. */
+export function mountSceneSourceTrace(body, { settings, snapshot, footer = null } = {}) {
+    if (!body) return null;
+    const meta = snapshot?._spMeta || {};
+    const trace = meta.sceneSourceTrace || null;
+    const model = buildTraceDrawerModel({ settings, meta, trace });
+    if (model.chip == null) return null;
+
+    let foot = footer;
+    if (!foot) {
+        foot = document.createElement('div');
+        foot.className = 'sp-gen-footer';
+        body.appendChild(foot);
+    }
+
+    const chip = document.createElement('button');
+    chip.type = 'button';
+    chip.className = 'sp-gen-lore';
+    chip.textContent = model.chip;
+    chip.setAttribute('aria-expanded', 'false');
+    chip.setAttribute('aria-label', t('Scene source trace'));
+    chip.title = t('Scene source trace');
+
+    const drawer = document.createElement('div');
+    drawer.className = 'sp-source-trace-drawer';
+    drawer.hidden = true;
+    drawer.setAttribute('aria-label', t('Scene source trace'));
+
+    let html = '';
+    if (model.capturedAt) {
+        let when = model.capturedAt;
+        try { when = new Date(model.capturedAt).toLocaleString(); } catch { /* keep raw */ }
+        html += `<div class="sp-source-trace-drawer-head"><span>${esc(t('Captured'))}</span><strong>${esc(when)}</strong></div>`;
+    }
+    if (model.emptyKey) {
+        html += `<div class="sp-source-trace-empty">${esc(_emptyMessage(model.emptyKey))}</div>`;
+    } else {
+        html += '<div class="sp-source-trace-lore">';
+        for (const group of model.groups) {
+            html += `<div class="sp-source-trace-world"><div class="sp-source-trace-world-title">${esc(group.world)} <span>${group.items.length}</span></div>`;
+            for (const item of group.items) {
+                if (item.uid) {
+                    html += `<details class="sp-source-trace-entry"><summary><span>${esc(item.line)}</span></summary><div class="sp-source-trace-row"><span>UID</span><strong>${esc(item.uid)}</strong></div></details>`;
+                } else {
+                    html += `<div class="sp-source-trace-line">${esc(item.line)}</div>`;
+                }
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+    if (model.omitted > 0) {
+        html += `<div class="sp-source-trace-omitted">${esc(t('+{count} more omitted', { count: model.omitted }))}</div>`;
+    }
+    drawer.innerHTML = html;
+
+    const onChipClick = (e) => {
+        try { e?.stopPropagation?.(); e?.preventDefault?.(); } catch { /* ignore */ }
+        const open = !!drawer.hidden;
+        drawer.hidden = !open;
+        chip.setAttribute('aria-expanded', String(open));
+        if (open) drawer.classList.add('sp-source-trace-drawer-open');
+        else drawer.classList.remove('sp-source-trace-drawer-open');
+    };
+    if (typeof chip.addEventListener === 'function') chip.addEventListener('click', onChipClick);
+    else chip.onclick = onChipClick;
+
+    foot.appendChild(chip);
+    body.appendChild(drawer);
+    return { chip, drawer, footer: foot, model };
 }
