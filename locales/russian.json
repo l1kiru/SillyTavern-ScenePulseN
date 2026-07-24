@@ -343,7 +343,7 @@
   "Expand/Collapse sections": "Развернуть/свернуть секции",
   "Experimental": "Экспериментальные",
   "Experimental, read-only": "Экспериментально, только чтение",
-  "Experimental: shows compact generation provenance and captured lorebook activations below the timeline. Together mode only; stores entry metadata, not full lorebook text.": "Экспериментально: компактная информация о происхождении генерации и активациях lorebook под таймлайном. Только Together; сохраняет метаданные записей, не полный текст.",
+  "Experimental: shows compact generation provenance and captured lorebook activations below the timeline. Together mode only; stores entry metadata plus truncated excerpts (up to 300 characters), not full lorebook text.": "Экспериментально: показывает компактную provenance генерации и сработавшие lorebook-записи под таймлайном. Только Together; сохраняет метаданные записи и усечённые excerpt (до 300 символов), не полный текст lorebook.",
   "Exploratory": "Исследовательский",
   "Export": "Экспорт",
   "Export Config": "Экспорт настроек",
