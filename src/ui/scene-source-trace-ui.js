@@ -80,14 +80,11 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null }
     return { chip, capturedAt, emptyKey: null, groups, omitted };
 }
 
-const EMPTY_COPY = {
-    no_capture: 'No capture for this snapshot',
-    no_activations: 'No lorebook activations',
-    together_only: 'Together mode only',
-};
-
 function _emptyMessage(emptyKey) {
-    return t(EMPTY_COPY[emptyKey] || emptyKey);
+    if (emptyKey === 'no_capture') return t('No capture for this snapshot');
+    if (emptyKey === 'no_activations') return t('No lorebook activations');
+    if (emptyKey === 'together_only') return t('Together mode only');
+    return emptyKey || '';
 }
 
 /** Mount Lore chip on footer + inline drawer under it. Returns null if setting off. */
