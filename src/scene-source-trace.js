@@ -1,9 +1,11 @@
 // Experimental Together-mode source trace.
-// Captures only compact metadata from SillyTavern's World Info activation
-// event. It deliberately does not scan lorebooks or store full entry text.
+// Captures compact metadata from SillyTavern's World Info activation event,
+// then resolves matched key substrings against a chat scan buffer on finish.
+// Does not scan lorebook files or call getWorldInfoPrompt.
 
-const MAX_ENTRIES = 20;
-const MAX_EXCERPT = 300;
+export const MAX_MATCHED_KEY_LEN = 80;
+export const MAX_LOREBOOK_JSON_BYTES = 65536;
+export const SCAN_DEPTH_FALLBACK = 10;
 
 let _activeTrace = null;
 
@@ -29,10 +31,10 @@ function _strArray(value) {
     return s ? [s] : [];
 }
 
-function _excerpt(value) {
-    const text = _str(value);
-    if (!text) return '';
-    return text.length > MAX_EXCERPT ? text.slice(0, MAX_EXCERPT - 1) + '…' : text;
+function _truncateMatch(text) {
+    const s = _str(text);
+    if (!s) return '';
+    return s.length > MAX_MATCHED_KEY_LEN ? s.slice(0, MAX_MATCHED_KEY_LEN - 1) + '…' : s;
 }
 
 function _entryLike(value) {
@@ -44,22 +46,20 @@ function _entryLike(value) {
     const keys = [
         ..._strArray(value.keys),
         ..._strArray(value.key),
-        ..._strArray(value.matchedKeys),
         ..._strArray(value.primaryKey),
         ..._strArray(entry.keys),
         ..._strArray(entry.key),
     ];
     const comment = _str(value.comment ?? entry.comment);
-    const content = value.content ?? value.text ?? value.message ?? entry.content ?? entry.text ?? entry.message;
-    const excerpt = _excerpt(content);
-    if (!uid && !title && !keys.length && !comment && !excerpt) return null;
+    const constant = !!(value.constant ?? entry.constant);
+    if (!uid && !title && !keys.length && !comment && !constant) return null;
     return {
         world,
         uid,
         title: title || comment || (uid ? `#${uid}` : ''),
         keys: [...new Set(keys)],
         comment,
-        excerpt,
+        constant,
     };
 }
 
@@ -90,9 +90,114 @@ export function normalizeWorldInfoEvent(payload) {
         if (seen.has(id)) continue;
         seen.add(id);
         out.push(entry);
-        if (out.length >= MAX_ENTRIES) break;
     }
     return out;
+}
+
+/** Build WI-like scan text from the last `depth` chat messages. */
+export function buildWiScanBuffer(chat, depth) {
+    if (!Array.isArray(chat) || !chat.length) return '';
+    const n = Math.max(1, Number(depth) || SCAN_DEPTH_FALLBACK);
+    return chat.slice(-n).map(m => String(m?.mes ?? '')).join('\n');
+}
+
+export function resolveScanDepth() {
+    try {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        const fromCtx = ctx?.power_user?.world_info_depth;
+        const fromGlobal = typeof power_user !== 'undefined' ? power_user?.world_info_depth : undefined;
+        const n = Number(fromCtx ?? fromGlobal);
+        if (Number.isFinite(n) && n > 0) return n;
+    } catch { /* ignore */ }
+    return SCAN_DEPTH_FALLBACK;
+}
+
+/** Parse SillyTavern `/pattern/flags` key; invalid → null. */
+export function parseWiRegexKey(key) {
+    const s = _str(key);
+    if (!s.startsWith('/')) return null;
+    const last = s.lastIndexOf('/');
+    if (last <= 0) return null;
+    const pattern = s.slice(1, last);
+    const flags = s.slice(last + 1);
+    if (!pattern) return null;
+    try {
+        return new RegExp(pattern, flags);
+    } catch {
+        return null;
+    }
+}
+
+export function matchEntryKeys({ keys = [], constant = false } = {}, buffer = '') {
+    if (constant) return { matchedKeys: [], matchKind: 'constant' };
+    const text = String(buffer || '');
+    const lower = text.toLowerCase();
+    const matched = [];
+    const seen = new Set();
+    for (const raw of Array.isArray(keys) ? keys : []) {
+        const key = _str(raw);
+        if (!key) continue;
+        let hit = '';
+        const rx = parseWiRegexKey(key);
+        if (rx) {
+            try {
+                const m = rx.exec(text);
+                if (m && m[0]) hit = m[0];
+            } catch { /* ignore bad exec */ }
+        } else {
+            const idx = lower.indexOf(key.toLowerCase());
+            if (idx >= 0) hit = text.slice(idx, idx + key.length) || key;
+        }
+        if (!hit) continue;
+        const clipped = _truncateMatch(hit);
+        const id = clipped.toLowerCase();
+        if (seen.has(id)) continue;
+        seen.add(id);
+        matched.push(clipped);
+    }
+    return {
+        matchedKeys: matched,
+        matchKind: matched.length ? 'keys' : 'none',
+    };
+}
+
+export function applyMatchedKeysToEntries(entries, buffer) {
+    return (Array.isArray(entries) ? entries : []).map(entry => {
+        try {
+            const { matchedKeys, matchKind } = matchEntryKeys(entry, buffer || '');
+            return {
+                world: entry.world || '',
+                uid: entry.uid || '',
+                title: entry.title || '',
+                matchedKeys,
+                matchKind,
+            };
+        } catch {
+            return {
+                world: entry?.world || '',
+                uid: entry?.uid || '',
+                title: entry?.title || '',
+                matchedKeys: [],
+                matchKind: 'none',
+            };
+        }
+    });
+}
+
+export function trimLorebookForStorage(lorebook) {
+    const lb = {
+        count: 0,
+        totalEvents: lorebook?.totalEvents || 0,
+        entries: Array.isArray(lorebook?.entries) ? lorebook.entries.slice() : [],
+        omitted: 0,
+    };
+    while (lb.entries.length && JSON.stringify(lb).length > MAX_LOREBOOK_JSON_BYTES) {
+        lb.entries.pop();
+        lb.omitted++;
+    }
+    lb.count = lb.entries.length;
+    if (!lb.omitted) delete lb.omitted;
+    return lb;
 }
 
 export function startSceneSourceTrace(owner, { enabled = false } = {}) {
@@ -119,9 +224,9 @@ export function recordWorldInfoActivation(payload) {
     if (!_activeTrace) return;
     _activeTrace.totalEvents++;
     for (const entry of normalizeWorldInfoEvent(payload)) {
-        if (_activeTrace.entries.length >= MAX_ENTRIES) break;
         const id = [entry.world, entry.uid, entry.title, entry.keys.join(',')].join('|').toLowerCase();
-        const exists = _activeTrace.entries.some(existing => [existing.world, existing.uid, existing.title, existing.keys.join(',')].join('|').toLowerCase() === id);
+        const exists = _activeTrace.entries.some(existing =>
+            [existing.world, existing.uid, existing.title, existing.keys.join(',')].join('|').toLowerCase() === id);
         if (!exists) _activeTrace.entries.push(entry);
     }
 }
@@ -131,17 +236,37 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
     const trace = _activeTrace;
     _activeTrace = null;
     if (!trace && !forceEmpty) return null;
-    if (trace && ownerKey && trace.ownerKey && trace.ownerKey !== ownerKey) return forceEmpty ? _emptyTrace() : null;
+    if (trace && ownerKey && trace.ownerKey && trace.ownerKey !== ownerKey) {
+        return forceEmpty ? _emptyTrace() : null;
+    }
+
+    let entries = [];
+    let totalEvents = 0;
+    let startedAt = '';
+    if (trace) {
+        startedAt = trace.startedAt || '';
+        totalEvents = trace.totalEvents || 0;
+        try {
+            const chat = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext?.()?.chat) || [];
+            const buffer = buildWiScanBuffer(chat, resolveScanDepth());
+            entries = applyMatchedKeysToEntries(trace.entries, buffer);
+        } catch {
+            entries = applyMatchedKeysToEntries(trace.entries, '');
+        }
+    }
+
+    const lorebook = trimLorebookForStorage({
+        count: entries.length,
+        totalEvents,
+        entries,
+    });
+
     return {
-        v: 1,
+        v: 2,
         mode: 'inline',
         capturedAt: new Date().toISOString(),
-        startedAt: trace?.startedAt || '',
-        lorebook: {
-            count: trace?.entries.length || 0,
-            totalEvents: trace?.totalEvents || 0,
-            entries: trace?.entries || [],
-        },
+        startedAt,
+        lorebook,
     };
 }
 
@@ -151,7 +276,7 @@ export function cancelSceneSourceTrace() {
 
 function _emptyTrace() {
     return {
-        v: 1,
+        v: 2,
         mode: 'inline',
         capturedAt: new Date().toISOString(),
         startedAt: '',
