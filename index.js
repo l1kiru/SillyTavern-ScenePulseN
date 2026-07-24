@@ -43,6 +43,7 @@ import {
 } from './src/generation/scene-build-controller.js';
 import { currentChatKey } from './src/message-fingerprint.js';
 import { initSceneBuildUi, reconcileSceneBuildUi, runManualSceneBuild } from './src/ui/scene-build-ui.js';
+import { recordWorldInfoActivation, cancelSceneSourceTrace } from './src/scene-source-trace.js';
 
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
@@ -201,6 +202,16 @@ eventSource.on(event_types.STREAM_TOKEN_RECEIVED, text => {
     try { noteStreamingText(text); } catch {}
 });
 
+if (event_types.WORLD_INFO_ACTIVATED) {
+    eventSource.on(event_types.WORLD_INFO_ACTIVATED, payload => {
+        try {
+            const s=getSettings();
+            if(!s.enabled||s.injectionMethod!=='inline'||s.sceneSourceTrace!==true||inlineGenStartMs<=0||!inlineGenerationContext)return;
+            recordWorldInfoActivation(payload);
+        } catch {}
+    });
+}
+
 // CRITICAL: Save chat the INSTANT generation ends, BEFORE other extensions
 // can trigger profile switches that cause CHAT_CHANGED → chat reload → message loss.
 eventSource.on(event_types.GENERATION_ENDED, async () => {
@@ -225,6 +236,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             if(_inlineCtx&&(_inlineCtx.mesIdx!==targetIdx||getActiveSwipeId(targetIdx)!==_inlineCtx.swipeId)){
                 warn('GENERATION_ENDED: target swipe changed; discarding inline tracker for',targetIdx);
                 discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
+                cancelSceneSourceTrace();
                 setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
                 return;
             }
@@ -263,6 +275,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 // stay locked while it waits.
                 spSetGenerating(false);
                 stopStreamingHider();
+                cancelSceneSourceTrace();
             }
         } else {
             log('GENERATION_ENDED: no assistant message found, deferring to onCharMsg');
@@ -271,10 +284,12 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             // delayed renderer pushes the message in.
             spSetGenerating(false);
             stopStreamingHider();
+            cancelSceneSourceTrace();
         }
     } else {
         spSetGenerating(false);
         stopStreamingHider();
+        cancelSceneSourceTrace();
     }
     try { await ensureChatSaved(); log('GENERATION_ENDED: chat saved preemptively'); }
     catch (e) { warn('GENERATION_ENDED save failed:', e); }
@@ -295,6 +310,7 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
     const hadEngine = generating;
     setCancelRequested(true);
     try { cancelTogetherSceneBuilds('reply-stopped'); } catch {}
+    try { cancelSceneSourceTrace(); } catch {}
     if (hadEngine) {
         const oldNonce = genNonce;
         setGenNonce(genNonce + 1);
@@ -331,6 +347,7 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
         reconcileSceneBuildUi();
     } catch (e) { warn('CHAT_CHANGED scene-build:', e); }
     if (generating) cancelGeneration();
+    cancelSceneSourceTrace();
     const tp = document.getElementById('sp-thought-panel');
     if (tp) { tp.classList.remove('sp-tp-visible'); const tpb = document.getElementById('sp-tp-body'); if (tpb) tpb.innerHTML = ''; }
     clearWeatherOverlay();

@@ -19,6 +19,7 @@ import { buildRequestSchema } from '../schema.js';
 import { classifyTimeChange } from '../temporal-check.js';
 import { currentChatFingerprint, currentChatKey, validateOperationOwner } from '../message-fingerprint.js';
 import { isOperationCurrent } from './scene-build-controller.js';
+import { finishSceneSourceTrace } from '../scene-source-trace.js';
 
 /**
  * Process extracted tracker data through the full pipeline:
@@ -146,6 +147,10 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         deltaMode: _useDelta,
         deltaTurnsSinceFull: _useDelta ? _prevCounter + 1 : 0,
     };
+    if (s.sceneSourceTrace === true && source.startsWith('auto:together')) {
+        const trace = finishSceneSourceTrace(opts.owner, { forceEmpty: true });
+        if (trace) norm._spMeta.sceneSourceTrace = trace;
+    }
     // Save normalized snapshot (consistent with engine.js path)
     if (sceneOpId && !isOperationCurrent(sceneOpId)) {
         warn('Pipeline: scene build not current before save; discarding', mesIdx, sceneOpId);
