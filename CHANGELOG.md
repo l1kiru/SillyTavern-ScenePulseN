@@ -2,7 +2,7 @@
 
 All notable changes to ScenePulse are documented in this file.
 
-### [Unreleased]
+### [7.1.9] — 2026-07-25
 
 #### Changed — Scene Source Trace UX
 

@@ -525,7 +525,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.8** - Together/inline owners skip source fingerprint so swipe strip does not SOURCE_CHANGED.
+**Latest: v7.1.9** - Scene Source Trace footer `Lore N` chip with matched-key drawer (Together mode).
 
 ## Contributing
 
