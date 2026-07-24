@@ -36,7 +36,13 @@ import { noteStreamingText, stopStreamingHider } from './src/generation/streamin
 import { cancelGeneration } from './src/generation/engine.js';
 import { scenePulseInterceptor, noteStreamProgress, clearStallWatchdog } from './src/generation/interceptor.js';
 import { rebindInlineCtxForExpectedSwipe } from './src/generation/inline-ctx.js';
-import { processExtraction } from './src/generation/pipeline.js';
+import { processTogetherExtraction, discardTogetherSceneBuild } from './src/generation/together-scene-build.js';
+import {
+    cancelTogetherSceneBuilds, cancelSceneBuildsForChat, disposeSceneBuilds,
+    supersedeSceneBuildsForMessageExceptSwipe,
+} from './src/generation/scene-build-controller.js';
+import { currentChatKey } from './src/message-fingerprint.js';
+import { initSceneBuildUi, reconcileSceneBuildUi, runManualSceneBuild, disposeSceneBuildUi } from './src/ui/scene-build-ui.js';
 
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
@@ -65,6 +71,8 @@ globalThis.scenePulseInterceptor = scenePulseInterceptor;
 
 // ── Wire SillyTavern Events ──
 const { eventSource, event_types } = SillyTavern.getContext();
+let _lastSceneBuildChatKey = '';
+try { _lastSceneBuildChatKey = currentChatKey(); } catch {}
 const _knownSwipeIds=new Map();
 function _rememberSwipeIds(){
     _knownSwipeIds.clear();
@@ -86,6 +94,7 @@ eventSource.on(event_types.APP_READY, async () => { try {
     // fetch hadn't completed before createPanel()/createSettings() ran.
     try { await initI18n(); log('APP_READY: i18n ok'); } catch { /* degrade to English */ }
     createPanel(); log('APP_READY: panel ok');
+    try { initSceneBuildUi(); log('APP_READY: scene-build UI ok'); } catch (e) { warn('SceneBuild UI:', e); }
     createSettings(); log('APP_READY: settings ok');
     // Register slash commands & macros
     try { registerSlashCommands(); log('APP_READY: slash commands ok'); } catch (e) { warn('Slash commands:', e); }
@@ -176,6 +185,7 @@ eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, idx => {
     const id=Number(idx);const message=SillyTavern.getContext().chat?.[id];
     if(message)_knownSwipeIds.set(id,Math.max(0,Number(message.swipe_id??0)||0));
     onCharMsg(idx);
+    try{reconcileSceneBuildUi()}catch{}
 });
 
 // v6.27.16: stream-stall detector. Each token received refreshes the
@@ -214,6 +224,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             const _inlineCtx=rebindInlineCtxForExpectedSwipe(inlineGenerationContext,targetIdx);
             if(_inlineCtx&&(_inlineCtx.mesIdx!==targetIdx||getActiveSwipeId(targetIdx)!==_inlineCtx.swipeId)){
                 warn('GENERATION_ENDED: target swipe changed; discarding inline tracker for',targetIdx);
+                discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
                 setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
                 return;
             }
@@ -229,14 +240,9 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 genMeta.promptTokens = 0;
                 genMeta.completionTokens = _compTokens;
                 genMeta.elapsed = _elapsed;
-                await processExtraction(targetIdx, extracted, 'auto:together', {
+                await processTogetherExtraction(targetIdx, extracted, 'auto:together', _inlineCtx, {
                     promptTokens: 0, completionTokens: _compTokens, elapsed: _elapsed,
                     stopHider: true, unlockGen: true,
-                    swipeId:_inlineCtx?.swipeId,expectedSwipeId:_inlineCtx?.swipeId,
-                    baseSnapshot:_inlineCtx?.baseSnapshot??null,
-                    expectedChatKey:_inlineCtx?.chatKey,
-                    expectedParentFingerprint:_inlineCtx?.parentFingerprint,
-                    owner:_inlineCtx?.owner
                 });
                 setInlineGenerationContext(null);
                 log('GENERATION_ENDED: pipeline complete');
@@ -288,6 +294,7 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
     const hadInline = inlineGenStartMs > 0 || pendingInlineIdx >= 0;
     const hadEngine = generating;
     setCancelRequested(true);
+    try { cancelTogetherSceneBuilds('reply-stopped'); } catch {}
     if (hadEngine) {
         const oldNonce = genNonce;
         setGenNonce(genNonce + 1);
@@ -318,6 +325,11 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
 
 eventSource.on(event_types.CHAT_CHANGED, async () => {
     try { await ensureChatSaved(); } catch (e) { warn('CHAT_CHANGED save:', e); }
+    try {
+        if (_lastSceneBuildChatKey) cancelSceneBuildsForChat(_lastSceneBuildChatKey, 'chat-changed');
+        _lastSceneBuildChatKey = currentChatKey();
+        reconcileSceneBuildUi();
+    } catch (e) { warn('CHAT_CHANGED scene-build:', e); }
     if (generating) cancelGeneration();
     const tp = document.getElementById('sp-thought-panel');
     if (tp) { tp.classList.remove('sp-tp-visible'); const tpb = document.getElementById('sp-tp-body'); if (tpb) tpb.innerHTML = ''; }
@@ -397,6 +409,11 @@ if (event_types.MESSAGE_SWIPED) {
             void spOnSwipeDeleted(pending.payload,true);return;
         }
         void onMessageSwiped(id);
+        try{
+            const swipeId=Math.max(0,Number(message?.swipe_id??0)||0);
+            supersedeSceneBuildsForMessageExceptSwipe(id,swipeId);
+            reconcileSceneBuildUi();
+        }catch{}
     });
 }
 
@@ -436,16 +453,15 @@ document.addEventListener('keydown', (e) => {
             }
             if (mesIdx >= 0) {
                 (async () => {
-                    const [stateM, engineM, loadM, mobileM, panelM] = await Promise.all([
-                        import('./src/state.js'), import('./src/generation/engine.js'),
-                        import('./src/ui/loading.js'), import('./src/ui/mobile.js'), import('./src/ui/panel.js')
+                    const [loadM, mobileM, panelM, uiM] = await Promise.all([
+                        import('./src/ui/loading.js'), import('./src/ui/mobile.js'),
+                        import('./src/ui/panel.js'), import('./src/ui/scene-build-ui.js')
                     ]);
-                    stateM.setLastGenSource('shortcut:regen');
                     mobileM.spAutoShow();
                     loadM.showLoadingOverlay(document.getElementById('sp-panel-body'), 'Generating Scene', 'Keyboard shortcut');
                     loadM.showStopButton(); loadM.startElapsedTimer();
                     loadM.showThoughtLoading('Generating Scene', 'Analyzing context');
-                    const result = await engineM.generateTracker(mesIdx);
+                    const result = await uiM.runManualSceneBuild(mesIdx, 'shortcut:regen');
                     loadM.hideStopButton(); loadM.stopElapsedTimer();
                     loadM.clearLoadingOverlay(document.getElementById('sp-panel-body'));
                     loadM.clearThoughtLoading();

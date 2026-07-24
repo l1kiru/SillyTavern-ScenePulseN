@@ -6,8 +6,8 @@ import { getSettings, saveSettings, canGenerateScene, getLastAssistantMessageInd
 import { charColor } from '../color.js';
 import { setLastGenSource } from '../state.js';
 import { showThoughtLoading, showStopButton, hideStopButton, clearThoughtLoading } from './loading.js';
-import { generateTracker } from '../generation/engine.js';
 import { guardRegenIfBusy } from '../generation/regen-guard.js';
+import { runManualSceneBuild } from './scene-build-ui.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
 import { updateFeatBadge } from './panel.js';
 import { updatePanel } from './update-panel.js';
@@ -99,7 +99,7 @@ export function createThoughtPanel(){
         showStopButton();
         log('Thought regen: starting...');
         setLastGenSource('manual:thoughts');
-        const result=await generateTracker(mesIdx,'characters');
+        const result=await runManualSceneBuild(mesIdx,'manual:thoughts','characters');
         btn.classList.remove('sp-spinning');
         hideStopButton();
         clearThoughtLoading();
