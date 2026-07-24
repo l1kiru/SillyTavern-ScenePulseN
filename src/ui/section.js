@@ -2,8 +2,8 @@
 import { esc } from '../utils.js';
 import { getSettings, saveSettings, canGenerateScene, getLastAssistantMessageIndex } from '../settings.js';
 import { setLastGenSource } from '../state.js';
-import { generateTracker } from '../generation/engine.js';
 import { guardRegenIfBusy } from '../generation/regen-guard.js';
+import { runManualSceneBuild } from './scene-build-ui.js';
 import { t } from '../i18n.js';
 import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton } from './loading.js';
 
@@ -50,7 +50,7 @@ export function mkSection(key,title,badge,fn,s){
         if(!sec.classList.contains('sp-open'))sec.classList.add('sp-open');
         setLastGenSource('manual:section:'+key);
         showStopButton();
-        await generateTracker(mesIdx,key);
+        await runManualSceneBuild(mesIdx,'manual:section:'+key,key);
         hideStopButton();
         btn.classList.remove('sp-spinning');
         clearLoadingOverlay(content);

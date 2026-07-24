@@ -18,6 +18,7 @@ import { recordExtractionFailure } from './extraction.js';
 import { buildRequestSchema } from '../schema.js';
 import { classifyTimeChange } from '../temporal-check.js';
 import { currentChatFingerprint, currentChatKey, validateOperationOwner } from '../message-fingerprint.js';
+import { isOperationCurrent } from './scene-build-controller.js';
 
 /**
  * Process extracted tracker data through the full pipeline:
@@ -37,6 +38,11 @@ import { currentChatFingerprint, currentChatKey, validateOperationOwner } from '
 export async function processExtraction(mesIdx, extracted, source, opts = {}) {
     const s = getSettings();
     const { promptTokens = 0, completionTokens = 0, elapsed = 0 } = opts;
+    const sceneOpId = opts.sceneBuildOperationId || opts.operationId || null;
+    if (sceneOpId && !isOperationCurrent(sceneOpId)) {
+        warn('Pipeline: scene build not current; discarding result for', mesIdx, sceneOpId);
+        return null;
+    }
 
     setLastGenSource(source);
     setLastRawResponse(JSON.stringify(extracted, null, 2));
@@ -141,6 +147,10 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         deltaTurnsSinceFull: _useDelta ? _prevCounter + 1 : 0,
     };
     // Save normalized snapshot (consistent with engine.js path)
+    if (sceneOpId && !isOperationCurrent(sceneOpId)) {
+        warn('Pipeline: scene build not current before save; discarding', mesIdx, sceneOpId);
+        return null;
+    }
     saveSnapshot(mesIdx, norm, targetSwipeId);
     setLastExtractionFailure(null);
 

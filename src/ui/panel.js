@@ -2,21 +2,20 @@
 import { log, warn } from '../logger.js';
 import { esc, str } from '../utils.js';
 import { t } from '../i18n.js';
-import { MASCOT_SVG, DEFAULTS, VERSION } from '../constants.js';
-import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView, canGenerateScene, getLastAssistantMessageIndex } from '../settings.js';
-import { BUILTIN_PANELS } from '../constants.js';
+import { MASCOT_SVG, DEFAULTS, VERSION, BUILTIN_PANELS } from '../constants.js';
+import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView, canGenerateScene, getLastAssistantMessageIndex, getLatestSnapshot, getTrustedSnapshotFor } from '../settings.js';
 import { buildDynamicSchema } from '../schema.js';
 import { customPanelSectionKey, getActiveProfile, validateCustomPanels } from '../profiles.js';
-import { getLatestSnapshot } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
     setCurrentWeatherType,
     setCurrentTimePeriod,
-    _cachedNormData
+    _cachedNormData,
+    getLastExtractionFailure
 } from '../state.js';
-import { generateTracker } from '../generation/engine.js';
 import { guardRegenIfBusy } from '../generation/regen-guard.js';
+import { runManualSceneBuild } from './scene-build-ui.js';
 import { spApplyMode, spDetectMode, spMinimizePanel, spRestorePanel, spUpdateFab, spInjectTopBar } from './mobile.js';
 import { updateWeatherOverlay, clearWeatherOverlay } from './weather.js';
 import { updateTimeTint, clearTimeTint } from './time-tint.js';
@@ -250,13 +249,15 @@ export function createPanel(){
             showThoughtLoading(t('Generating Scene'),t('Analyzing context'));
         }
         const preNonce=genNonce;
-        const result=await generateTracker(mesIdx);
+        const result=await runManualSceneBuild(mesIdx,'manual:full');
         // If nonce changed beyond our generation, cancel already handled UI -- bail
         if(genNonce>preNonce+1){log('Toolbar regen: stale caller, cancel handled UI');return}
         hideStopButton();stopElapsedTimer();
         clearLoadingOverlay(body);clearThoughtLoading();
         if(!result){
-            const snap=getLatestSnapshot();
+            const failure=getLastExtractionFailure();
+            if(failure)warn('Manual regen failed:',failure.code,failure.message||'','mesIdx=',failure.mesIdx,'swipe=',failure.swipeId);
+            const snap=getTrustedSnapshotFor(mesIdx);
             if(snap){const norm=normalizeTracker(snap);updatePanel(norm)}
             else renderEmptyState({icon:'⟳'});
         }
