@@ -4,9 +4,9 @@
   "languages": {
     "Russian": {
       "file": "russian.json",
-      "translated": 1096,
-      "fallback": 22,
-      "coveragePercent": 98
+      "translated": 1113,
+      "fallback": 5,
+      "coveragePercent": 99.6
     },
     "Japanese": {
       "file": "japanese.json",
