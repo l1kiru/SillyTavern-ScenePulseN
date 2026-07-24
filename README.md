@@ -525,7 +525,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.6** — Mobile panel viewport fix, Together swipe rebind, and SceneBuildController.
+**Latest: v7.1.7** - SceneBuild stub after mes_text, 40s soft timeout, clear stale error stubs.
 
 ## Contributing
 
