@@ -2,6 +2,14 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [Unreleased]
+
+#### Changed — Scene Source Trace UX
+
+- Replace the always-on Scene Source Trace card with a compact `Lore N` chip in the generation footer (setting on only).
+- Inline drawer lists `lorebook — entry — matched key(s)` from a post-pass against chat scan context; regex patterns are not shown.
+- Remove the 20-entry capture cap; soft-trim oversized lorebook JSON (~64KB) with an omitted count.
+
 ### [7.1.8] — 2026-07-24
 
 #### Fixed — Together swipe SOURCE_CHANGED
