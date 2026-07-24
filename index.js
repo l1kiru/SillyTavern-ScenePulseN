@@ -35,6 +35,7 @@ import { extractInlineTracker } from './src/generation/extraction.js';
 import { noteStreamingText, stopStreamingHider } from './src/generation/streaming.js';
 import { cancelGeneration } from './src/generation/engine.js';
 import { scenePulseInterceptor, noteStreamProgress, clearStallWatchdog } from './src/generation/interceptor.js';
+import { rebindInlineCtxForExpectedSwipe } from './src/generation/inline-ctx.js';
 import { processExtraction } from './src/generation/pipeline.js';
 
 // ── UI ──
@@ -44,7 +45,7 @@ import { renderEmptyState } from './src/ui/empty-state.js';
 import { updatePanel } from './src/ui/update-panel.js';
 import { clearWeatherOverlay } from './src/ui/weather.js';
 import { clearTimeTint } from './src/ui/time-tint.js';
-import { onCharMsg, renderExisting, spOnMessageDeleted, spOnSwipeDeleted } from './src/ui/message.js';
+import { onCharMsg, renderExisting, onMessageSwiped, spOnMessageDeleted, spOnSwipeDeleted } from './src/ui/message.js';
 import { cleanupGenUI, clearThoughtLoading } from './src/ui/loading.js';
 import { updateThoughts } from './src/ui/thoughts.js';
 import { invalidateCharacterHistory } from './src/ui/character-history.js';
@@ -210,7 +211,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             if (!chat[i].is_user) { targetIdx = i; break; }
         }
         if (targetIdx >= 0) {
-            const _inlineCtx=inlineGenerationContext;
+            const _inlineCtx=rebindInlineCtxForExpectedSwipe(inlineGenerationContext,targetIdx);
             if(_inlineCtx&&(_inlineCtx.mesIdx!==targetIdx||getActiveSwipeId(targetIdx)!==_inlineCtx.swipeId)){
                 warn('GENERATION_ENDED: target swipe changed; discarding inline tracker for',targetIdx);
                 setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
@@ -395,9 +396,7 @@ if (event_types.MESSAGE_SWIPED) {
             const pending=_pendingActiveSwipeDeletion;_pendingActiveSwipeDeletion=null;clearTimeout(pending.timer);
             void spOnSwipeDeleted(pending.payload,true);return;
         }
-        const snap=Number.isFinite(id)?getTrustedSnapshotFor(id):null;
-        try{updateThoughts(snap?normalizeTracker(snap):null)}catch{}
-        setTimeout(()=>renderExisting(id),0);
+        void onMessageSwiped(id);
     });
 }
 
