@@ -525,7 +525,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.5** — Fixes false “not the current scene” after cancel+swipe so Jump no longer sends you to an older message.
+**Latest: v7.1.6** — Mobile panel viewport fix, Together swipe rebind, and SceneBuildController.
 
 ## Contributing
 

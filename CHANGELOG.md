@@ -2,6 +2,20 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.6] — 2026-07-24
+
+#### Fixed — Mobile panel viewport
+
+- Size panel with `dvh` / visualViewport instead of `screen.availHeight` (fixes mobile viewport clip).
+
+#### Fixed — Together swipe rebind
+
+- Rebind Together inline generation context when ST advances `swipe_id` so tracker JSON is not discarded; recover on MESSAGE_SWIPED.
+
+#### Added — SceneBuildController
+
+- SceneBuildController FSM with lifecycle, AbortSignal, soft/hard watchdogs, and UI toast/stub.
+
 ### [7.1.5] — 2026-07-24
 
 #### Fixed — Timeline scrub after cancel + swipe
