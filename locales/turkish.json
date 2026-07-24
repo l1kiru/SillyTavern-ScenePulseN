@@ -343,7 +343,7 @@
   "Expand/Collapse sections": "Bölümleri aç/kapat",
   "Experimental": "Experimental",
   "Experimental, read-only": "Experimental, read-only",
-  "Experimental: shows compact generation provenance and captured lorebook activations below the timeline. Together mode only; stores entry metadata, not full lorebook text.": "Experimental: shows compact generation provenance and captured lorebook activations below the timeline. Together mode only; stores entry metadata, not full lorebook text.",
+  "Experimental: shows compact generation provenance and captured lorebook activations below the timeline. Together mode only; stores entry metadata plus truncated excerpts (up to 300 characters), not full lorebook text.": "Experimental: shows compact generation provenance and captured lorebook activations below the timeline. Together mode only; stores entry metadata plus truncated excerpts (up to 300 characters), not full lorebook text.",
   "Exploratory": "Keşifçi",
   "Export": "Export",
   "Export Config": "Export Config",
