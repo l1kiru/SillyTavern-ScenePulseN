@@ -22,6 +22,7 @@ import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
 import { processTogetherExtraction, discardTogetherSceneBuild } from '../generation/together-scene-build.js';
 import { rebindInlineCtxForExpectedSwipe } from '../generation/inline-ctx.js';
+import { cancelSceneSourceTrace } from '../scene-source-trace.js';
 import { ensureChatSaved, anyPanelsActive } from '../settings.js';
 import { spAutoShow, spPostGenShow, spSetGenerating } from './mobile.js';
 import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, showChatBanner, clearThoughtLoading } from './loading.js';
@@ -138,6 +139,7 @@ export async function onCharMsg(idx){
         if(_inlineCtx&&(_inlineCtx.mesIdx!==idx||getActiveSwipeId(idx)!==_inlineCtx.swipeId)){
             warn('onCharMsg [inline]: target swipe changed; discarding tracker for',idx);
             discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
+            cancelSceneSourceTrace();
             setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
             return;
         }

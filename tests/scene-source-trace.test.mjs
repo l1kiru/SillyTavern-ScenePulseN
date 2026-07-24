@@ -28,6 +28,7 @@ const {
     recordWorldInfoActivation,
     finishSceneSourceTrace,
     rebindSceneSourceTraceOwner,
+    cancelSceneSourceTrace,
     _resetSceneSourceTraceForTests,
 } = await import('../src/scene-source-trace.js');
 const { _renderSceneSourceTrace } = await import('../src/ui/update-panel.js');
@@ -79,5 +80,32 @@ assert.match(unavailable.children[0].innerHTML, /Together mode/);
 const visible = _renderSceneSourceTrace({ _spMeta: { injectionMethod: 'inline', source: 'auto:together', sceneSourceTrace: trace } }, { sceneSourceTrace: true });
 assert.match(visible.innerHTML, /Scene Source Trace/);
 assert.equal(visible.children[0].children[0].children.length, 1);
+
+// cancel then finish(forceEmpty) must not resurrect entries
+_resetSceneSourceTraceForTests();
+const ownerC = { chatKey: 'chat-c', targetMessageId: 1, swipeId: 0 };
+startSceneSourceTrace(ownerC, { enabled: true });
+recordWorldInfoActivation({ world: 'Book', uid: 1, key: 'a', content: 'x' });
+cancelSceneSourceTrace();
+const afterCancel = finishSceneSourceTrace(ownerC, { forceEmpty: true });
+assert.equal(afterCancel.lorebook.count, 0);
+
+// defer simulation: NO cancel — finish preserves entries
+_resetSceneSourceTraceForTests();
+const ownerD = { chatKey: 'chat-d', targetMessageId: 2, swipeId: 0 };
+startSceneSourceTrace(ownerD, { enabled: true });
+recordWorldInfoActivation({ world: 'Book', uid: 9, key: 'hero', content: 'kept after defer' });
+const deferred = finishSceneSourceTrace(ownerD, { forceEmpty: true });
+assert.equal(deferred.lorebook.count, 1);
+assert.equal(deferred.lorebook.entries[0].uid, '9');
+
+// owner mismatch without rebind + forceEmpty → empty provenance
+_resetSceneSourceTraceForTests();
+const ownerE0 = { chatKey: 'chat-e', targetMessageId: 3, swipeId: 0 };
+const ownerE1 = { chatKey: 'chat-e', targetMessageId: 3, swipeId: 9 };
+startSceneSourceTrace(ownerE0, { enabled: true });
+recordWorldInfoActivation({ world: 'Book', uid: 3, key: 'k', content: 'lost on mismatch' });
+const mismatched = finishSceneSourceTrace(ownerE1, { forceEmpty: true });
+assert.equal(mismatched.lorebook.count, 0);
 
 console.log('scene-source-trace.test.mjs: all tests passed');
