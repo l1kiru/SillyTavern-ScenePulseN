@@ -2,6 +2,7 @@
 
 import { t } from '../i18n.js';
 import { log } from '../logger.js';
+import { esc } from '../utils.js';
 import { spDetectMode } from './mobile.js';
 import {
     subscribeSceneBuild, getActiveSceneBuilds, getAllSceneBuilds, getSceneBuild,
@@ -14,6 +15,7 @@ const READY_DISMISS_MS = 1200;
 const CANCEL_DISMISS_MS = 900;
 const _dismissTimers = new Map();
 let _subscribed = false;
+let _unsubscribe = null;
 
 function _stageCopy(op) {
     const soft = op.softNotified;
@@ -56,6 +58,7 @@ function _stageCopy(op) {
                 sub: op.error?.message ? String(op.error.message).slice(0, 120) : '',
                 busy: false,
                 retry: true,
+                close: true,
             };
         case 'expired':
             return {
@@ -173,7 +176,7 @@ function _renderStub(op) {
             actions += `<button type="button" class="sp-scene-build-close" data-sp-close="${op.operationId}">${t('Close')}</button>`;
         }
     }
-    el.innerHTML = `<div class="sp-scene-build-row">${spinner}<div class="sp-scene-build-text"><div class="sp-scene-build-title">${copy.title}</div>${copy.sub ? `<div class="sp-scene-build-sub">${copy.sub}</div>` : ''}</div>${actions}</div>`;
+    el.innerHTML = `<div class="sp-scene-build-row">${spinner}<div class="sp-scene-build-text"><div class="sp-scene-build-title">${esc(copy.title)}</div>${copy.sub ? `<div class="sp-scene-build-sub">${esc(copy.sub)}</div>` : ''}</div>${actions}</div>`;
 }
 
 function _syncFloating() {
@@ -321,26 +324,39 @@ function _onChange(op, reason) {
     else if (op.status === 'superseded') _clearDismiss(op.operationId);
 }
 
+function _onVisibilityChange() {
+    if (document.visibilityState === 'visible') reconcileSceneBuildUi();
+}
+
+function _onPageHide() {
+    try { disposeSceneBuilds(); } catch {}
+}
+
 export function initSceneBuildUi() {
     if (_subscribed) return;
     _subscribed = true;
-    subscribeSceneBuild(_onChange);
+    _unsubscribe = subscribeSceneBuild(_onChange);
     document.addEventListener('click', _onClick, true);
-    document.addEventListener('visibilitychange', () => {
-        if (document.visibilityState === 'visible') reconcileSceneBuildUi();
-    });
-    window.addEventListener('pagehide', () => {
-        try { disposeSceneBuilds(); } catch {}
-    });
+    document.addEventListener('visibilitychange', _onVisibilityChange);
+    window.addEventListener('pagehide', _onPageHide);
     log('SceneBuild UI: initialized');
 }
 
 export function reconcileSceneBuildUi() {
     const liveIds = new Set();
     for (const op of getAllSceneBuilds()) {
-        if (isActiveStatus(op.status) || op.status === 'error' || op.status === 'expired') {
-            liveIds.add(op.operationId);
-            _renderStub(op);
+        const keep = isActiveStatus(op.status)
+            || op.status === 'error'
+            || op.status === 'expired'
+            || op.status === 'ready'
+            || op.status === 'cancelled';
+        if (!keep) continue;
+        liveIds.add(op.operationId);
+        _renderStub(op);
+        if (op.status === 'ready' && !_dismissTimers.has(op.operationId)) {
+            _scheduleRemove(op.operationId, READY_DISMISS_MS);
+        } else if (op.status === 'cancelled' && !_dismissTimers.has(op.operationId)) {
+            _scheduleRemove(op.operationId, CANCEL_DISMISS_MS);
         }
     }
     document.querySelectorAll('.sp-scene-build').forEach(el => {
@@ -353,7 +369,13 @@ export function reconcileSceneBuildUi() {
 }
 
 export function disposeSceneBuildUi() {
+    if (_unsubscribe) {
+        try { _unsubscribe(); } catch {}
+        _unsubscribe = null;
+    }
     document.removeEventListener('click', _onClick, true);
+    document.removeEventListener('visibilitychange', _onVisibilityChange);
+    window.removeEventListener('pagehide', _onPageHide);
     document.querySelectorAll('.sp-scene-build').forEach(n => n.remove());
     document.getElementById('sp-scene-build-toast')?.remove();
     _dismissTimers.forEach(clearTimeout);
