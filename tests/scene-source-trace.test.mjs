@@ -164,4 +164,49 @@ assert.equal(mapped[0].title, 'Lancer-class Servant');
 assert.deepEqual(mapped[0].matchedKeys, ['Artoria Pendragon Lancer']);
 assert.equal(mapped[0].keys, undefined);
 
+
+const {
+    formatLoreChipLabel,
+    formatTraceEntryLine,
+    buildTraceDrawerModel,
+} = await import('../src/ui/scene-source-trace-ui.js');
+
+assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: false }, meta: {}, trace: null }), null);
+assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'separate' }, trace: null }), 'Lore —');
+assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: null }), 'Lore —');
+assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 0, entries: [] } } }), 'Lore 0');
+assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 2, entries: [{}, {}] } } }), 'Lore 2');
+
+const line = formatTraceEntryLine({
+    world: 'fate_lorebook',
+    title: 'Lancer-class Servant',
+    matchedKeys: ['Artoria Pendragon', 'Артория Пендрагон Лансер'],
+    matchKind: 'keys',
+});
+assert.equal(line, 'fate_lorebook — Lancer-class Servant — Artoria Pendragon — Артория Пендрагон Лансер');
+assert.ok(!line.includes('(?:'));
+const rxLine = formatTraceEntryLine({
+    world: 'Book',
+    title: 'Entry',
+    keys: ['/(?:artoria|lion king)/i', 'plain'],
+});
+assert.equal(rxLine, 'Book — Entry — plain');
+assert.ok(!rxLine.includes('(?:'));
+
+const model = buildTraceDrawerModel({
+    settings: { sceneSourceTrace: true },
+    meta: { injectionMethod: 'inline' },
+    trace: {
+        capturedAt: '2026-07-25T00:00:00.000Z',
+        lorebook: {
+            count: 1,
+            entries: [{ world: 'fate_lorebook', uid: '9', title: 'Lancer-class Servant', matchedKeys: ['Artoria Pendragon'], matchKind: 'keys' }],
+        },
+    },
+});
+assert.equal(model.chip, 'Lore 1');
+assert.equal(model.emptyKey, null);
+assert.equal(model.groups.length, 1);
+assert.equal(model.groups[0].items[0].line, 'fate_lorebook — Lancer-class Servant — Artoria Pendragon');
+
 console.log('scene-source-trace.test.mjs: all tests passed');
