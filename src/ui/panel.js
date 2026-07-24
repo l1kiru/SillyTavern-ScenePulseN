@@ -37,6 +37,7 @@ export function updateFeatBadge(){
 
 // Brand icon state — reflects generating/idle/error
 let _errorTimer=null;
+let _spVisualViewportWired=false;
 export function setBrandState(state){
     const wrap=document.getElementById('sp-brand-icon-wrap');if(!wrap)return;
     if(_errorTimer){clearTimeout(_errorTimer);_errorTimer=null}
@@ -69,14 +70,10 @@ export function showPanel(){
     // Reset ALL positioning inline styles before applying mode-specific ones.
     // This prevents stale styles from a previous mode (e.g. left:'0' from
     // mobile) persisting when switching back to desktop.
+    // Mobile/tablet height is CSS-driven (100dvh − topbar); do not use
+    // screen.availHeight — it overshoots the visible browser viewport.
     p.style.top='';p.style.bottom='';p.style.left='';p.style.right='';p.style.width='';p.style.height='';
     if(mode==='mobile'||mode==='tablet'){
-        const spTopH=44;
-        // Use explicit pixel height for mobile — bottom:0 is unreliable
-        // due to html{transform:translateZ(0)} containment. Desktop works
-        // with bottom:0 because per-section scrolling handles overflow.
-        const mobileH=Math.max(window.innerHeight,window.screen?.availHeight||0)-spTopH;
-        p.style.top=spTopH+'px';p.style.height=mobileH+'px';p.style.left='0';p.style.right='0';p.style.width='100vw';
         // Force-remove compact mode on mobile/tablet — fullscreen panel
         // doesn't need condensing, and compact hides char grid/goals/fertility
         p.classList.remove('sp-compact');delete p.dataset.spAutoCompact;delete p.dataset.spUserCompact;
@@ -202,6 +199,24 @@ export function createPanel(){
         if(_resizeTimer)return;
         _resizeTimer=setTimeout(()=>{_resizeTimer=null;const p=document.getElementById('sp-panel');if(p?.classList.contains('sp-visible'))showPanel();spApplyMode()},100);
     });
+    // Keyboard / URL-bar changes: re-sync mode/FAB; CSS 100dvh handles height
+    if(!_spVisualViewportWired&&window.visualViewport){
+        _spVisualViewportWired=true;
+        let _vvTimer=null;
+        const onVv=()=>{
+            if(_vvTimer)return;
+            _vvTimer=setTimeout(()=>{
+                _vvTimer=null;
+                const p=document.getElementById('sp-panel');
+                if(!p?.classList.contains('sp-visible'))return;
+                const mode=spDetectMode();
+                if(mode!=='mobile'&&mode!=='tablet')return;
+                showPanel();
+            },100);
+        };
+        window.visualViewport.addEventListener('resize',onVv);
+        window.visualViewport.addEventListener('scroll',onVv);
+    }
 
     // Easter egg: click the icon for a surprise spin
     let eggClicks=0;

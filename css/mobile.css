@@ -1,4 +1,8 @@
 /* ═══ MOBILE FAB (floating restore button — fallback) ═══ */
+:root {
+    --sp-mobile-topbar-height: calc(44px + env(safe-area-inset-top, 0px));
+}
+
 .sp-mobile-fab {
     display: none; position: fixed; bottom: 24px; right: 24px; z-index: 100000;
     width: 60px; height: 60px; border-radius: 50%;
@@ -79,6 +83,16 @@
 #sp-panel.sp-mode-mobile.sp-visible,
 #sp-panel.sp-mode-tablet.sp-visible {
     animation: sp-mobile-slide-up 0.3s ease-out;
+    top: var(--sp-mobile-topbar-height) !important;
+    bottom: auto !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: auto !important;
+    /* Fallback then dynamic viewport — never screen.availHeight */
+    height: calc(100vh - var(--sp-mobile-topbar-height)) !important;
+    height: calc(100dvh - var(--sp-mobile-topbar-height)) !important;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    box-sizing: border-box;
 }
 .sp-mobile-topbar.sp-mt-visible {
     animation: sp-mobile-topbar-in 0.25s ease-out;
@@ -100,7 +114,12 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-bar,
 body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: none !important; }
 .sp-mobile-topbar {
     display: none; position: fixed; top: 0; left: 0; right: 0; z-index: 100002;
-    height: 44px; padding: 0 14px;
+    box-sizing: border-box;
+    height: var(--sp-mobile-topbar-height);
+    padding-top: env(safe-area-inset-top, 0px);
+    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding-right: max(14px, env(safe-area-inset-right, 0px));
+    padding-bottom: 0;
     background: var(--sp-bg-solid, #12141a);
     border-bottom: none;
     align-items: center; justify-content: space-between;
@@ -125,7 +144,7 @@ body:has(#sp-panel.sp-mode-mobile.sp-visible) #top-settings-holder { display: no
 .sp-mt-minimize:hover, .sp-mt-minimize:active { background: rgba(77,184,164,0.15); border-color: rgba(77,184,164,0.5); color: #7aecd8; }
 
 #sp-panel.sp-mode-mobile {
-    width: 100vw !important; right: 0 !important; left: 0 !important;
+    right: 0 !important; left: 0 !important;
     border-left: none; border-radius: 0; font-size: var(--sp-fs-md);
 }
 #sp-panel.sp-mode-mobile .sp-toolbar {
@@ -302,4 +321,15 @@ body:has(#sp-panel.sp-mode-mobile) .sp-tour-spotlight { z-index: 100003; }
     #sp-panel.sp-mode-mobile .sp-meter-row { grid-template-columns: auto 1fr minmax(0, 60px) 30px; }
     #sp-panel.sp-mode-mobile .sp-meter-face { display: none !important; }
     #sp-panel.sp-mode-mobile .sp-sparkline { width: 28px !important; height: 12px !important; }
+}
+
+/* Single scroll surface: #sp-panel-body only (no nested section scroll) */
+#sp-panel.sp-mode-mobile .sp-section.sp-open,
+#sp-panel.sp-mode-tablet .sp-section.sp-open {
+    max-height: none;
+}
+#sp-panel.sp-mode-mobile .sp-section-content,
+#sp-panel.sp-mode-tablet .sp-section-content {
+    overflow-y: visible;
+    flex: 0 0 auto;
 }
