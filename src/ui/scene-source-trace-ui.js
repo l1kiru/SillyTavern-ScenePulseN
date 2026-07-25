@@ -87,7 +87,7 @@ function _attachmentLabel(sources) {
 /**
  * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array, omitted: number, timeline: Array, budgetOverflowed: boolean }}
  */
-export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null } = {}) {
+export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null, groupBy = 'world' } = {}) {
     const chip = formatLoreChipLabel({ settings, meta, trace });
     const view = trace ? _view(trace) : null;
     const capturedAt = view?.capturedAt || trace?.capturedAt || '';
@@ -117,12 +117,11 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null }
     if (!entries.length) {
         return { chip, capturedAt, emptyKey: 'no_activations', groups: [], omitted, timeline, budgetOverflowed };
     }
-    const map = new Map();
-    for (const entry of entries) {
-        const world = String(entry.world || '').trim() || '—';
-        if (!map.has(world)) map.set(world, []);
+    const items = entries.map(entry => {
         const matchKind = String(entry.matchKind || (entry.constant ? 'constant' : 'none'));
-        map.get(world).push({
+        const world = String(entry.world || '').trim() || '—';
+        return {
+            world,
             title: formatTraceEntryTitle(entry),
             keyLine: formatTraceEntryKeyLine(entry),
             uid: entry.uid != null ? String(entry.uid) : '',
@@ -131,22 +130,37 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null }
             matchKind,
             firstSeenLoop: entry.firstSeenLoop,
             timedEffects: entry.timedEffects || {},
+            insertion: entry.promptInsertion?.status || entry.stages?.inserted?.value || 'unknown',
+            evidenceBest: _hasInferredKey(entry)
+                ? 'inferred'
+                : (matchKind === 'constant' || matchKind === 'force' || matchKind === 'sticky' ? 'engine' : 'unknown'),
             evidenceLabel: _hasInferredKey(entry)
                 ? t('Evidence: inferred')
                 : (matchKind === 'constant' || matchKind === 'force' || matchKind === 'sticky'
                     ? t('Evidence: engine')
                     : t('Evidence: unknown')),
-        });
+        };
+    });
+
+    const map = new Map();
+    for (const item of items) {
+        let bucket = item.world;
+        if (groupBy === 'loop') bucket = item.firstSeenLoop == null ? 'unknown' : `loop ${item.firstSeenLoop}`;
+        else if (groupBy === 'activationType') bucket = item.matchKind || 'unknown';
+        else if (groupBy === 'insertion') bucket = String(item.insertion);
+        else if (groupBy === 'evidence') bucket = item.evidenceBest;
+        if (!map.has(bucket)) map.set(bucket, []);
+        map.get(bucket).push(item);
     }
-    const groups = [...map.entries()].map(([world, items]) => {
+    const groups = [...map.entries()].map(([world, groupItems]) => {
         const book = lorebookByName.get(world);
         return {
             world,
             attachment: book ? _attachmentLabel(book.attachmentSources) : '',
-            items,
+            items: groupItems,
         };
     });
-    return { chip, capturedAt, emptyKey: null, groups, omitted, timeline, budgetOverflowed };
+    return { chip, capturedAt, emptyKey: null, groups, omitted, timeline, budgetOverflowed, groupBy };
 }
 
 function _emptyMessage(emptyKey) {
