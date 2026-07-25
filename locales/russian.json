@@ -343,6 +343,7 @@
   "events": "события",
   "Every scene has a pulse. Now you can feel it.": "У каждой сцены есть пульс. Теперь вы можете его почувствовать.",
   "Every tracked AI message creates a snapshot. Select a timeline dot to restore that moment and compare how the scene evolved.": "Каждый отслеженный ответ ИИ создаёт снимок. Выберите точку на шкале, чтобы вернуть этот момент и сравнить развитие сцены.",
+  "Evidence: diagnostic": "Evidence: diagnostic",
   "Evidence: engine": "Evidence: engine",
   "Evidence: inferred": "Evidence: inferred",
   "Evidence: unknown": "Evidence: unknown",

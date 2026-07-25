@@ -1,10 +1,16 @@
 import { installConsoleIntercept } from './console-intercept.js';
-import { parseWiConsoleArgs, probeWiLogFormat, PARSER_ID } from './parsers/st-1-18.js';
+import {
+    parseWiConsoleArgs,
+    resetParserContext,
+    KNOWN_WI_KINDS,
+    PARSER_ID,
+} from './parsers/st-1-18.js';
 
 let _uninstall = null;
+/** @type {'off'|'active'|'ok'|'disabled_unknown_format'} */
 let _status = 'off';
-let _unknownStreak = 0;
 let _onEvent = null;
+/** @type {Array<{ raw: string, parsed: object|null }>} */
 const _ring = [];
 
 export function getDiagnosticsStatus() {
@@ -22,29 +28,21 @@ export function startDiagnostics({ enabled = false, onEvent = null } = {}) {
         return;
     }
     _onEvent = onEvent;
-    _unknownStreak = 0;
     _status = 'active';
     _ring.length = 0;
+    resetParserContext();
 
     const handle = (args) => {
         if (_status !== 'active') return;
         const joined = (Array.isArray(args) ? args : [args]).map(String).join(' ');
         if (!joined.includes('[WI]')) return;
         const parsed = parseWiConsoleArgs(args);
-        if (!parsed || parsed.kind === 'other') {
-            _unknownStreak++;
-            if (_unknownStreak >= 3) {
-                const probe = probeWiLogFormat([joined, joined, joined]);
-                if (!probe.ok) {
-                    _status = 'disabled_unknown_format';
-                    stopDiagnostics(false);
-                }
-            }
+        _ring.push({ raw: joined, parsed });
+        if (_ring.length > 50) _ring.shift();
+
+        if (!parsed || !KNOWN_WI_KINDS.has(parsed.kind)) {
             return;
         }
-        _unknownStreak = 0;
-        _ring.push(parsed);
-        if (_ring.length > 50) _ring.shift();
         try { _onEvent?.(parsed); } catch { /* ignore */ }
     };
 
@@ -52,10 +50,24 @@ export function startDiagnostics({ enabled = false, onEvent = null } = {}) {
     return PARSER_ID;
 }
 
-export function stopDiagnostics(resetStatus = true) {
+/**
+ * End capture and classify format from the ring (no mid-scan disable).
+ * @returns {'off'|'active'|'ok'|'disabled_unknown_format'}
+ */
+export function stopDiagnostics() {
+    if (_status === 'active') {
+        const wiLineCount = _ring.length;
+        const knownCount = _ring.filter(item => KNOWN_WI_KINDS.has(item.parsed?.kind)).length;
+        if (knownCount > 0) _status = 'ok';
+        else if (wiLineCount > 0) _status = 'disabled_unknown_format';
+        else _status = 'off';
+    }
+
     if (_uninstall) {
         try { _uninstall(); } catch { /* ignore */ }
         _uninstall = null;
     }
-    if (resetStatus && _status === 'active') _status = 'off';
+    _onEvent = null;
+    resetParserContext();
+    return _status;
 }

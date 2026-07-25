@@ -300,6 +300,46 @@ assert.equal(
     formatTraceEntryKeyLine({ matchKind: 'none', matchedKeys: [], keys: ['Alpha', 'Beta'] }),
     'key - { — }',
 );
+
+{
+    const { getBestEvidence, formatTraceEntryKeyLine: keyLine } = await import('../src/ui/scene-source-trace-ui.js');
+    const mixedDiag = {
+        matchKind: 'keys',
+        matchedKeys: ['old inference'],
+        triggers: [
+            { type: 'primary_key', matchedText: 'old inference', evidence: { type: 'inferred' } },
+            { type: 'primary_key', matchedText: 'real diagnostic key', evidence: { type: 'diagnostic' } },
+        ],
+    };
+    assert.equal(getBestEvidence(mixedDiag), 'diagnostic');
+    assert.match(keyLine(mixedDiag), /real diagnostic key/);
+    assert.ok(!keyLine(mixedDiag).includes('old inference'));
+    assert.ok(!keyLine(mixedDiag).includes('Inferred key'));
+
+    const mixedEng = {
+        matchKind: 'keys',
+        matchedKeys: ['Alpha'],
+        triggers: [
+            { type: 'primary_key', matchedText: 'Alpha', evidence: { type: 'inferred' } },
+            { type: 'primary_key', matchedText: 'Beta', evidence: { type: 'engine' } },
+        ],
+    };
+    assert.equal(getBestEvidence(mixedEng), 'engine');
+    assert.match(keyLine(mixedEng), /\{ Beta \}/);
+    assert.ok(!keyLine(mixedEng).includes('Alpha'));
+
+    const engOnly = {
+        matchKind: 'keys',
+        matchedKeys: ['Artoria'],
+        triggers: [{ type: 'primary_key', matchedText: 'Artoria', evidence: { type: 'engine' } }],
+    };
+    const model = buildTraceDrawerModel({
+        settings: { sceneSourceTrace: true },
+        meta: { injectionMethod: 'inline' },
+        trace: { v: 3, lorebook: { count: 1, entries: [engOnly] }, capabilities: { scanDone: false, engineDecisions: false, promptBuildDecisions: false } },
+    });
+    assert.equal(model.groups[0].items[0].evidenceBest, 'engine');
+}
 const line = formatTraceEntryLine({
     world: 'fate_lorebook',
     title: 'Lancer-class Servant',

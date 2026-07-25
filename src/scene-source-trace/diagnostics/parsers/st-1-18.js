@@ -1,17 +1,22 @@
 export const PARSER_ID = 'st-1.18';
 
-export function probeWiLogFormat(sampleLines) {
-    const lines = Array.isArray(sampleLines) ? sampleLines : [];
-    let wi = 0;
-    let known = 0;
-    for (const line of lines) {
-        const s = String(line || '');
-        if (!s.includes('[WI]')) continue;
-        wi++;
-        if (parseWiConsoleArgs([s])) known++;
-    }
-    if (wi === 0) return { ok: true, parserId: PARSER_ID };
-    return { ok: known > 0, parserId: PARSER_ID };
+export const KNOWN_WI_KINDS = new Set([
+    'primary_match',
+    'sticky',
+    'cooldown',
+    'delay',
+    'budget',
+]);
+
+/** @type {{ uid?: string, world?: string }|null} */
+let _lastEntryContext = null;
+
+export function resetParserContext() {
+    _lastEntryContext = null;
+}
+
+export function getParserContextForTests() {
+    return _lastEntryContext ? { ..._lastEntryContext } : null;
 }
 
 function _argText(a) {
@@ -47,6 +52,13 @@ function _keyAfterPrimaryMatch(args) {
     return undefined;
 }
 
+function _updateContext(uid, world) {
+    if (uid == null && world == null) return;
+    if (!_lastEntryContext) _lastEntryContext = {};
+    if (uid != null) _lastEntryContext.uid = String(uid);
+    if (world != null) _lastEntryContext.world = String(world);
+}
+
 /**
  * @returns {null | { kind: string, world?: string, uid?: string|number, key?: string, detail?: string }}
  */
@@ -54,11 +66,24 @@ export function parseWiConsoleArgs(args) {
     const arr = Array.isArray(args) ? args : [args];
     const text = arr.map(_argText).join(' ');
 
+    if (/---\s*START WI SCAN/i.test(text)) {
+        _lastEntryContext = null;
+    }
+
     if (!text.includes('[WI]') && !/primary key match/i.test(text) && !/sticky/i.test(text)) {
         return null;
     }
 
-    const { uid, world } = _extractUidWorld(text);
+    let { uid, world } = _extractUidWorld(text);
+    if (world != null || (uid != null && /processing/i.test(text))) {
+        _updateContext(uid, world);
+    } else if (uid != null && _lastEntryContext?.uid === String(uid) && _lastEntryContext.world) {
+        world = _lastEntryContext.world;
+    } else if (uid != null) {
+        _updateContext(uid, world);
+    }
+    if (uid != null && world != null) _updateContext(uid, world);
+
     const base = { detail: text.slice(0, 200) };
     if (uid != null) base.uid = uid;
     if (world != null) base.world = world;
@@ -83,4 +108,27 @@ export function parseWiConsoleArgs(args) {
         return { kind: 'other', ...base };
     }
     return null;
+}
+
+/** Pure probe over raw lines — does not mutate parser context. */
+export function probeWiLogFormat(sampleLines) {
+    const lines = Array.isArray(sampleLines) ? sampleLines : [];
+    let wi = 0;
+    let known = 0;
+    for (const line of lines) {
+        const s = String(line || '');
+        if (!s.includes('[WI]')) continue;
+        wi++;
+        // Lightweight kind sniff without stateful parse
+        if (/primary key match/i.test(s)
+            || /activated because active sticky/i.test(s)
+            || /is sticky/i.test(s)
+            || (/cooldown/i.test(s) && /\[WI\]/i.test(s))
+            || (/delay/i.test(s) && /\[WI\]/i.test(s))
+            || (/budget/i.test(s) && /\[WI\]/i.test(s))) {
+            known++;
+        }
+    }
+    if (wi === 0) return { ok: true, parserId: PARSER_ID };
+    return { ok: known > 0, parserId: PARSER_ID };
 }

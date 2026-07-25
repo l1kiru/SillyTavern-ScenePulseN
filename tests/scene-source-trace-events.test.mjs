@@ -30,6 +30,14 @@ import {
 }
 
 {
+    const missing = snapshotWorldInfoSettings({});
+    assert.equal(missing.scanDepth, null);
+    assert.equal(missing.budget, null);
+    const zero = snapshotWorldInfoSettings({ world_info_depth: 0 });
+    assert.equal(zero.scanDepth, 0);
+}
+
+{
     const e1 = { world: 'Fate', uid: 42, comment: 'Artoria', key: ['a'], content: 'x' };
     const map1 = new Map([['Fate.42', e1]]);
     const args1 = {
