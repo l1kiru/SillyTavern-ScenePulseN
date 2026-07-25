@@ -1,13 +1,47 @@
 // Experimental Together-mode source trace.
-// Captures compact metadata from SillyTavern's World Info activation event,
-// then resolves matched key substrings against a chat scan buffer on finish.
-// Does not scan lorebook files or call getWorldInfoPrompt.
+// Captures WI engine events + pre-gen scan context; inferred keys labeled as such.
+
+import { EvidenceLevel, evidence } from './scene-source-trace/evidence.js';
+import { migrateTraceToV3View } from './scene-source-trace/migrate.js';
+import { capturePreGenScanContext } from './scene-source-trace/scan-context.js';
+import {
+    entryKey,
+    snapshotScanDone,
+    snapshotEntriesLoaded,
+} from './scene-source-trace/event-adapters.js';
+import {
+    inferTriggersForEntry,
+    matchEntryKeys,
+    parseWiRegexKey,
+    WI_LOGIC,
+} from './scene-source-trace/matcher.js';
+import {
+    snapshotWorldInfoSettings,
+    readWiSettingsFromDom,
+} from './scene-source-trace/settings-snapshot.js';
 
 export const MAX_MATCHED_KEY_LEN = 80;
 export const MAX_LOREBOOK_JSON_BYTES = 65536;
 export const SCAN_DEPTH_FALLBACK = 10;
 
+export {
+    EvidenceLevel,
+    evidence,
+    migrateTraceToV3View,
+    capturePreGenScanContext,
+    entryKey,
+    snapshotScanDone,
+    snapshotEntriesLoaded,
+    inferTriggersForEntry,
+    matchEntryKeys,
+    parseWiRegexKey,
+    WI_LOGIC,
+    snapshotWorldInfoSettings,
+    readWiSettingsFromDom,
+};
+
 let _activeTrace = null;
+let _eventSeq = 0;
 
 function _ownerKey(owner) {
     if (!owner) return '';
@@ -31,12 +65,6 @@ function _strArray(value) {
     return s ? [s] : [];
 }
 
-function _truncateMatch(text) {
-    const s = _str(text);
-    if (!s) return '';
-    return s.length > MAX_MATCHED_KEY_LEN ? s.slice(0, MAX_MATCHED_KEY_LEN - 1) + '…' : s;
-}
-
 function _entryLike(value) {
     if (!value || typeof value !== 'object') return null;
     const entry = value.entry && typeof value.entry === 'object' ? value.entry : {};
@@ -50,6 +78,11 @@ function _entryLike(value) {
         ..._strArray(entry.keys),
         ..._strArray(entry.key),
     ];
+    const keysecondary = [
+        ..._strArray(value.keysecondary),
+        ..._strArray(value.secondaryKeys),
+        ..._strArray(entry.keysecondary),
+    ];
     const comment = _str(value.comment ?? entry.comment);
     const constant = !!(value.constant ?? entry.constant);
     const content = _str(value.content ?? entry.content);
@@ -60,9 +93,14 @@ function _entryLike(value) {
         uid,
         title: title || comment || (uid ? `#${uid}` : ''),
         keys: [...new Set(keys)],
+        keysecondary: [...new Set(keysecondary)],
+        selectiveLogic: value.selectiveLogic ?? entry.selectiveLogic ?? WI_LOGIC.AND_ANY,
+        caseSensitive: value.caseSensitive ?? entry.caseSensitive ?? null,
+        matchWholeWords: value.matchWholeWords ?? entry.matchWholeWords ?? null,
         comment,
         constant,
         tokens,
+        contentHead: content ? content.slice(0, 64) : '',
     };
 }
 
@@ -106,6 +144,8 @@ export function buildWiScanBuffer(chat, depth) {
 
 export function resolveScanDepth() {
     try {
+        const fromDom = snapshotWorldInfoSettings(readWiSettingsFromDom());
+        if (fromDom.scanDepth > 0) return fromDom.scanDepth;
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
         const fromCtx = ctx?.power_user?.world_info_depth;
         const fromGlobal = typeof power_user !== 'undefined' ? power_user?.world_info_depth : undefined;
@@ -115,60 +155,11 @@ export function resolveScanDepth() {
     return SCAN_DEPTH_FALLBACK;
 }
 
-/** Parse SillyTavern `/pattern/flags` key; invalid → null. */
-export function parseWiRegexKey(key) {
-    const s = _str(key);
-    if (!s.startsWith('/')) return null;
-    const last = s.lastIndexOf('/');
-    if (last <= 0) return null;
-    const pattern = s.slice(1, last);
-    const flags = s.slice(last + 1);
-    if (!pattern) return null;
-    try {
-        return new RegExp(pattern, flags);
-    } catch {
-        return null;
-    }
-}
-
-export function matchEntryKeys({ keys = [], constant = false } = {}, buffer = '') {
-    if (constant) return { matchedKeys: [], matchKind: 'constant' };
-    const text = String(buffer || '');
-    const lower = text.toLowerCase();
-    const matched = [];
-    const seen = new Set();
-    for (const raw of Array.isArray(keys) ? keys : []) {
-        const key = _str(raw);
-        if (!key) continue;
-        let hit = '';
-        const rx = parseWiRegexKey(key);
-        if (rx) {
-            try {
-                const m = rx.exec(text);
-                if (m && m[0]) hit = m[0];
-            } catch { /* ignore bad exec */ }
-        } else {
-            const idx = lower.indexOf(key.toLowerCase());
-            if (idx >= 0) hit = text.slice(idx, idx + key.length) || key;
-        }
-        if (!hit) continue;
-        const clipped = _truncateMatch(hit);
-        const id = clipped.toLowerCase();
-        if (seen.has(id)) continue;
-        seen.add(id);
-        matched.push(clipped);
-    }
-    return {
-        matchedKeys: matched,
-        matchKind: matched.length ? 'keys' : 'none',
-    };
-}
-
-export function applyMatchedKeysToEntries(entries, buffer) {
+export function applyMatchedKeysToEntries(entries, buffer, settings = {}) {
     return (Array.isArray(entries) ? entries : []).map(entry => {
         const tokens = Number.isFinite(entry?.tokens) ? Math.max(0, Math.round(entry.tokens)) : 0;
         try {
-            const { matchedKeys, matchKind } = matchEntryKeys(entry, buffer || '');
+            const { matchedKeys, matchKind, triggers } = inferTriggersForEntry(entry, buffer || '', settings);
             return {
                 world: entry.world || '',
                 uid: entry.uid || '',
@@ -176,6 +167,13 @@ export function applyMatchedKeysToEntries(entries, buffer) {
                 matchedKeys,
                 matchKind,
                 tokens,
+                triggers,
+                keys: entry.keys,
+                keysecondary: entry.keysecondary,
+                constant: entry.constant,
+                selectiveLogic: entry.selectiveLogic,
+                caseSensitive: entry.caseSensitive,
+                matchWholeWords: entry.matchWholeWords,
             };
         } catch {
             return {
@@ -185,9 +183,14 @@ export function applyMatchedKeysToEntries(entries, buffer) {
                 matchedKeys: [],
                 matchKind: 'none',
                 tokens,
+                triggers: [],
             };
         }
     });
+}
+
+function jsonUtf8Bytes(value) {
+    return new TextEncoder().encode(JSON.stringify(value)).byteLength;
 }
 
 export function trimLorebookForStorage(lorebook) {
@@ -197,7 +200,7 @@ export function trimLorebookForStorage(lorebook) {
         entries: Array.isArray(lorebook?.entries) ? lorebook.entries.slice() : [],
         omitted: 0,
     };
-    while (lb.entries.length && JSON.stringify(lb).length > MAX_LOREBOOK_JSON_BYTES) {
+    while (lb.entries.length && jsonUtf8Bytes(lb) > MAX_LOREBOOK_JSON_BYTES) {
         lb.entries.pop();
         lb.omitted++;
     }
@@ -206,16 +209,64 @@ export function trimLorebookForStorage(lorebook) {
     return lb;
 }
 
-export function startSceneSourceTrace(owner, { enabled = false } = {}) {
+function _pushEvent(type, source, extra = {}) {
+    if (!_activeTrace) return;
+    _activeTrace.events.push({
+        sequence: ++_eventSeq,
+        timestamp: new Date().toISOString(),
+        type,
+        source,
+        loop: extra.loop ?? null,
+        entryKey: extra.entryKey ?? null,
+        payload: extra.payload || {},
+    });
+    if (_activeTrace.events.length > 500) {
+        _activeTrace.events.splice(0, _activeTrace.events.length - 500);
+    }
+}
+
+export function startSceneSourceTrace(owner, {
+    enabled = false,
+    chat = null,
+    depth = null,
+    includeNames = false,
+    settingsRaw = null,
+} = {}) {
     if (!enabled) {
         _activeTrace = null;
         return;
     }
+    _eventSeq = 0;
+    const scanDepth = depth != null ? Number(depth) : resolveScanDepth();
+    const settings = snapshotWorldInfoSettings(
+        settingsRaw || readWiSettingsFromDom(),
+    );
+    if (!settings.scanDepth && scanDepth) settings.scanDepth = scanDepth;
+    const scanContext = capturePreGenScanContext(chat, {
+        depth: settings.scanDepth || scanDepth || SCAN_DEPTH_FALLBACK,
+        includeNames: includeNames || settings.includeNames,
+    });
     _activeTrace = {
         ownerKey: _ownerKey(owner),
+        owner: {
+            chatKey: owner?.chatKey ?? '',
+            messageId: owner?.targetMessageId ?? null,
+            swipeId: owner?.swipeId ?? null,
+        },
         startedAt: new Date().toISOString(),
         entries: [],
         totalEvents: 0,
+        scanContext,
+        settings,
+        lorebooks: [],
+        loadedEntryKeys: [],
+        titleByKey: new Map(),
+        forceKeys: new Set(),
+        loops: [],
+        events: [],
+        timedEffectsByKey: {},
+        decisions: [],
+        budgetOverflowed: false,
     };
 }
 
@@ -223,12 +274,18 @@ export function startSceneSourceTrace(owner, { enabled = false } = {}) {
 export function rebindSceneSourceTraceOwner(owner) {
     if (!_activeTrace || !owner) return false;
     _activeTrace.ownerKey = _ownerKey(owner);
+    _activeTrace.owner = {
+        chatKey: owner.chatKey ?? '',
+        messageId: owner.targetMessageId ?? null,
+        swipeId: owner.swipeId ?? null,
+    };
     return true;
 }
 
 export function recordWorldInfoActivation(payload) {
     if (!_activeTrace) return;
     _activeTrace.totalEvents++;
+    _pushEvent('world_info_activated', 'WORLD_INFO_ACTIVATED');
     for (const entry of normalizeWorldInfoEvent(payload)) {
         const id = [entry.world, entry.uid, entry.title, entry.keys.join(',')].join('|').toLowerCase();
         const exists = _activeTrace.entries.some(existing =>
@@ -237,42 +294,208 @@ export function recordWorldInfoActivation(payload) {
     }
 }
 
+export function recordWorldInfoScanDone(args) {
+    if (!_activeTrace) return;
+    const snap = snapshotScanDone(args);
+    // prompt_build phase: decisions only (Phase 4); do not append loops
+    if (snap.phase === 'prompt_build' || snap.loopCount === -1) {
+        if (snap.decisions.length) {
+            _activeTrace.decisions.push(...snap.decisions);
+        }
+        _pushEvent('scan_prompt_build', 'WORLDINFO_SCAN_DONE', {
+            loop: null,
+            payload: { phase: 'prompt_build', decisionCount: snap.decisions.length },
+        });
+        return;
+    }
+
+    const prev = new Set(
+        _activeTrace.loops.length
+            ? _activeTrace.loops[_activeTrace.loops.length - 1].acceptedEntryKeys
+            : [],
+    );
+    const newAccepted = snap.acceptedEntryKeys.filter(k => !prev.has(k));
+    _activeTrace.loops.push({
+        loopCount: snap.loopCount,
+        state: snap.state,
+        nextState: snap.nextState,
+        budgetCurrent: snap.budgetCurrent,
+        budgetOverflowed: snap.budgetOverflowed,
+        acceptedEntryKeys: snap.acceptedEntryKeys.slice(),
+        newAcceptedEntryKeys: newAccepted,
+    });
+    if (snap.budgetOverflowed) _activeTrace.budgetOverflowed = true;
+    Object.assign(_activeTrace.timedEffectsByKey, snap.timedEffectsByKey || {});
+    if (snap.decisions.length) _activeTrace.decisions.push(...snap.decisions);
+    _pushEvent('scan_loop_completed', 'WORLDINFO_SCAN_DONE', {
+        loop: snap.loopCount,
+        payload: {
+            state: snap.state,
+            newAcceptedCount: newAccepted.length,
+            budgetOverflowed: snap.budgetOverflowed,
+        },
+    });
+}
+
+export function recordWorldInfoEntriesLoaded(payload) {
+    if (!_activeTrace) return;
+    const snap = snapshotEntriesLoaded(payload);
+    _activeTrace.lorebooks = snap.lorebooks;
+    _activeTrace.loadedEntryKeys = snap.loadedEntryKeys;
+    _activeTrace.titleByKey = snap.titleByKey;
+    _pushEvent('entries_loaded', 'WORLDINFO_ENTRIES_LOADED', {
+        payload: { loadedCount: snap.loadedCount },
+    });
+}
+
+export function recordWorldInfoForceActivate(entries) {
+    if (!_activeTrace) return;
+    const list = Array.isArray(entries) ? entries : (entries?.entries || []);
+    for (const entry of list) {
+        const key = entryKey(entry?.world, entry?.uid);
+        if (key !== '::') _activeTrace.forceKeys.add(key);
+    }
+    _pushEvent('force_activate', 'WORLDINFO_FORCE_ACTIVATE', {
+        payload: { count: list.length },
+    });
+}
+
+function _emptyTrace(owner = null) {
+    return {
+        v: 3,
+        mode: 'inline',
+        capturedAt: new Date().toISOString(),
+        startedAt: '',
+        settings: {},
+        owner: owner || { chatKey: '', messageId: null, swipeId: null },
+        lorebooks: [],
+        loadedEntryKeys: [],
+        candidates: [],
+        lorebook: { count: 0, totalEvents: 0, entries: [] },
+        loops: [],
+        events: [],
+        summary: {
+            loadedEntries: 0,
+            acceptedEntries: 0,
+            candidateEntries: 0,
+            inferredTriggers: 0,
+            recursionLoops: 0,
+            budgetOverflowed: false,
+            stickyCount: 0,
+        },
+    };
+}
+
 export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
     const ownerKey = _ownerKey(owner);
     const trace = _activeTrace;
     _activeTrace = null;
     if (!trace && !forceEmpty) return null;
     if (trace && ownerKey && trace.ownerKey && trace.ownerKey !== ownerKey) {
-        return forceEmpty ? _emptyTrace() : null;
+        return forceEmpty ? _emptyTrace(owner ? {
+            chatKey: owner.chatKey ?? '',
+            messageId: owner.targetMessageId ?? null,
+            swipeId: owner.swipeId ?? null,
+        } : null) : null;
     }
 
-    let entries = [];
-    let totalEvents = 0;
-    let startedAt = '';
-    if (trace) {
-        startedAt = trace.startedAt || '';
-        totalEvents = trace.totalEvents || 0;
-        try {
-            const chat = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext?.()?.chat) || [];
-            const buffer = buildWiScanBuffer(chat, resolveScanDepth());
-            entries = applyMatchedKeysToEntries(trace.entries, buffer);
-        } catch {
-            entries = applyMatchedKeysToEntries(trace.entries, '');
+    if (!trace) return forceEmpty ? _emptyTrace() : null;
+
+    const buffer = trace.scanContext?.buffer || '';
+    const settings = trace.settings || {};
+    const matched = applyMatchedKeysToEntries(trace.entries, buffer, settings);
+
+    let inferredTriggers = 0;
+    let stickyCount = 0;
+    const finishedEntries = matched.map(entry => {
+        const key = entryKey(entry.world, entry.uid);
+        const forced = trace.forceKeys.has(key);
+        const timed = trace.timedEffectsByKey[key] || { sticky: false, cooldown: false, delay: false };
+        let triggers = Array.isArray(entry.triggers) ? entry.triggers.slice() : [];
+        let matchKind = entry.matchKind || 'none';
+        let matchedKeys = Array.isArray(entry.matchedKeys) ? entry.matchedKeys.slice() : [];
+
+        if (forced) {
+            triggers = [
+                { type: 'force_activate', evidence: evidence(EvidenceLevel.ENGINE) },
+                ...triggers.filter(t => t.type !== 'unknown'),
+            ];
+            matchKind = 'force';
+            matchedKeys = [];
+        } else if (timed.sticky && matchKind === 'none') {
+            triggers = [{ type: 'sticky', evidence: evidence(EvidenceLevel.ENGINE) }, ...triggers];
+            matchKind = 'sticky';
         }
+
+        inferredTriggers += triggers.filter(t => t.evidence?.type === EvidenceLevel.INFERRED).length;
+        if (timed.sticky) stickyCount++;
+
+        let firstSeenLoop = null;
+        for (const loop of trace.loops) {
+            if (loop.newAcceptedEntryKeys.includes(key)) {
+                firstSeenLoop = loop.loopCount;
+                break;
+            }
+        }
+
+        return {
+            world: entry.world || '',
+            uid: entry.uid || '',
+            title: entry.title || '',
+            tokens: entry.tokens || 0,
+            stages: { accepted: { value: true, evidence: EvidenceLevel.ENGINE } },
+            firstSeenLoop,
+            triggers,
+            timedEffects: timed,
+            matchedKeys,
+            matchKind,
+        };
+    });
+
+    const acceptedKeys = new Set(finishedEntries.map(e => entryKey(e.world, e.uid)));
+    const candidates = [];
+    for (const key of trace.loadedEntryKeys || []) {
+        if (acceptedKeys.has(key)) continue;
+        const meta = trace.titleByKey?.get?.(key) || {};
+        candidates.push({
+            world: meta.world || key.split('::')[0] || '',
+            uid: meta.uid || key.split('::')[1] || '',
+            title: meta.title || '',
+        });
     }
 
     const lorebook = trimLorebookForStorage({
-        count: entries.length,
-        totalEvents,
-        entries,
+        count: finishedEntries.length,
+        totalEvents: trace.totalEvents || 0,
+        entries: finishedEntries,
     });
 
+    const recursionLoops = trace.loops.filter(l => l.state === 'RECURSION').length;
+
     return {
-        v: 2,
+        v: 3,
         mode: 'inline',
         capturedAt: new Date().toISOString(),
-        startedAt,
+        startedAt: trace.startedAt || '',
+        settings,
+        owner: trace.owner || { chatKey: '', messageId: null, swipeId: null },
+        lorebooks: Array.isArray(trace.lorebooks) ? trace.lorebooks : [],
+        loadedEntryKeys: Array.isArray(trace.loadedEntryKeys) ? trace.loadedEntryKeys.slice() : [],
+        candidates,
         lorebook,
+        loops: trace.loops.slice(),
+        events: trace.events.slice(),
+        summary: {
+            loadedEntries: (trace.loadedEntryKeys || []).length,
+            acceptedEntries: lorebook.count,
+            candidateEntries: candidates.length,
+            inferredTriggers,
+            recursionLoops,
+            budgetOverflowed: !!trace.budgetOverflowed,
+            stickyCount,
+        },
+        // Phase 4 may read these before applyScanDecisions is wired in finish
+        _decisions: trace.decisions.slice(),
     };
 }
 
@@ -280,16 +503,11 @@ export function cancelSceneSourceTrace() {
     _activeTrace = null;
 }
 
-function _emptyTrace() {
-    return {
-        v: 2,
-        mode: 'inline',
-        capturedAt: new Date().toISOString(),
-        startedAt: '',
-        lorebook: { count: 0, totalEvents: 0, entries: [] },
-    };
-}
-
 export function _resetSceneSourceTraceForTests() {
     _activeTrace = null;
+    _eventSeq = 0;
+}
+
+export function _getActiveTraceForTests() {
+    return _activeTrace;
 }

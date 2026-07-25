@@ -3,6 +3,7 @@
 import { t } from '../i18n.js';
 import { esc } from '../utils.js';
 import { highlightMatchedKeysInChat } from './wi-key-highlight.js';
+import { migrateTraceToV3View, EvidenceLevel } from '../scene-source-trace/migrate.js';
 
 function _isRegexKey(key) {
     const s = String(key || '').trim();
@@ -14,15 +15,20 @@ function _mode(meta = {}, settings = {}) {
     return meta.injectionMethod || settings.injectionMethod || 'inline';
 }
 
+function _view(trace) {
+    return migrateTraceToV3View(trace) || trace;
+}
+
 /** @returns {null | string} Lore N / Lore 0 / Lore —, or null when setting off */
 export function formatLoreChipLabel({ settings = {}, meta = {}, trace = null } = {}) {
     if (settings.sceneSourceTrace !== true) return null;
     const mode = _mode(meta, settings);
     if (mode !== 'inline') return 'Lore —';
     if (!trace || typeof trace !== 'object') return 'Lore —';
-    const entries = Array.isArray(trace.lorebook?.entries) ? trace.lorebook.entries : [];
-    const count = Number.isFinite(trace.lorebook?.count) ? trace.lorebook.count : entries.length;
-    if (!trace.lorebook) return 'Lore —';
+    const view = _view(trace);
+    const entries = Array.isArray(view?.lorebook?.entries) ? view.lorebook.entries : [];
+    const count = Number.isFinite(view?.lorebook?.count) ? view.lorebook.count : entries.length;
+    if (!view?.lorebook) return 'Lore —';
     if (!entries.length && count === 0) return 'Lore 0';
     return `Lore ${count}`;
 }
@@ -35,15 +41,23 @@ function _displayKeys(entry) {
     return keys.map(String).filter(k => k && !_isRegexKey(k));
 }
 
+function _hasInferredKey(entry) {
+    const triggers = Array.isArray(entry?.triggers) ? entry.triggers : [];
+    return triggers.some(tr => tr?.type === 'primary_key' && tr?.evidence?.type === EvidenceLevel.INFERRED);
+}
+
 export function formatTraceEntryTitle(entry) {
     return String(entry?.title || entry?.comment || entry?.uid || '').trim() || '—';
 }
 
 export function formatTraceEntryKeyLine(entry) {
     if (entry?.matchKind === 'constant') return 'key - { constant }';
+    if (entry?.matchKind === 'force') return `${t('External activation')} - { external }`;
+    if (entry?.matchKind === 'sticky') return `${t('Sticky activation')} - { sticky }`;
     const keys = _displayKeys(entry);
     if (!keys.length) return 'key - { — }';
-    return `key - { ${keys.join(', ')} }`;
+    const label = _hasInferredKey(entry) ? t('Inferred key') : 'key';
+    return `${label} - { ${keys.join(', ')} }`;
 }
 
 /** title + key line (no world — world is the group header) */
@@ -52,33 +66,56 @@ export function formatTraceEntryLine(entry) {
 }
 
 function _entryMatchedKeys(entry) {
-    if (entry?.matchKind === 'constant') return [];
+    if (entry?.matchKind === 'constant' || entry?.matchKind === 'force') return [];
     if (Array.isArray(entry?.matchedKeys)) {
         return entry.matchedKeys.map(k => String(k || '').trim()).filter(Boolean);
     }
     return [];
 }
 
+function _attachmentLabel(sources) {
+    if (!Array.isArray(sources) || !sources.length) return '';
+    const map = {
+        character: t('Attachment: Character Lore'),
+        global: t('Attachment: Global Lore'),
+        chat: t('Attachment: Chat Lore'),
+        persona: t('Attachment: Persona Lore'),
+    };
+    return sources.map(s => map[s] || s).join(', ');
+}
+
 /**
- * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array<{world:string, items:Array<{title:string, keyLine:string, uid:string, tokens:number|null, matchedKeys:string[], matchKind:string}>}>, omitted: number }}
+ * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array, omitted: number, timeline: Array, budgetOverflowed: boolean }}
  */
 export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null } = {}) {
     const chip = formatLoreChipLabel({ settings, meta, trace });
-    const capturedAt = trace?.capturedAt || '';
-    const omitted = Number(trace?.lorebook?.omitted) || 0;
+    const view = trace ? _view(trace) : null;
+    const capturedAt = view?.capturedAt || trace?.capturedAt || '';
+    const omitted = Number(view?.lorebook?.omitted || trace?.lorebook?.omitted) || 0;
+    const timeline = Array.isArray(view?.loops) ? view.loops.map(l => ({
+        loopCount: l.loopCount,
+        state: l.state,
+        newAcceptedEntryKeys: l.newAcceptedEntryKeys || [],
+        budgetOverflowed: !!l.budgetOverflowed,
+    })) : [];
+    const budgetOverflowed = !!view?.summary?.budgetOverflowed;
+    const lorebookByName = new Map(
+        (Array.isArray(view?.lorebooks) ? view.lorebooks : []).map(b => [b.name || b.id, b]),
+    );
+
     if (chip == null) {
-        return { chip: null, capturedAt: '', emptyKey: null, groups: [], omitted: 0 };
+        return { chip: null, capturedAt: '', emptyKey: null, groups: [], omitted: 0, timeline: [], budgetOverflowed: false };
     }
     const mode = _mode(meta, settings);
     if (mode !== 'inline') {
-        return { chip, capturedAt, emptyKey: 'together_only', groups: [], omitted: 0 };
+        return { chip, capturedAt, emptyKey: 'together_only', groups: [], omitted: 0, timeline: [], budgetOverflowed };
     }
     if (!trace) {
-        return { chip, capturedAt: '', emptyKey: 'no_capture', groups: [], omitted: 0 };
+        return { chip, capturedAt: '', emptyKey: 'no_capture', groups: [], omitted: 0, timeline: [], budgetOverflowed };
     }
-    const entries = Array.isArray(trace.lorebook?.entries) ? trace.lorebook.entries : [];
+    const entries = Array.isArray(view?.lorebook?.entries) ? view.lorebook.entries : [];
     if (!entries.length) {
-        return { chip, capturedAt, emptyKey: 'no_activations', groups: [], omitted };
+        return { chip, capturedAt, emptyKey: 'no_activations', groups: [], omitted, timeline, budgetOverflowed };
     }
     const map = new Map();
     for (const entry of entries) {
@@ -92,10 +129,24 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null }
             tokens: Number.isFinite(entry.tokens) ? entry.tokens : null,
             matchedKeys: _entryMatchedKeys(entry),
             matchKind,
+            firstSeenLoop: entry.firstSeenLoop,
+            timedEffects: entry.timedEffects || {},
+            evidenceLabel: _hasInferredKey(entry)
+                ? t('Evidence: inferred')
+                : (matchKind === 'constant' || matchKind === 'force' || matchKind === 'sticky'
+                    ? t('Evidence: engine')
+                    : t('Evidence: unknown')),
         });
     }
-    const groups = [...map.entries()].map(([world, items]) => ({ world, items }));
-    return { chip, capturedAt, emptyKey: null, groups, omitted };
+    const groups = [...map.entries()].map(([world, items]) => {
+        const book = lorebookByName.get(world);
+        return {
+            world,
+            attachment: book ? _attachmentLabel(book.attachmentSources) : '',
+            items,
+        };
+    });
+    return { chip, capturedAt, emptyKey: null, groups, omitted, timeline, budgetOverflowed };
 }
 
 function _emptyMessage(emptyKey) {
@@ -126,7 +177,9 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
     chip.textContent = model.chip;
     chip.setAttribute('aria-expanded', 'false');
     chip.setAttribute('aria-label', t('Scene source trace'));
-    chip.title = t('Scene source trace');
+    let title = t('Scene source trace');
+    if (model.budgetOverflowed) title += ` — ${t('Budget overflowed')}`;
+    chip.title = title;
 
     const drawer = document.createElement('div');
     drawer.className = 'sp-source-trace-drawer';
@@ -139,19 +192,28 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
         try { when = new Date(model.capturedAt).toLocaleString(); } catch { /* keep raw */ }
         html += `<div class="sp-source-trace-drawer-head"><span>${esc(t('Captured'))}</span><strong>${esc(when)}</strong></div>`;
     }
+    if (model.budgetOverflowed) {
+        html += `<div class="sp-source-trace-budget">${esc(t('Budget overflowed'))}</div>`;
+    }
     if (model.emptyKey) {
         html += `<div class="sp-source-trace-empty">${esc(_emptyMessage(model.emptyKey))}</div>`;
     } else {
         html += '<div class="sp-source-trace-lore">';
         for (const group of model.groups) {
-            html += `<div class="sp-source-trace-world"><div class="sp-source-trace-world-title">${esc(group.world)} <span>${group.items.length}</span></div>`;
+            const attach = group.attachment
+                ? `<div class="sp-source-trace-attach">${esc(group.attachment)}</div>`
+                : '';
+            html += `<div class="sp-source-trace-world"><div class="sp-source-trace-world-title">${esc(group.world)} <span>${group.items.length}</span></div>${attach}`;
             for (const item of group.items) {
                 const keysJson = esc(JSON.stringify(Array.isArray(item.matchedKeys) ? item.matchedKeys : []));
                 const kind = esc(item.matchKind || 'none');
                 const summary = `<span class="sp-source-trace-entry-title">${esc(item.title)}</span><span class="sp-source-trace-entry-key">${esc(item.keyLine)}</span>`;
+                const loopLine = item.firstSeenLoop != null
+                    ? `<div class="sp-source-trace-meta"><span>${esc(t('Scan loop {{n}} · {{state}}', { n: item.firstSeenLoop, state: '' }).replace(/\s·\s$/, '') || `Loop ${item.firstSeenLoop}`)}</span><strong>${esc(String(item.firstSeenLoop))}</strong></div>`
+                    : '';
                 if (item.uid) {
                     const tokenLabel = item.tokens == null ? '—' : `~${item.tokens}`;
-                    html += `<details class="sp-source-trace-entry" data-matched-keys="${keysJson}" data-match-kind="${kind}"><summary>${summary}</summary><div class="sp-source-trace-row"><div class="sp-source-trace-meta"><span>UID</span><strong>${esc(item.uid)}</strong></div><div class="sp-source-trace-meta"><span>${esc(t('Tokens'))}</span><strong>${esc(tokenLabel)}</strong></div></div></details>`;
+                    html += `<details class="sp-source-trace-entry" data-matched-keys="${keysJson}" data-match-kind="${kind}"><summary>${summary}</summary><div class="sp-source-trace-row"><div class="sp-source-trace-meta"><span>UID</span><strong>${esc(item.uid)}</strong></div><div class="sp-source-trace-meta"><span>${esc(t('Tokens'))}</span><strong>${esc(tokenLabel)}</strong></div>${loopLine}<div class="sp-source-trace-meta"><span>${esc(item.evidenceLabel || '')}</span></div></div></details>`;
                 } else {
                     html += `<div class="sp-source-trace-line" data-matched-keys="${keysJson}" data-match-kind="${kind}">${summary}</div>`;
                 }
@@ -159,6 +221,13 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
             html += '</div>';
         }
         html += '</div>';
+        if (model.timeline.length) {
+            html += '<div class="sp-source-trace-timeline"><div class="sp-source-trace-timeline-title">Timeline</div>';
+            for (const loop of model.timeline) {
+                html += `<div class="sp-source-trace-timeline-row"><strong>${esc(String(loop.loopCount))}</strong> ${esc(loop.state)} <span>+${(loop.newAcceptedEntryKeys || []).length}</span></div>`;
+            }
+            html += '</div>';
+        }
     }
     if (model.omitted > 0) {
         html += `<div class="sp-source-trace-omitted">${esc(t('+{count} more omitted', { count: model.omitted }))}</div>`;
