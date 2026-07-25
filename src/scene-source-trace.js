@@ -28,6 +28,8 @@ import {
 import { buildInferredSegments, inferTriggerSources } from './scene-source-trace/segments.js';
 import { classifyForceEntries } from './scene-source-trace/force-source.js';
 import { explainWhyNot } from './scene-source-trace/why-not.js';
+import { startDiagnostics, stopDiagnostics, getDiagnosticsStatus } from './scene-source-trace/diagnostics/index.js';
+import { reconcileDiagnosticEvent } from './scene-source-trace/diagnostics/reconcile.js';
 
 export const MAX_MATCHED_KEY_LEN = 80;
 export const MAX_LOREBOOK_JSON_BYTES = 65536;
@@ -55,6 +57,10 @@ export {
     inferTriggerSources,
     classifyForceEntries,
     explainWhyNot,
+    startDiagnostics,
+    stopDiagnostics,
+    getDiagnosticsStatus,
+    reconcileDiagnosticEvent,
 };
 
 let _activeTrace = null;
@@ -248,7 +254,9 @@ export function startSceneSourceTrace(owner, {
     depth = null,
     includeNames = false,
     settingsRaw = null,
+    diagnostics = false,
 } = {}) {
+    stopDiagnostics();
     if (!enabled) {
         _activeTrace = null;
         return;
@@ -289,7 +297,21 @@ export function startSceneSourceTrace(owner, {
         promptCaptured: false,
         forceSource: 'external',
         segmentsExtras: { character: null, persona: null, recurseTexts: [] },
+        diagnosticEvents: [],
     };
+    if (diagnostics) {
+        startDiagnostics({
+            enabled: true,
+            onEvent: (ev) => {
+                if (_activeTrace) {
+                    _activeTrace.diagnosticEvents.push(ev);
+                    if (_activeTrace.diagnosticEvents.length > 50) {
+                        _activeTrace.diagnosticEvents.shift();
+                    }
+                }
+            },
+        });
+    }
 }
 
 /** Keep capture keyed to the final swipe when Together rebinds expected advance. */
@@ -439,6 +461,8 @@ function _emptyTrace(owner = null) {
 export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
     const ownerKey = _ownerKey(owner);
     const trace = _activeTrace;
+    const diagStatus = getDiagnosticsStatus();
+    stopDiagnostics();
     _activeTrace = null;
     if (!trace && !forceEmpty) return null;
     if (trace && ownerKey && trace.ownerKey && trace.ownerKey !== ownerKey) {
@@ -602,10 +626,20 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
         });
     }
 
+    // Reconcile optional diagnostic events (never overrides engine accepted)
+    let entriesOut = finishedEntries;
+    if (Array.isArray(trace.diagnosticEvents) && trace.diagnosticEvents.length) {
+        entriesOut = finishedEntries.map(e => {
+            let cur = e;
+            for (const ev of trace.diagnosticEvents) cur = reconcileDiagnosticEvent(cur, ev);
+            return cur;
+        });
+    }
+
     const lorebook = trimLorebookForStorage({
-        count: finishedEntries.length,
+        count: entriesOut.length,
         totalEvents: trace.totalEvents || 0,
-        entries: finishedEntries,
+        entries: entriesOut,
     });
 
     const recursionLoops = trace.loops.filter(l => l.state === 'RECURSION').length;
@@ -635,14 +669,17 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
             possiblyInsertedEntries,
         },
         _decisions: trace.decisions.slice(),
+        diagnostics: { status: diagStatus },
     };
 }
 
 export function cancelSceneSourceTrace() {
+    stopDiagnostics();
     _activeTrace = null;
 }
 
 export function _resetSceneSourceTraceForTests() {
+    stopDiagnostics();
     _activeTrace = null;
     _eventSeq = 0;
 }

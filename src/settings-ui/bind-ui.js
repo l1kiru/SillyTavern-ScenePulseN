@@ -148,6 +148,7 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     $('#sp-thought-fit').prop('checked',s.thoughtPanelFit===true);
     $('#sp-npc-graph').prop('checked',s.npcRelationshipGraph===true);
     $('#sp-scene-source-trace').prop('checked',s.sceneSourceTrace===true);
+    $('#sp-scene-source-trace-diag').prop('checked',s.sceneSourceTraceDiagnostics===true);
     $('#sp-show-weather').prop('checked',s.weatherOverlay!==false);
     $('#sp-show-timetint').prop('checked',s.timeTint!==false);
     $('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);
@@ -307,6 +308,10 @@ export function bindUI(){const s=getSettings();
         saveSettings();
         const snap=getLatestSnapshot();
         if(snap)updatePanel(normalizeTracker(snap),true);
+    });
+    $('#sp-scene-source-trace-diag').on('change',function(){
+        s.sceneSourceTraceDiagnostics=this.checked;
+        saveSettings();
     });
     $('#sp-show-weather').on('change',function(){s.weatherOverlay=this.checked;saveSettings();_spSaveLS();const cb=document.getElementById('sp-tb-weather');if(cb)cb.checked=this.checked;_syncFeatBadge();if(!this.checked)clearWeatherOverlay();else{const snap=getLatestSnapshot();if(snap){const n=normalizeTracker(snap);updateWeatherOverlay(n.weather)}}});
     $('#sp-show-timetint').on('change',function(){s.timeTint=this.checked;saveSettings();_spSaveLS();const cb=document.getElementById('sp-tb-timeTint');if(cb)cb.checked=this.checked;_syncFeatBadge();if(!this.checked)clearTimeTint();else{const snap=getLatestSnapshot();if(snap){const n=normalizeTracker(snap);updateTimeTint(n.time)}}});

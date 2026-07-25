@@ -320,9 +320,13 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             startSceneSourceTrace(_owner, {
                 enabled: s.sceneSourceTrace === true,
                 chat: _ctx.chat,
+                diagnostics: s.sceneSourceTraceDiagnostics === true,
             });
         } catch {
-            startSceneSourceTrace(_owner, { enabled: s.sceneSourceTrace === true });
+            startSceneSourceTrace(_owner, {
+                enabled: s.sceneSourceTrace === true,
+                diagnostics: s.sceneSourceTraceDiagnostics === true,
+            });
         }
         const _genStart = Date.now();
         setInlineGenStartMs(_genStart);
