@@ -30,6 +30,7 @@ import { classifyForceEntries } from './scene-source-trace/force-source.js';
 import { explainWhyNot } from './scene-source-trace/why-not.js';
 import { startDiagnostics, stopDiagnostics, getDiagnosticsStatus } from './scene-source-trace/diagnostics/index.js';
 import { reconcileDiagnosticEvent } from './scene-source-trace/diagnostics/reconcile.js';
+import { applyScanDecisions } from './scene-source-trace/apply-decisions.js';
 
 export const MAX_MATCHED_KEY_LEN = 80;
 export const MAX_LOREBOOK_JSON_BYTES = 65536;
@@ -61,6 +62,7 @@ export {
     stopDiagnostics,
     getDiagnosticsStatus,
     reconcileDiagnosticEvent,
+    applyScanDecisions,
 };
 
 let _activeTrace = null;
@@ -626,10 +628,30 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
         });
     }
 
+    // Apply engine decisions (Phase 4) onto entries + candidates
+    const entriesByKey = new Map(finishedEntries.map(e => [entryKey(e.world, e.uid), e]));
+    const candidatesByKey = new Map(candidates.map(c => [entryKey(c.world, c.uid), { ...c, triggers: [], stages: {} }]));
+    const scanDecisions = (trace.decisions || []).filter(d => d?.phase !== 'prompt_build');
+    const promptDecisions = (trace.decisions || []).filter(d => d?.phase === 'prompt_build');
+    applyScanDecisions({ entriesByKey, candidatesByKey }, scanDecisions, { phase: 'scan' });
+    if (promptDecisions.length) {
+        applyScanDecisions({ entriesByKey, candidatesByKey }, promptDecisions, { phase: 'prompt_build' });
+    }
+
+    let entriesOut = [...entriesByKey.values()];
+    const candidatesOut = [...candidatesByKey.values()].map(c => ({
+        world: c.world || '',
+        uid: c.uid || '',
+        title: c.title || '',
+        triggers: c.triggers || [],
+        selectiveEvaluation: c.selectiveEvaluation || null,
+        rejection: c.rejection || null,
+        stages: c.stages || {},
+    }));
+
     // Reconcile optional diagnostic events (never overrides engine accepted)
-    let entriesOut = finishedEntries;
     if (Array.isArray(trace.diagnosticEvents) && trace.diagnosticEvents.length) {
-        entriesOut = finishedEntries.map(e => {
+        entriesOut = entriesOut.map(e => {
             let cur = e;
             for (const ev of trace.diagnosticEvents) cur = reconcileDiagnosticEvent(cur, ev);
             return cur;
@@ -653,7 +675,7 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
         owner: trace.owner || { chatKey: '', messageId: null, swipeId: null },
         lorebooks: Array.isArray(trace.lorebooks) ? trace.lorebooks : [],
         loadedEntryKeys: Array.isArray(trace.loadedEntryKeys) ? trace.loadedEntryKeys.slice() : [],
-        candidates,
+        candidates: candidatesOut,
         lorebook,
         loops: trace.loops.slice(),
         events: trace.events.slice(),
