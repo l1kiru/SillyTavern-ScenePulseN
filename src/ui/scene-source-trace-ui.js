@@ -2,6 +2,7 @@
 
 import { t } from '../i18n.js';
 import { esc } from '../utils.js';
+import { highlightMatchedKeysInChat } from './wi-key-highlight.js';
 
 function _isRegexKey(key) {
     const s = String(key || '').trim();
@@ -46,8 +47,16 @@ export function formatTraceEntryLine(entry) {
     return [world, title, ...keys].join(' — ');
 }
 
+function _entryMatchedKeys(entry) {
+    if (entry?.matchKind === 'constant') return [];
+    if (Array.isArray(entry?.matchedKeys)) {
+        return entry.matchedKeys.map(k => String(k || '').trim()).filter(Boolean);
+    }
+    return [];
+}
+
 /**
- * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array<{world:string, items:Array<{line:string, uid:string}>}>, omitted: number }}
+ * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array<{world:string, items:Array<{line:string, uid:string, matchedKeys:string[], matchKind:string}>}>, omitted: number }}
  */
 export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null } = {}) {
     const chip = formatLoreChipLabel({ settings, meta, trace });
@@ -71,9 +80,12 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null }
     for (const entry of entries) {
         const world = String(entry.world || '').trim() || '—';
         if (!map.has(world)) map.set(world, []);
+        const matchKind = String(entry.matchKind || (entry.constant ? 'constant' : 'none'));
         map.get(world).push({
             line: formatTraceEntryLine(entry),
             uid: entry.uid != null ? String(entry.uid) : '',
+            matchedKeys: _entryMatchedKeys(entry),
+            matchKind,
         });
     }
     const groups = [...map.entries()].map(([world, items]) => ({ world, items }));
@@ -128,10 +140,12 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
         for (const group of model.groups) {
             html += `<div class="sp-source-trace-world"><div class="sp-source-trace-world-title">${esc(group.world)} <span>${group.items.length}</span></div>`;
             for (const item of group.items) {
+                const keysJson = esc(JSON.stringify(Array.isArray(item.matchedKeys) ? item.matchedKeys : []));
+                const kind = esc(item.matchKind || 'none');
                 if (item.uid) {
-                    html += `<details class="sp-source-trace-entry"><summary><span>${esc(item.line)}</span></summary><div class="sp-source-trace-row"><span>UID</span><strong>${esc(item.uid)}</strong></div></details>`;
+                    html += `<details class="sp-source-trace-entry" data-matched-keys="${keysJson}" data-match-kind="${kind}"><summary><span>${esc(item.line)}</span></summary><div class="sp-source-trace-row"><span>UID</span><strong>${esc(item.uid)}</strong></div></details>`;
                 } else {
-                    html += `<div class="sp-source-trace-line">${esc(item.line)}</div>`;
+                    html += `<div class="sp-source-trace-line" data-matched-keys="${keysJson}" data-match-kind="${kind}">${esc(item.line)}</div>`;
                 }
             }
             html += '</div>';
@@ -142,6 +156,17 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
         html += `<div class="sp-source-trace-omitted">${esc(t('+{count} more omitted', { count: model.omitted }))}</div>`;
     }
     drawer.innerHTML = html;
+
+    const onEntryClick = (e) => {
+        const entry = e?.target?.closest?.('.sp-source-trace-entry, .sp-source-trace-line');
+        if (!entry || !drawer.contains(entry)) return;
+        let keys = [];
+        try { keys = JSON.parse(entry.getAttribute('data-matched-keys') || '[]'); } catch { keys = []; }
+        if (!Array.isArray(keys) || !keys.length) return;
+        try { highlightMatchedKeysInChat(keys); } catch { /* ignore */ }
+    };
+    if (typeof drawer.addEventListener === 'function') drawer.addEventListener('click', onEntryClick);
+    else drawer.onclick = onEntryClick;
 
     const onChipClick = (e) => {
         try { e?.stopPropagation?.(); e?.preventDefault?.(); } catch { /* ignore */ }

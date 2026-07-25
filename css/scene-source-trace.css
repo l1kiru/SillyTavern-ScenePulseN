@@ -125,6 +125,15 @@
     font-size: 9px;
 }
 
+/* Temporary WI key match underline in chat (.mes_text) */
+.sp-wi-key-hit {
+    text-decoration: underline;
+    text-decoration-color: #d4a855;
+    text-underline-offset: 2px;
+    background: transparent;
+    outline: none;
+}
+
 @media (max-width: 600px) {
     .sp-source-trace-drawer { max-height: 180px; }
 }
