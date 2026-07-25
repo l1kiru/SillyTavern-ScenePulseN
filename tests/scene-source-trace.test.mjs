@@ -89,6 +89,8 @@ const {
 } = await import('../src/scene-source-trace.js');
 const {
     formatLoreChipLabel,
+    formatTraceEntryTitle,
+    formatTraceEntryKeyLine,
     formatTraceEntryLine,
     buildTraceDrawerModel,
     mountSceneSourceTrace,
@@ -199,20 +201,32 @@ assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: {
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 0, entries: [] } } }), 'Lore 0');
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 2, entries: [{}, {}] } } }), 'Lore 2');
 
+assert.equal(
+    formatTraceEntryTitle({ world: 'fate_lorebook', title: 'Lancer-class Servant', matchedKeys: ['Artoria Pendragon'], matchKind: 'keys' }),
+    'Lancer-class Servant',
+);
+assert.equal(
+    formatTraceEntryKeyLine({ matchedKeys: ['Artoria Pendragon', 'Артория Пендрагон Лансер'], matchKind: 'keys' }),
+    'key - { Artoria Pendragon, Артория Пендрагон Лансер }',
+);
+assert.equal(formatTraceEntryKeyLine({ matchKind: 'constant', matchedKeys: [] }), 'key - { constant }');
+assert.equal(formatTraceEntryKeyLine({ matchKind: 'none', matchedKeys: [] }), 'key - { — }');
 const line = formatTraceEntryLine({
     world: 'fate_lorebook',
     title: 'Lancer-class Servant',
     matchedKeys: ['Artoria Pendragon', 'Артория Пендрагон Лансер'],
     matchKind: 'keys',
 });
-assert.equal(line, 'fate_lorebook — Lancer-class Servant — Artoria Pendragon — Артория Пендрагон Лансер');
+assert.equal(line, 'Lancer-class Servant\nkey - { Artoria Pendragon, Артория Пендрагон Лансер }');
 assert.ok(!line.includes('(?:'));
 const modelKeys = buildTraceDrawerModel({
     settings: { sceneSourceTrace: true },
     meta: { injectionMethod: 'inline' },
     trace: { lorebook: { count: 1, entries: [{ world: 'A', title: 'B', matchedKeys: ['C'], matchKind: 'keys' }] } },
 });
-assert.equal(modelKeys.groups[0].items[0].line, 'A — B — C');
+assert.equal(modelKeys.groups[0].items[0].title, 'B');
+assert.equal(modelKeys.groups[0].items[0].keyLine, 'key - { C }');
+assert.equal(modelKeys.groups[0].items[0].tokens, null);
 assert.deepEqual(modelKeys.groups[0].items[0].matchedKeys, ['C']);
 assert.equal(modelKeys.groups[0].items[0].matchKind, 'keys');
 
@@ -255,6 +269,7 @@ const mounted = mountSceneSourceTrace(bodyOn, {
                         title: 'Lancer-class Servant',
                         matchedKeys: ['Artoria Pendragon'],
                         matchKind: 'keys',
+                        tokens: 12,
                     }],
                 },
             },
@@ -273,8 +288,14 @@ assert.ok(di >= 0 && fi >= 0);
 assert.equal(di, fi - 1);
 mounted.chip.click();
 assert.equal(mounted.drawer.hidden, false);
+assert.match(mounted.drawer.innerHTML, /sp-source-trace-entry-title/);
+assert.match(mounted.drawer.innerHTML, /Lancer-class Servant/);
+assert.match(mounted.drawer.innerHTML, /key - \{ Artoria Pendragon \}/);
+assert.ok(!mounted.drawer.innerHTML.includes('fate_lorebook —'));
 assert.match(mounted.drawer.innerHTML, /fate_lorebook/);
 assert.match(mounted.drawer.innerHTML, /Artoria Pendragon/);
+assert.match(mounted.drawer.innerHTML, /~12/);
+assert.match(mounted.drawer.innerHTML, /Tokens/);
 assert.match(mounted.drawer.innerHTML, /data-matched-keys="\[&quot;Artoria Pendragon&quot;\]"/);
 assert.match(mounted.drawer.innerHTML, /data-match-kind="keys"/);
 assert.ok(!mounted.drawer.innerHTML.includes(sampleRx));
