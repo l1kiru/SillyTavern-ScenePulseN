@@ -19,7 +19,18 @@ function el(tag) {
         },
         setAttribute(name, value) { this.attributes[name] = String(value); },
         getAttribute(name) { return this.attributes[name]; },
-        appendChild(child) { this.children.push(child); return child; },
+        appendChild(child) {
+            this.children.push(child);
+            child.parentNode = this;
+            return child;
+        },
+        insertBefore(child, ref) {
+            const i = this.children.indexOf(ref);
+            if (i < 0) this.children.push(child);
+            else this.children.splice(i, 0, child);
+            child.parentNode = this;
+            return child;
+        },
         addEventListener(type, fn) {
             this._listeners = this._listeners || {};
             (this._listeners[type] = this._listeners[type] || []).push(fn);
@@ -223,6 +234,12 @@ const mounted = mountSceneSourceTrace(bodyOn, {
 assert.ok(mounted);
 assert.equal(mounted.chip.textContent, 'Lore 1');
 assert.ok(mounted.drawer.hidden);
+// Drawer must sit immediately before footer (visible above margin-top:auto footer)
+const kids = bodyOn.children;
+const di = kids.indexOf(mounted.drawer);
+const fi = kids.indexOf(footer);
+assert.ok(di >= 0 && fi >= 0);
+assert.equal(di, fi - 1);
 mounted.chip.click();
 assert.equal(mounted.drawer.hidden, false);
 assert.match(mounted.drawer.innerHTML, /fate_lorebook/);
