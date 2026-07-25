@@ -1,37 +1,41 @@
 import { EvidenceLevel, evidence } from '../evidence.js';
 import { entryKey } from '../event-adapters.js';
 
-/** Whether a diagnostic event is targeted at this lorebook entry. */
-export function diagnosticEventMatchesEntry(entry, diagEvent) {
-    if (!entry || !diagEvent) return false;
+function _entryKeys(entry) {
+    return [
+        ...(Array.isArray(entry?.keys) ? entry.keys : []),
+        ...(Array.isArray(entry?.key) ? entry.key : []),
+        ...(Array.isArray(entry?.matchedKeys) ? entry.matchedKeys : []),
+    ].map(String);
+}
+
+/**
+ * Resolve which lorebook entry a diagnostic event targets.
+ * @returns {string|null} entryKey or null when ambiguous / untargeted
+ */
+export function resolveDiagnosticTarget(entries, diagEvent) {
+    if (!diagEvent || !Array.isArray(entries)) return null;
 
     if (diagEvent.world != null && String(diagEvent.world) !== ''
         && diagEvent.uid != null && String(diagEvent.uid) !== '') {
-        return entryKey(entry.world, entry.uid) === entryKey(diagEvent.world, diagEvent.uid);
-    }
-
-    if (diagEvent.uid != null && String(diagEvent.uid) !== '') {
-        return String(entry.uid) === String(diagEvent.uid);
+        const key = entryKey(diagEvent.world, diagEvent.uid);
+        return entries.some(e => entryKey(e.world, e.uid) === key) ? key : null;
     }
 
     if (diagEvent.kind === 'primary_match' && diagEvent.key) {
         const needle = String(diagEvent.key);
-        const keys = [
-            ...(Array.isArray(entry.keys) ? entry.keys : []),
-            ...(Array.isArray(entry.key) ? entry.key : []),
-            ...(Array.isArray(entry.matchedKeys) ? entry.matchedKeys : []),
-        ].map(String);
-        return keys.includes(needle);
+        const matches = entries.filter(e => _entryKeys(e).includes(needle));
+        if (matches.length === 1) return entryKey(matches[0].world, matches[0].uid);
+        return null;
     }
 
-    // No targeting info — never broadcast to every entry.
-    return false;
+    // No world+uid and not a uniquely keyed primary — refuse (incl. uid-only).
+    return null;
 }
 
-/** Merge diagnostic fact without overriding engine accepted stage. */
+/** Merge diagnostic fact without overriding engine accepted stage. Caller must target. */
 export function reconcileDiagnosticEvent(entry, diagEvent) {
     if (!entry || !diagEvent) return entry;
-    if (!diagnosticEventMatchesEntry(entry, diagEvent)) return entry;
 
     const out = {
         ...entry,

@@ -1,7 +1,7 @@
 // Experimental Together-mode source trace.
 // Captures WI engine events + pre-gen scan context; inferred keys labeled as such.
 
-import { EvidenceLevel, evidence } from './scene-source-trace/evidence.js';
+import { EvidenceLevel, evidence, getBestEvidence } from './scene-source-trace/evidence.js';
 import { migrateTraceToV3View } from './scene-source-trace/migrate.js';
 import { capturePreGenScanContext, normalizeScanDepth } from './scene-source-trace/scan-context.js';
 import {
@@ -30,8 +30,27 @@ import { buildInferredSegments, inferTriggerSources } from './scene-source-trace
 import { classifyForceEntries } from './scene-source-trace/force-source.js';
 import { explainWhyNot } from './scene-source-trace/why-not.js';
 import { startDiagnostics, stopDiagnostics, getDiagnosticsStatus } from './scene-source-trace/diagnostics/index.js';
-import { reconcileDiagnosticEvent } from './scene-source-trace/diagnostics/reconcile.js';
+import {
+    reconcileDiagnosticEvent,
+    resolveDiagnosticTarget,
+} from './scene-source-trace/diagnostics/reconcile.js';
 import { applyScanDecisions } from './scene-source-trace/apply-decisions.js';
+
+function _defaultCapabilities() {
+    return {
+        scanDone: false,
+        engineDecisions: false,
+        promptBuildDecisions: false,
+    };
+}
+
+function _defaultTelemetry() {
+    return {
+        scanDoneObserved: false,
+        decisionsFieldObserved: false,
+        promptBuildPhaseObserved: false,
+    };
+}
 
 export const MAX_MATCHED_KEY_LEN = 80;
 export const MAX_LOREBOOK_JSON_BYTES = 65536;
@@ -40,6 +59,7 @@ export const SCAN_DEPTH_FALLBACK = 10;
 export {
     EvidenceLevel,
     evidence,
+    getBestEvidence,
     migrateTraceToV3View,
     capturePreGenScanContext,
     normalizeScanDepth,
@@ -65,6 +85,7 @@ export {
     stopDiagnostics,
     getDiagnosticsStatus,
     reconcileDiagnosticEvent,
+    resolveDiagnosticTarget,
     applyScanDecisions,
 };
 
@@ -125,6 +146,10 @@ function _entryLike(value) {
         selectiveLogic: value.selectiveLogic ?? entry.selectiveLogic ?? WI_LOGIC.AND_ANY,
         caseSensitive: value.caseSensitive ?? entry.caseSensitive ?? null,
         matchWholeWords: value.matchWholeWords ?? entry.matchWholeWords ?? null,
+        vectorized: value.vectorized ?? entry.vectorized ?? null,
+        probability: value.probability ?? entry.probability ?? null,
+        useProbability: value.useProbability ?? entry.useProbability ?? null,
+        scanDepth: value.scanDepth ?? entry.scanDepth ?? null,
         comment,
         constant,
         tokens,
@@ -311,6 +336,7 @@ export function startSceneSourceTrace(owner, {
         forceSource: 'external',
         segmentsExtras: { character: null, persona: null, recurseTexts: [] },
         diagnosticEvents: [],
+        telemetry: _defaultTelemetry(),
     };
     if (diagnostics) {
         startDiagnostics({
@@ -353,6 +379,16 @@ export function recordWorldInfoActivation(payload) {
 
 export function recordWorldInfoScanDone(args) {
     if (!_activeTrace) return;
+    _activeTrace.telemetry.scanDoneObserved = true;
+    if (
+        Object.prototype.hasOwnProperty.call(args ?? {}, 'decisions')
+        && Array.isArray(args.decisions)
+    ) {
+        _activeTrace.telemetry.decisionsFieldObserved = true;
+    }
+    if (args?.phase === 'prompt_build') {
+        _activeTrace.telemetry.promptBuildPhaseObserved = true;
+    }
     const snap = snapshotScanDone(args);
     // prompt_build phase: decisions only (Phase 4); do not append loops
     if (snap.phase === 'prompt_build' || snap.loopCount === -1) {
@@ -468,14 +504,15 @@ function _emptyTrace(owner = null) {
             insertedEntries: 0,
             possiblyInsertedEntries: 0,
         },
+        capabilities: _defaultCapabilities(),
+        diagnostics: { status: 'off' },
     };
 }
 
 export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
     const ownerKey = _ownerKey(owner);
     const trace = _activeTrace;
-    const diagStatus = getDiagnosticsStatus();
-    stopDiagnostics();
+    const diagStatus = stopDiagnostics();
     _activeTrace = null;
     if (!trace && !forceEmpty) return null;
     if (trace && ownerKey && trace.ownerKey && trace.ownerKey !== ownerKey) {
@@ -609,12 +646,15 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
                 inserted: { value: insertedStage, evidence: promptInsertion.evidence.type },
             },
             configuration: {
-                constant: !!raw.constant,
-                vectorized: false,
-                selective: Array.isArray(raw.keysecondary) && raw.keysecondary.length > 0,
-                selectiveLogic: raw.selectiveLogic ?? 0,
-                probability: 100,
-                scanDepth: null,
+                constant: raw.constant ?? null,
+                vectorized: raw.vectorized ?? null,
+                selective: Array.isArray(raw.keysecondary)
+                    ? raw.keysecondary.length > 0
+                    : null,
+                selectiveLogic: raw.selectiveLogic ?? null,
+                probability: raw.probability ?? null,
+                useProbability: raw.useProbability ?? null,
+                scanDepth: raw.scanDepth ?? null,
                 caseSensitive: raw.caseSensitive ?? null,
                 matchWholeWords: raw.matchWholeWords ?? null,
             },
@@ -661,14 +701,25 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
         stages: c.stages || {},
     }));
 
-    // Reconcile optional diagnostic events (never overrides engine accepted)
+    // Reconcile optional diagnostic events (targeted; never broadcast)
     if (Array.isArray(trace.diagnosticEvents) && trace.diagnosticEvents.length) {
-        entriesOut = entriesOut.map(e => {
-            let cur = e;
-            for (const ev of trace.diagnosticEvents) cur = reconcileDiagnosticEvent(cur, ev);
-            return cur;
-        });
+        for (const ev of trace.diagnosticEvents) {
+            const targetKey = resolveDiagnosticTarget(entriesOut, ev);
+            if (!targetKey) continue;
+            entriesOut = entriesOut.map(entry => (
+                entryKey(entry.world, entry.uid) === targetKey
+                    ? reconcileDiagnosticEvent(entry, ev)
+                    : entry
+            ));
+        }
     }
+
+    const telemetry = trace.telemetry || _defaultTelemetry();
+    const capabilities = {
+        scanDone: !!telemetry.scanDoneObserved,
+        engineDecisions: !!telemetry.decisionsFieldObserved,
+        promptBuildDecisions: !!telemetry.promptBuildPhaseObserved,
+    };
 
     const lorebook = trimLorebookForStorage({
         count: entriesOut.length,
@@ -703,6 +754,7 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
             possiblyInsertedEntries,
         },
         _decisions: trace.decisions.slice(),
+        capabilities,
         diagnostics: { status: diagStatus },
     };
 }

@@ -21,6 +21,11 @@ import { migrateTraceToV3View, EvidenceLevel } from '../src/scene-source-trace/m
     assert.equal(view.lorebook.entries[0].triggers[0].evidence.type, EvidenceLevel.INFERRED);
     assert.deepEqual(view.loops, []);
     assert.equal(view.summary.acceptedEntries, 1);
+    assert.deepEqual(view.capabilities, {
+        scanDone: false,
+        engineDecisions: false,
+        promptBuildDecisions: false,
+    });
 }
 
 {
