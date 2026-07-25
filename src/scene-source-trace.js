@@ -24,6 +24,7 @@ import {
     extractWiSlotsFromPromptChat,
     extractTextCompletionSlots,
     matchFingerprintInSlots,
+    resolvePromptSlots,
 } from './scene-source-trace/prompt-insertion.js';
 import { buildInferredSegments, inferTriggerSources } from './scene-source-trace/segments.js';
 import { classifyForceEntries } from './scene-source-trace/force-source.js';
@@ -54,6 +55,7 @@ export {
     extractWiSlotsFromPromptChat,
     extractTextCompletionSlots,
     matchFingerprintInSlots,
+    resolvePromptSlots,
     buildInferredSegments,
     inferTriggerSources,
     classifyForceEntries,
@@ -490,29 +492,30 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
         if (!persona && ctx?.powerUserSettings) persona = { description: ctx.powerUserSettings.persona_description };
     } catch { /* ignore */ }
 
-    const segments = buildInferredSegments({
-        chat: null, // use buffer-derived window via message rebuild below
-        depth: settings.scanDepth || SCAN_DEPTH_FALLBACK,
+    // Segments from frozen pre-gen messages — never re-read live/regen chat.
+    const frozenMsgs = Array.isArray(trace.scanContext?.messages)
+        ? trace.scanContext.messages
+        : [];
+    let segments = buildInferredSegments({
+        chat: frozenMsgs.map(m => ({ mes: m.mes, name: m.name })),
+        depth: frozenMsgs.length || settings.scanDepth || SCAN_DEPTH_FALLBACK,
         includeNames: settings.includeNames,
         character,
         persona,
         recurseTexts: trace.segmentsExtras?.recurseTexts || [],
     });
-    // Rebuild chat segments from scanContext messageIds if we still have chat on context
-    try {
-        const chat = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext?.()?.chat) || [];
-        const pre = buildInferredSegments({
-            chat: Array.isArray(chat) ? chat.slice(0, Math.max(...(trace.scanContext?.messageIds || [0])) + 1) : [],
-            depth: settings.scanDepth || SCAN_DEPTH_FALLBACK,
-            includeNames: settings.includeNames,
-            character,
-            persona,
-            recurseTexts: trace.segmentsExtras?.recurseTexts || [],
+    if (frozenMsgs.length) {
+        // buildInferredSegments uses 0..n-1; map back to capture-time messageIds.
+        segments = segments.map(seg => {
+            if (seg.messageId == null) return seg;
+            const snap = frozenMsgs[seg.messageId];
+            return snap ? { ...seg, messageId: snap.messageId } : seg;
         });
-        if (pre.length) segments.splice(0, segments.length, ...pre);
-    } catch {
-        // fall back: single chat_message segment from buffer
-        if (buffer) segments.unshift({ type: 'chat_message', messageId: null, depth: 1, text: buffer });
+    } else if (buffer) {
+        segments = [
+            { type: 'chat_message', messageId: null, depth: 1, text: buffer },
+            ...segments.filter(s => s.type !== 'chat_message' && s.type !== 'speaker_name'),
+        ];
     }
 
     const matched = applyMatchedKeysToEntries(trace.entries, buffer, settings);
@@ -521,21 +524,21 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
     let stickyCount = 0;
     let insertedEntries = 0;
     let possiblyInsertedEntries = 0;
-    const promptSlots = trace.promptSlotsCc || trace.promptSlotsTc || null;
+    const promptSlots = resolvePromptSlots(trace.promptSlotsCc, trace.promptSlotsTc);
 
     const finishedEntries = matched.map((entry, idx) => {
         const raw = trace.entries[idx] || entry;
         const key = entryKey(entry.world, entry.uid);
         const forced = trace.forceKeys.has(key);
         const timed = trace.timedEffectsByKey[key] || { sticky: false, cooldown: false, delay: false };
-        let triggers = inferTriggerSources(raw, segments, settings);
-        if (!triggers.length) triggers = Array.isArray(entry.triggers) ? entry.triggers.slice() : [];
+        // Buffer match is authoritative; segment infer only attributes source for those keys.
         let matchKind = entry.matchKind || 'none';
         let matchedKeys = Array.isArray(entry.matchedKeys) ? entry.matchedKeys.slice() : [];
-        if (triggers.some(t => t.matchedText)) {
-            matchedKeys = [...new Set(triggers.filter(t => t.matchedText).map(t => t.matchedText))];
-            if (matchKind === 'none') matchKind = 'keys';
-        }
+        const allowed = new Set(matchedKeys.map(String));
+        let triggers = inferTriggerSources(raw, segments, settings).filter(t => (
+            !t.matchedText || allowed.has(String(t.matchedText))
+        ));
+        if (!triggers.length) triggers = Array.isArray(entry.triggers) ? entry.triggers.slice() : [];
 
         if (forced) {
             triggers = [

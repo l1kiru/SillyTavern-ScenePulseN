@@ -32,6 +32,36 @@ export function extractTextCompletionSlots(eventData) {
     return { textCompletionPrompt: p };
 }
 
+/** True when any WI / TC slot family has non-empty text. */
+export function slotsHaveContent(slots) {
+    if (!slots || typeof slots !== 'object') return false;
+    if (slots.worldInfoBefore || slots.worldInfoAfter || slots.textCompletionPrompt) return true;
+    if ((slots.depthTexts || []).some(Boolean)) return true;
+    if ((slots.otherWi || []).some(Boolean)) return true;
+    return false;
+}
+
+/**
+ * Prefer slots that actually contain text. An empty CC capture must not
+ * block matching against a non-empty TC prompt.
+ */
+export function resolvePromptSlots(cc, tc) {
+    const a = slotsHaveContent(cc) ? cc : null;
+    const b = slotsHaveContent(tc) ? tc : null;
+    if (a && b) {
+        return {
+            ...a,
+            ...b,
+            worldInfoBefore: a.worldInfoBefore || b.worldInfoBefore || '',
+            worldInfoAfter: a.worldInfoAfter || b.worldInfoAfter || '',
+            textCompletionPrompt: a.textCompletionPrompt || b.textCompletionPrompt || '',
+            depthTexts: [...(a.depthTexts || []), ...(b.depthTexts || [])],
+            otherWi: [...(a.otherWi || []), ...(b.otherWi || [])],
+        };
+    }
+    return a || b || cc || tc || null;
+}
+
 /**
  * @param {{ hash: string, length: number }} fingerprint
  * @param {object} slots

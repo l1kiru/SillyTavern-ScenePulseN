@@ -178,6 +178,34 @@ assert.ok(new TextEncoder().encode(JSON.stringify(trimLorebookForStorage(fat))).
     assert.equal(causal.lorebook.entries[0].matchKind, 'none');
 }
 
+// Regen: live chat rewritten at same messageId must not invent keys / override buffer match
+{
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace(
+        { chatKey: 'c', targetMessageId: 1, swipeId: 1 },
+        {
+            enabled: true,
+            chat: [
+                { mes: 'user said hello' },
+                { mes: 'old assistant without the key' },
+            ],
+            depth: 10,
+        },
+    );
+    recordWorldInfoActivation([{ world: 'W', uid: 2, comment: 'E', key: ['SecretKey'], content: 'x' }]);
+    globalThis.SillyTavern.getContext = () => ({
+        chat: [
+            { mes: 'user said hello' },
+            { mes: 'SecretKey appears only after regen' },
+        ],
+        power_user: { world_info_depth: 10 },
+    });
+    const regen = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 1 });
+    assert.deepEqual(regen.lorebook.entries[0].matchedKeys, []);
+    assert.equal(regen.lorebook.entries[0].matchKind, 'none');
+    assert.ok(!(regen.lorebook.entries[0].triggers || []).some(t => t.matchedText === 'SecretKey'));
+}
+
 // Artoria compound regex fixture
 {
     const fixture = (await import('./fixtures/wi-artoria-regex.json', { with: { type: 'json' } })).default;
