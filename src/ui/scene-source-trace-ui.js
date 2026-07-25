@@ -3,7 +3,10 @@
 import { t } from '../i18n.js';
 import { esc } from '../utils.js';
 import { highlightMatchedKeysInChat } from './wi-key-highlight.js';
-import { migrateTraceToV3View, EvidenceLevel } from '../scene-source-trace/migrate.js';
+import { migrateTraceToV3View } from '../scene-source-trace/migrate.js';
+import { EvidenceLevel, getBestEvidence } from '../scene-source-trace/evidence.js';
+
+export { getBestEvidence };
 
 function _mode(meta = {}, settings = {}) {
     return meta.injectionMethod || settings.injectionMethod || 'inline';
@@ -11,6 +14,21 @@ function _mode(meta = {}, settings = {}) {
 
 function _view(trace) {
     return migrateTraceToV3View(trace) || trace;
+}
+
+function _evidenceLabel(best) {
+    if (best === EvidenceLevel.INFERRED) return t('Evidence: inferred');
+    if (best === EvidenceLevel.DIAGNOSTIC) return t('Evidence: diagnostic');
+    if (best === EvidenceLevel.ENGINE) return t('Evidence: engine');
+    return t('Evidence: unknown');
+}
+
+function _defaultCapabilities(view) {
+    return view?.capabilities || {
+        scanDone: false,
+        engineDecisions: false,
+        promptBuildDecisions: false,
+    };
 }
 
 /** @returns {null | string} Lore N / Lore 0 / Lore —, or null when setting off */
@@ -28,19 +46,18 @@ export function formatLoreChipLabel({ settings = {}, meta = {}, trace = null } =
 }
 
 function _displayKeys(entry) {
-    // Only show keys that were actually matched (engine or inferred) — never dump entry.key list.
-    if (Array.isArray(entry?.matchedKeys) && entry.matchedKeys.length) {
-        return entry.matchedKeys.map(String).filter(Boolean);
-    }
-    const fromTriggers = (Array.isArray(entry?.triggers) ? entry.triggers : [])
-        .filter(tr => tr?.type === 'primary_key' && tr.matchedText)
+    const bestEvidence = getBestEvidence(entry);
+    const triggerKeys = (entry?.triggers ?? [])
+        .filter(tr =>
+            tr?.type === 'primary_key'
+            && tr?.matchedText
+            && tr?.evidence?.type === bestEvidence,
+        )
         .map(tr => String(tr.matchedText));
-    return [...new Set(fromTriggers)];
-}
-
-function _hasInferredKey(entry) {
-    const triggers = Array.isArray(entry?.triggers) ? entry.triggers : [];
-    return triggers.some(tr => tr?.type === 'primary_key' && tr?.evidence?.type === EvidenceLevel.INFERRED);
+    if (triggerKeys.length) return [...new Set(triggerKeys)];
+    return Array.isArray(entry?.matchedKeys)
+        ? [...new Set(entry.matchedKeys.map(String).filter(Boolean))]
+        : [];
 }
 
 export function formatTraceEntryTitle(entry) {
@@ -53,7 +70,8 @@ export function formatTraceEntryKeyLine(entry) {
     if (entry?.matchKind === 'sticky') return `${t('Sticky activation')} - { sticky }`;
     const keys = _displayKeys(entry);
     if (!keys.length) return 'key - { — }';
-    const label = _hasInferredKey(entry) ? t('Inferred key') : 'key';
+    const best = getBestEvidence(entry);
+    const label = best === EvidenceLevel.INFERRED ? t('Inferred key') : 'key';
     return `${label} - { ${keys.join(', ')} }`;
 }
 
@@ -64,10 +82,7 @@ export function formatTraceEntryLine(entry) {
 
 function _entryMatchedKeys(entry) {
     if (entry?.matchKind === 'constant' || entry?.matchKind === 'force') return [];
-    if (Array.isArray(entry?.matchedKeys)) {
-        return entry.matchedKeys.map(k => String(k || '').trim()).filter(Boolean);
-    }
-    return [];
+    return _displayKeys(entry);
 }
 
 function _attachmentLabel(sources) {
@@ -100,19 +115,20 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null, 
         (Array.isArray(view?.lorebooks) ? view.lorebooks : []).map(b => [b.name || b.id, b]),
     );
 
+    const capsEmpty = _defaultCapabilities(view);
     if (chip == null) {
-        return { chip: null, capturedAt: '', emptyKey: null, groups: [], omitted: 0, timeline: [], budgetOverflowed: false };
+        return { chip: null, capturedAt: '', emptyKey: null, groups: [], omitted: 0, timeline: [], budgetOverflowed: false, capabilities: capsEmpty };
     }
     const mode = _mode(meta, settings);
     if (mode !== 'inline') {
-        return { chip, capturedAt, emptyKey: 'together_only', groups: [], omitted: 0, timeline: [], budgetOverflowed };
+        return { chip, capturedAt, emptyKey: 'together_only', groups: [], omitted: 0, timeline: [], budgetOverflowed, capabilities: capsEmpty };
     }
     if (!trace) {
-        return { chip, capturedAt: '', emptyKey: 'no_capture', groups: [], omitted: 0, timeline: [], budgetOverflowed };
+        return { chip, capturedAt: '', emptyKey: 'no_capture', groups: [], omitted: 0, timeline: [], budgetOverflowed, capabilities: capsEmpty };
     }
     const entries = Array.isArray(view?.lorebook?.entries) ? view.lorebook.entries : [];
     if (!entries.length) {
-        return { chip, capturedAt, emptyKey: 'no_activations', groups: [], omitted, timeline, budgetOverflowed };
+        return { chip, capturedAt, emptyKey: 'no_activations', groups: [], omitted, timeline, budgetOverflowed, capabilities: capsEmpty };
     }
     const items = entries.map(entry => {
         const matchKind = String(entry.matchKind || (entry.constant ? 'constant' : 'none'));
@@ -128,16 +144,11 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null, 
             firstSeenLoop: entry.firstSeenLoop,
             timedEffects: entry.timedEffects || {},
             insertion: entry.promptInsertion?.status || entry.stages?.inserted?.value || 'unknown',
-            evidenceBest: _hasInferredKey(entry)
-                ? 'inferred'
-                : (matchKind === 'constant' || matchKind === 'force' || matchKind === 'sticky' ? 'engine' : 'unknown'),
-            evidenceLabel: _hasInferredKey(entry)
-                ? t('Evidence: inferred')
-                : (matchKind === 'constant' || matchKind === 'force' || matchKind === 'sticky'
-                    ? t('Evidence: engine')
-                    : t('Evidence: unknown')),
+            evidenceBest: getBestEvidence(entry),
+            evidenceLabel: _evidenceLabel(getBestEvidence(entry)),
         };
     });
+    const capabilities = _defaultCapabilities(view);
 
     const map = new Map();
     for (const item of items) {
@@ -157,7 +168,17 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null, 
             items: groupItems,
         };
     });
-    return { chip, capturedAt, emptyKey: null, groups, omitted, timeline, budgetOverflowed, groupBy };
+    return {
+        chip,
+        capturedAt,
+        emptyKey: null,
+        groups,
+        omitted,
+        timeline,
+        budgetOverflowed,
+        groupBy,
+        capabilities,
+    };
 }
 
 function _emptyMessage(emptyKey) {

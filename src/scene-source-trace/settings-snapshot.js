@@ -1,8 +1,9 @@
 /** Map ST world_info_* fields → v3 settings. Tests inject plain objects. */
 export function snapshotWorldInfoSettings(raw = {}) {
-    const n = (v, d = 0) => {
-        const x = Number(v);
-        return Number.isFinite(x) ? x : d;
+    const n = (value, fallback = null) => {
+        if (value == null || value === '') return fallback;
+        const number = Number(value);
+        return Number.isFinite(number) ? number : fallback;
     };
     return {
         scanDepth: n(raw.world_info_depth ?? raw.scanDepth),

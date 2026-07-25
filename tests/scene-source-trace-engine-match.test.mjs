@@ -152,6 +152,58 @@ import {
     assert.deepEqual(entry.matchedKeys, ['Beta']);
     assert.ok(!entry.triggers.some(t => t.type === 'primary_key' && t.evidence?.type === 'inferred'));
     assert.equal(entry.triggers.find(t => t.type === 'primary_key')?.matchedText, 'Beta');
+    assert.equal(eng.capabilities.engineDecisions, true);
+    assert.equal(eng.capabilities.scanDone, true);
+}
+
+{
+    // Activation without SCAN_DONE → scanDone false
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 }, {
+        enabled: true, chat: [{ mes: 'hi' }],
+    });
+    recordWorldInfoActivation([{ world: 'W', uid: 1, key: ['k'], comment: 'E', content: 'x' }]);
+    const actOnly = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    assert.equal(actOnly.capabilities.scanDone, false);
+    assert.equal(actOnly.capabilities.engineDecisions, false);
+}
+
+{
+    // Stock SCAN_DONE: no decisions field
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 }, {
+        enabled: true, chat: [{ mes: 'Artoria' }],
+    });
+    recordWorldInfoScanDone({
+        state: { current: 1, next: 0, loopCount: 0 },
+        activated: { entries: new Map([['W.1', { world: 'W', uid: 1, key: ['Artoria'], content: 'x' }]]), text: 'x' },
+        budget: { current: 1, overflowed: false },
+        timedEffects: { isEffectActive: () => false },
+    });
+    recordWorldInfoActivation([{ world: 'W', uid: 1, key: ['Artoria'], content: 'x', comment: 'E' }]);
+    const stock = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    assert.equal(stock.capabilities.scanDone, true);
+    assert.equal(stock.capabilities.engineDecisions, false);
+    assert.ok(!stock.lorebook.entries[0].triggers.some(t =>
+        t.type === 'primary_key' && t.evidence?.type === 'engine'));
+}
+
+{
+    // Patched contract present with empty decisions array
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 }, {
+        enabled: true, chat: [{ mes: 'hi' }],
+    });
+    recordWorldInfoScanDone({
+        state: { current: 1, next: 0, loopCount: 0 },
+        activated: { entries: new Map(), text: '' },
+        budget: { current: 1, overflowed: false },
+        decisions: [],
+        timedEffects: { isEffectActive: () => false },
+    });
+    const patchedEmpty = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    assert.equal(patchedEmpty.capabilities.scanDone, true);
+    assert.equal(patchedEmpty.capabilities.engineDecisions, true);
 }
 
 {

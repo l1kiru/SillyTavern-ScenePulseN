@@ -68,5 +68,10 @@ export function migrateTraceToV3View(trace) {
             budgetOverflowed: false,
             stickyCount: 0,
         },
+        capabilities: {
+            scanDone: false,
+            engineDecisions: false,
+            promptBuildDecisions: false,
+        },
     };
 }
