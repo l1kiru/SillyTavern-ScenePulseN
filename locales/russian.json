@@ -195,6 +195,7 @@
   "Compatibility": "Совместимость",
   "Compatible:": "Совместимы:",
   "Compatible (short — best with heavy presets)": "Совместимый (краткий — лучше с тяжёлыми пресетами)",
+  "Compatible/Full Together framing and updated Separate slot defaults apply only after you Clear legacy system prompt.": "Обрамление Compatible/Full в режиме Together и обновлённые значения слотов по умолчанию для Separate применяются только после нажатия «Удалить устаревший промпт».",
   "Completed": "Завершён",
   "component": "компонент",
   "Component": "Компонент",
