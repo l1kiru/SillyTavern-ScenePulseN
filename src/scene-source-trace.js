@@ -52,6 +52,8 @@ function _entryLike(value) {
     ];
     const comment = _str(value.comment ?? entry.comment);
     const constant = !!(value.constant ?? entry.constant);
+    const content = _str(value.content ?? entry.content);
+    const tokens = content ? Math.round(content.length / 4) : 0;
     if (!uid && !title && !keys.length && !comment && !constant) return null;
     return {
         world,
@@ -60,6 +62,7 @@ function _entryLike(value) {
         keys: [...new Set(keys)],
         comment,
         constant,
+        tokens,
     };
 }
 
@@ -163,6 +166,7 @@ export function matchEntryKeys({ keys = [], constant = false } = {}, buffer = ''
 
 export function applyMatchedKeysToEntries(entries, buffer) {
     return (Array.isArray(entries) ? entries : []).map(entry => {
+        const tokens = Number.isFinite(entry?.tokens) ? Math.max(0, Math.round(entry.tokens)) : 0;
         try {
             const { matchedKeys, matchKind } = matchEntryKeys(entry, buffer || '');
             return {
@@ -171,6 +175,7 @@ export function applyMatchedKeysToEntries(entries, buffer) {
                 title: entry.title || '',
                 matchedKeys,
                 matchKind,
+                tokens,
             };
         } catch {
             return {
@@ -179,6 +184,7 @@ export function applyMatchedKeysToEntries(entries, buffer) {
                 title: entry?.title || '',
                 matchedKeys: [],
                 matchKind: 'none',
+                tokens,
             };
         }
     });

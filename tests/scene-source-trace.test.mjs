@@ -120,6 +120,21 @@ const normalized = normalizeWorldInfoEvent(event);
 assert.equal(normalized.length, 1);
 assert.equal(normalized[0].uid, '7');
 
+const withContent = normalizeWorldInfoEvent({
+    world: 'Chaldea',
+    uid: 1,
+    comment: 'Mash',
+    keys: ['Mash'],
+    content: 'x'.repeat(40),
+});
+assert.equal(withContent[0].tokens, 10); // 40/4
+
+const finished = applyMatchedKeysToEntries(
+    [{ world: 'W', uid: '1', title: 'T', keys: ['hero'], constant: false, tokens: 10 }],
+    'hero appears',
+)[0];
+assert.equal(finished.tokens, 10);
+
 _resetSceneSourceTraceForTests();
 const owner = { chatKey: 'chat-a', targetMessageId: 3, swipeId: 0 };
 startSceneSourceTrace(owner, { enabled: true });
