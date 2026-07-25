@@ -18,6 +18,7 @@
 
 import { DEFAULTS } from './constants.js';
 import { log } from './logger.js';
+import { normalizeTrackerPromptStyle } from './prompts/together-framing.js';
 
 const CUSTOM_PANEL_LIMITS = Object.freeze({
     panels: 32,
@@ -59,7 +60,7 @@ export function isValidCustomFieldKey(value) {
 // outgoing system-prompt message) added.
 // v6.20.0: appliedPresetId tracks which bundled preset (src/presets/built-in.js)
 // the user accepted, so we don't re-prompt for the same model + preset pair.
-const PROFILE_FIELDS = ['schema', 'systemPrompt', 'promptOverrides', 'systemPromptRole', 'appliedPresetId', 'panels', 'fieldToggles', 'dashCards', 'customPanels'];
+const PROFILE_FIELDS = ['schema', 'systemPrompt', 'promptOverrides', 'systemPromptRole', 'appliedPresetId', 'trackerPromptStyle', 'panels', 'fieldToggles', 'dashCards', 'customPanels'];
 const SCHEMA_VERSION = 1;
 
 function _uuid() {
@@ -386,6 +387,8 @@ export function makeProfile(partial = {}) {
         appliedPresetId: typeof partial.appliedPresetId === 'string' && partial.appliedPresetId.trim()
             ? partial.appliedPresetId
             : null,
+        // Together-mode Compatible/Full framing toggle. Default compatible.
+        trackerPromptStyle: normalizeTrackerPromptStyle(partial.trackerPromptStyle),
         panels: partial.panels && typeof partial.panels === 'object' ? { ...partial.panels } : {},
         fieldToggles: partial.fieldToggles && typeof partial.fieldToggles === 'object' ? { ...partial.fieldToggles } : {},
         dashCards: partial.dashCards && typeof partial.dashCards === 'object' ? { ...partial.dashCards } : {},
@@ -766,6 +769,7 @@ export function validateImportedProfile(raw) {
         promptOverrides,
         // v6.19.0: role selector also survives export/import.
         systemPromptRole: raw.systemPromptRole,
+        trackerPromptStyle: raw.trackerPromptStyle,
         panels,
         fieldToggles,
         dashCards,

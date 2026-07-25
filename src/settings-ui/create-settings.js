@@ -33,6 +33,14 @@ export function createSettings(){
 </div><!-- /generation tab -->
 <div class="sp-tab-panel" data-tab="prompts">
 <div class="sp-sh">${t('Profile')}</div><div class="sp-hint">${t('A profile is a self-contained prompt + schema bundle. Switch profiles to swap setups (e.g. Medieval Fantasy vs Pokemon) without manually editing prompts and schemas.')}</div><div class="sp-fi" style="gap:4px;align-items:center"><label style="flex-shrink:0">${t('Active')}</label><select id="sp-profile-active" style="flex:1"></select><button class="sp-btn sp-btn-sm" id="sp-profile-manage" title="${t('Manage Profiles')}">⚙ ${t('Manage')}</button></div><div class="sp-fi" style="gap:4px;margin-top:4px"><button class="sp-btn sp-btn-sm" id="sp-profile-new" style="flex:1">＋ ${t('New')}</button><button class="sp-btn sp-btn-sm" id="sp-profile-duplicate" style="flex:1">⎘ ${t('Duplicate')}</button><button class="sp-btn sp-btn-sm" id="sp-profile-rename" style="flex:1">✎ ${t('Rename')}</button></div><div class="sp-fi" style="gap:4px;margin-top:4px"><button class="sp-btn sp-btn-sm" id="sp-profile-export" style="flex:1">⬇ ${t('Export')}</button><button class="sp-btn sp-btn-sm" id="sp-profile-import" style="flex:1">⬆ ${t('Import')}</button><input type="file" id="sp-profile-import-file" accept=".json" style="display:none"><button class="sp-btn sp-btn-sm sp-btn-danger" id="sp-profile-delete" style="flex:1">🗑 ${t('Delete')}</button></div><div class="sp-hint" id="sp-profile-meta" style="margin-top:4px;opacity:0.7"></div>
+<div class="sp-fs" style="margin-top:6px">
+  <label>${t('Tracker Prompt Style')}</label>
+  <select id="sp-tracker-prompt-style">
+    <option value="compatible">${t('Compatible (short — best with heavy presets)')}</option>
+    <option value="full">${t('Full (detailed + silent reasoning)')}</option>
+  </select>
+</div>
+<div class="sp-hint">${t('Together mode only. Compatible is the default and minimizes conflict with heavy jailbreaks (Marinara, Freaky Frankenstein, etc.). Full adds VAD mood guidance and silent reasoning. Separate mode always uses the detailed JSON analysis rules.')}</div>
 <div class="sp-sh">${t('System Prompt')}</div>
 <div class="sp-hint">${t('The instruction sent to the model. Defines how the tracker generates data.')}</div>
 <!-- v6.22.0: legacy "full prompt override" textarea fully removed. The slot

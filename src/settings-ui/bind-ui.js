@@ -205,6 +205,7 @@ export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s
     const _activeProfile=getActiveProfile(s);
     const schemaStr=_activeProfile.schema||JSON.stringify(buildDynamicSchema(s),null,2);
     $('#sp-schema').val(schemaStr);
+    $('#sp-tracker-prompt-style').val(_activeProfile.trackerPromptStyle||'compatible');
     updateBadge();$('#scenepulse-settings .inline-drawer-content').toggleClass('sp-disabled',!s.enabled);
     // Save resolved UUIDs back to localStorage (synchronous, immune to ST race conditions)
     _spSaveLS();
@@ -342,6 +343,10 @@ export function bindUI(){const s=getSettings();
     $('#sp-profile').on('change',function(){s.connectionProfile=this.value;saveSettings();_spSaveLS()});
     $('#sp-preset').on('change',function(){s.chatPreset=this.value;saveSettings();_spSaveLS();$('#sp-preset-info').toggle(!this.value)});
     $('#sp-mode').on('change',function(){s.promptMode=this.value;saveSettings();_spSaveLS()});
+    $('#sp-tracker-prompt-style').on('change',function(){
+        updateActiveProfile(s,{trackerPromptStyle:this.value});
+        saveSettings();
+    });
     // Fallback settings
     $('#sp-fallback-enabled').on('change',function(){s.fallbackEnabled=this.checked;saveSettings();_spSaveLS();$('#sp-fallback-settings').toggle(this.checked);});
     $('#sp-fallback-profile').on('change',function(){s.fallbackProfile=this.value;saveSettings();_spSaveLS();});
