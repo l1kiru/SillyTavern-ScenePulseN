@@ -51,5 +51,22 @@ settings.deltaMode=true;
 const withoutIdeas=buildInlineTrackerPrompt();
 ok('disabled story ideas are absent from Together prompt', !withoutIdeas.includes('plotBranches'));
 
+console.log('\n── Tracker prompt style framing ──');
+if (!active) {
+    fail++;
+    console.log('  FAIL active profile available for trackerPromptStyle');
+} else {
+    active.trackerPromptStyle = 'full';
+    settings.deltaMode = true;
+    const fullStyle = buildInlineTrackerPrompt();
+    ok('full style includes INTERNAL REASONING', fullStyle.includes('INTERNAL REASONING'));
+    ok('full style includes SP_TRACKER_START', fullStyle.includes('SP_TRACKER_START'));
+
+    active.trackerPromptStyle = 'compatible';
+    const compatibleStyle = buildInlineTrackerPrompt();
+    ok('compatible style omits INTERNAL REASONING', !compatibleStyle.includes('INTERNAL REASONING'));
+    ok('compatible style includes SP_TRACKER_START', compatibleStyle.includes('SP_TRACKER_START'));
+}
+
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} ${pass}/${pass + fail}`);
 if (fail) process.exit(1);
