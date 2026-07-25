@@ -624,6 +624,8 @@
   "Evidence: unknown": "Evidence: unknown",
   "Evidence: diagnostic": "Evidence: diagnostic",
   "Budget overflowed": "Budget overflowed",
+  "WI diagnostic log capture": "WI diagnostic log capture",
+  "Optional: while Scene Source Trace is capturing, briefly intercept console WI debug lines for extra match hints. Never overrides engine events. Off by default.": "Optional: while Scene Source Trace is capturing, briefly intercept console WI debug lines for extra match hints. Never overrides engine events. Off by default.",
   "No other characters to merge into": "No other characters to merge into",
   "No outbound requests captured yet. ScenePulse network calls (generate, update check, file persist) will appear here.": "No outbound requests captured yet. ScenePulse network calls (generate, update check, file persist) will appear here.",
   "No presets match your filter.": "No presets match your filter.",
