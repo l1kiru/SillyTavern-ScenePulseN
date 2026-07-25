@@ -16,10 +16,15 @@
 }
 
 .sp-source-trace-drawer {
-    margin: 0 0 6px;
+    margin: 0;
     padding: 8px;
     max-height: 220px;
-    overflow: auto;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow-x: hidden;
+    overflow-y: auto;
     border-top: 1px solid var(--sp-border);
     background: color-mix(in srgb, var(--sp-bg) 92%, var(--sp-accent));
     color: var(--sp-text);
@@ -72,6 +77,8 @@
 .sp-source-trace-line,
 .sp-source-trace-entry summary span {
     display: block;
+    min-width: 0;
+    max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
