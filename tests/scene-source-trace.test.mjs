@@ -192,11 +192,27 @@ const line = formatTraceEntryLine({
 });
 assert.equal(line, 'fate_lorebook — Lancer-class Servant — Artoria Pendragon — Артория Пендрагон Лансер');
 assert.ok(!line.includes('(?:'));
-assert.equal(buildTraceDrawerModel({
+const modelKeys = buildTraceDrawerModel({
     settings: { sceneSourceTrace: true },
     meta: { injectionMethod: 'inline' },
     trace: { lorebook: { count: 1, entries: [{ world: 'A', title: 'B', matchedKeys: ['C'], matchKind: 'keys' }] } },
-}).groups[0].items[0].line, 'A — B — C');
+});
+assert.equal(modelKeys.groups[0].items[0].line, 'A — B — C');
+assert.deepEqual(modelKeys.groups[0].items[0].matchedKeys, ['C']);
+assert.equal(modelKeys.groups[0].items[0].matchKind, 'keys');
+
+const modelConst = buildTraceDrawerModel({
+    settings: { sceneSourceTrace: true },
+    meta: { injectionMethod: 'inline' },
+    trace: {
+        lorebook: {
+            count: 1,
+            entries: [{ world: 'A', title: 'Hub', matchedKeys: [], matchKind: 'constant', uid: '0' }],
+        },
+    },
+});
+assert.deepEqual(modelConst.groups[0].items[0].matchedKeys, []);
+assert.equal(modelConst.groups[0].items[0].matchKind, 'constant');
 
 const bodyOff = el('div');
 assert.equal(mountSceneSourceTrace(bodyOff, { settings: { sceneSourceTrace: false }, snapshot: {} }), null);
@@ -244,7 +260,40 @@ mounted.chip.click();
 assert.equal(mounted.drawer.hidden, false);
 assert.match(mounted.drawer.innerHTML, /fate_lorebook/);
 assert.match(mounted.drawer.innerHTML, /Artoria Pendragon/);
+assert.match(mounted.drawer.innerHTML, /data-matched-keys="\[&quot;Artoria Pendragon&quot;\]"/);
+assert.match(mounted.drawer.innerHTML, /data-match-kind="keys"/);
 assert.ok(!mounted.drawer.innerHTML.includes(sampleRx));
 assert.ok(!mounted.drawer.innerHTML.includes('(?:'));
+
+const bodyConst = el('div');
+const footerConst = el('div');
+footerConst.className = 'sp-gen-footer';
+bodyConst.appendChild(footerConst);
+const mountedConst = mountSceneSourceTrace(bodyConst, {
+    settings: { sceneSourceTrace: true },
+    snapshot: {
+        _spMeta: {
+            injectionMethod: 'inline',
+            sceneSourceTrace: {
+                v: 2,
+                capturedAt: '2026-07-25T00:00:00.000Z',
+                lorebook: {
+                    count: 1,
+                    entries: [{
+                        world: 'Book',
+                        uid: '0',
+                        title: 'Always on',
+                        matchedKeys: [],
+                        matchKind: 'constant',
+                    }],
+                },
+            },
+        },
+    },
+    footer: footerConst,
+});
+assert.ok(mountedConst);
+assert.match(mountedConst.drawer.innerHTML, /data-matched-keys="\[\]"/);
+assert.match(mountedConst.drawer.innerHTML, /data-match-kind="constant"/);
 
 console.log('scene-source-trace.test.mjs: all tests passed');
