@@ -4,6 +4,8 @@ import {
     extractWiSlotsFromPromptChat,
     extractTextCompletionSlots,
     matchFingerprintInSlots,
+    resolvePromptSlots,
+    slotsHaveContent,
 } from '../src/scene-source-trace/prompt-insertion.js';
 import { fnv1aHex } from '../src/scene-source-trace/hash.js';
 import {
@@ -99,6 +101,41 @@ import {
     }]);
     const trace = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
     assert.equal(trace.lorebook.entries[0].promptInsertion.status, 'unknown');
+}
+
+{
+    const emptyCc = extractWiSlotsFromPromptChat([
+        { role: 'system', identifier: 'worldInfoBefore', content: '' },
+        { role: 'system', identifier: 'worldInfoAfter', content: '' },
+    ]);
+    assert.equal(slotsHaveContent(emptyCc), false);
+    const tc = extractTextCompletionSlots({ prompt: 'sys\nunique lore head and more text here\nuser' });
+    assert.equal(slotsHaveContent(tc), true);
+    const resolved = resolvePromptSlots(emptyCc, tc);
+    assert.match(resolved.textCompletionPrompt, /unique lore head/);
+}
+
+{
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 }, {
+        enabled: true,
+        chat: [{ mes: 'hi' }],
+    });
+    recordWorldInfoActivation([{
+        world: 'W', uid: 4, comment: 'E', key: ['k'], content: 'unique lore head and more text here',
+    }]);
+    // Empty CC capture must not block TC insertion matching
+    recordPromptReady({
+        dryRun: false,
+        chat: [
+            { role: 'system', identifier: 'worldInfoBefore', content: '' },
+            { role: 'system', identifier: 'worldInfoAfter', content: '' },
+        ],
+    });
+    recordTextCompletionPrompt({ prompt: 'sys\nunique lore head and more text here\nuser', dryRun: false });
+    const trace = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    assert.equal(trace.lorebook.entries[0].promptInsertion.status, 'yes');
+    assert.equal(trace.lorebook.entries[0].promptInsertion.position, 'text_completion_prompt');
 }
 
 console.log('scene-source-trace-prompt.test.mjs: all tests passed');
