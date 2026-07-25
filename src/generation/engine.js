@@ -475,6 +475,9 @@ export async function generateTracker(mesIdx,partKey,opts){
         const _prevCounter = (baseSnapshot?._spMeta?.deltaTurnsSinceFull ?? 0);
         result._spMeta={promptTokens:genMeta.promptTokens,completionTokens:genMeta.completionTokens,elapsed:genMeta.elapsed,source:lastGenSource,injectionMethod:getSettings().injectionMethod||'inline',deltaMode:_wasDelta,deltaTurnsSinceFull:_wasDelta?_prevCounter+1:0};
         if(successfulRequestMeta)result._spMeta.request=successfulRequestMeta;
+        // Together Tier-2 fallback: attach lore trace finished from the original
+        // inline generation (passed via runManualSceneBuild extraOpts).
+        if(opts?.sceneSourceTrace)result._spMeta.sceneSourceTrace=opts.sceneSourceTrace;
         // v6.9.8: first-run success confirmation — if this is the very
         // first snapshot in the chat, show a welcome toast so the user
         // knows ScenePulse is working.
