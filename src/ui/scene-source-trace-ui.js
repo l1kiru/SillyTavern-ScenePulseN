@@ -155,6 +155,7 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
     else chip.onclick = onChipClick;
 
     foot.appendChild(chip);
-    body.appendChild(drawer);
+    if (foot.parentNode === body) body.insertBefore(drawer, foot);
+    else body.appendChild(drawer);
     return { chip, drawer, footer: foot, model };
 }
