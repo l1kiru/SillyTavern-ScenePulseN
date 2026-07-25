@@ -116,6 +116,8 @@ console.log('\n── Default output contains every expected section ──');
     assertContains('contains role text',        out, 'You are a precise scene analysis engine.');
     assertContains('contains critical rules',   out, '## CRITICAL RULES');
     assertContains('contains rule 1',           out, 'Use [] for genuinely empty array fields');
+    assertContains('contains Full anti-omniscient rule', out, 'ANTI-OMNISCIENT');
+    assertContains('contains Full VAD mood guidance', out, 'Valence');
     assertContains('contains FIELD SPECIFICATIONS heading', out, '## FIELD SPECIFICATIONS');
     assertContains('contains dashboard env block', out, '### Environment');
     assertContains('contains scene block',      out, '### Scene Analysis');

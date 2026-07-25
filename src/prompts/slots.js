@@ -111,8 +111,12 @@ const _ROLE = `You are a precise scene analysis engine. Read the story context a
 
 const _CRITICAL_RULES = `## CRITICAL RULES
 1. Populate scalar and object fields with concise, evidence-based values. Use [] for genuinely empty array fields; never invent filler entries just to make an array non-empty.
-2. Output must be valid parseable JSON. No trailing commas, no comments.
-3. Carry durable facts forward when unchanged. NEVER carry charactersPresent, witnesses, innerThought, or immediateNeed forward by default: recompute them from THIS turn. If nobody qualifies for a volatile array, output [].`;
+2. Output must be valid parseable JSON. No trailing commas, no comments. Do not wrap JSON in markdown code blocks. No explanations before or after the JSON.
+3. Carry durable facts forward when unchanged. NEVER carry charactersPresent, witnesses, innerThought, or immediateNeed forward by default: recompute them from THIS turn. If nobody qualifies for a volatile array, output [].
+4. ANTI-OMNISCIENT: Previous snapshot is continuity only (names/aliases/unchanged durable facts). New facts and meter changes must be evidenced in this turn's scene text. Do not invent from character cards, world info, or unreferenced history.
+5. Do not repeat, rephrase, or re-describe information already present in the previous tracker snapshot (ban semantic re-skinning).
+6. Only record relationship or physical changes that actually occurred and were fully executed in the narrative. Mood, tension, and relationship meters must reflect visible/behavioral evidence from this turn only.
+7. When updating mood and tension, consider Valence, Arousal, and Dominance; reflect the dominant combination.`;
 
 // Template var: ${language}
 const _LANGUAGE = `## LANGUAGE
@@ -192,7 +196,8 @@ const _DELTA_MODE = `You are in DELTA mode. The previous state is provided for r
 6. For quests: include the FULL array if ANY quest was added/removed/modified. Omit entirely if unchanged.
 7. plotBranches: ALWAYS include (fresh suggestions every time).
 8. Re-verify charactersPresent and witnesses from THIS turn. Use [] when nobody qualifies; never carry either array forward out of habit.
-9. Do NOT echo unchanged data. Omitting a field means "unchanged" (except for the ALWAYS-include fields above).`;
+9. Do NOT echo unchanged data. Omitting a field means "unchanged" (except for the ALWAYS-include fields above).
+10. Ban repeating distinctive phrases or character descriptions from recent context unless they meaningfully changed this turn.`;
 
 /**
  * Default text per slot. The `fields` slot is omitted because it is
