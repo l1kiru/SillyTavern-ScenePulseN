@@ -34,6 +34,11 @@ import { showChatBanner, cleanupGenUI } from '../ui/loading.js';
 import { startStWatchdog } from './st-watchdog.js';
 import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { getActivePromptRole, promptRoleFlags } from '../prompts/role.js';
+import {
+    normalizeTrackerPromptStyle,
+    getTogetherRulesBlock,
+    getTogetherOutputFormatBlock,
+} from '../prompts/together-framing.js';
 import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
 import { startSceneBuild, updateSceneBuild } from './scene-build-controller.js';
 import { startSceneSourceTrace, cancelSceneSourceTrace } from '../scene-source-trace.js';
@@ -221,9 +226,13 @@ QUEST STATE RULES (all REQUIRED):
     const _langBlock=_lang?`\nLANGUAGE: All narrative string values MUST be in ${_lang}. JSON keys and enum values remain in English.\n`:'';
     const deltaAlways=panels.storyIdeas===false?'time, date, elapsed, charactersPresent, witnesses':'time, date, elapsed, charactersPresent, witnesses, plotBranches';
     const deltaExample=panels.storyIdeas===false?'{"time":"14:30","date":"03/15/2025","elapsed":"120","charactersPresent":["NPC"],"witnesses":[],"characters":[...]}':'{"time":"14:30","date":"03/15/2025","elapsed":"120","charactersPresent":["NPC"],"witnesses":[],"characters":[...],"plotBranches":[...]}';
+    const style=normalizeTrackerPromptStyle(profile?.trackerPromptStyle);
+    const rulesBlock=getTogetherRulesBlock(style);
+    const outputFormat=getTogetherOutputFormatBlock({isDelta,deltaAlways,deltaExample,fieldList});
+    const overrideReminder='\nThese always-include / WHEN INCLUDING / MANDATORY FIELDS lists override omit-unchanged from the framing rules above.';
 
     if(isDelta){
-        return `After your complete narrative, append a scene-tracking JSON block wrapped in markers. Include ONLY fields that changed since the previous state.
+        return `${rulesBlock}
 
 DELTA RULES:
 - Always include these fields: ${deltaAlways}.
@@ -232,21 +241,19 @@ DELTA RULES:
 - For relationships: include only entities that changed, with ALL their sub-fields.
 - Omit unchanged fields \u2014 omission means "no change."
 ${mandatoryHints?'\nWHEN INCLUDING:'+mandatoryHints:''}
+${overrideReminder}
 
 ${fieldSpecs}
 ${_langBlock}${prevState}
 
-MANDATORY OUTPUT \u2014 append this exact format after your narrative (the markers are machine-parsed, never omit them):
-
-<!--SP_TRACKER_START-->
-${deltaExample}
-<!--SP_TRACKER_END-->`;
+${outputFormat}`;
     }
 
-    return `After your complete narrative, append a scene-tracking JSON block wrapped in markers.
+    return `${rulesBlock}
 
 Required keys: ${fieldList}
 ${mandatoryHints?'\nMANDATORY FIELDS:'+mandatoryHints:''}
+${overrideReminder}
 
 No schema metadata. Only actual tracker data as a flat JSON object.
 Every required scalar must have a meaningful value. Use [] for genuinely empty array fields \u2014 especially charactersPresent, witnesses, characters, and relationships \u2014 and never invent an entity just to avoid an empty array.
@@ -254,11 +261,7 @@ Every required scalar must have a meaningful value. Use [] for genuinely empty a
 ${fieldSpecs}
 ${_langBlock}${prevState}
 
-MANDATORY OUTPUT \u2014 append this exact format after your narrative (the markers are machine-parsed, never omit them):
-
-<!--SP_TRACKER_START-->
-{"time":"14:30","date":"03/15/2025","location":"Town Square",...all fields...}
-<!--SP_TRACKER_END-->`;
+${outputFormat}`;
 }
 
 export const scenePulseInterceptor=async function(chat,cs,abort,type){
@@ -370,7 +373,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         // structured output is required *before* it begins narrative generation.
         chat.unshift({
             ..._flags,
-            mes:'IMPORTANT: This turn requires structured output. After your narrative response, you MUST append a tracker JSON block wrapped in <!--SP_TRACKER_START--> and <!--SP_TRACKER_END--> markers. Full schema is provided later in the context. This is non-negotiable — the response is incomplete without it.',
+            mes:'IMPORTANT: After your complete narrative, append tracker JSON between <!--SP_TRACKER_START--> and <!--SP_TRACKER_END-->. Do not put tracker data in the story. Full rules and schema appear later in the context.',
             extra: _extra,
         });
         chat.splice(Math.max(0,chat.length-1),0,{
@@ -380,7 +383,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         });
         chat.push({
             ..._flags,
-            mes:'Your response must end with <!--SP_TRACKER_START-->{ tracker JSON }<!--SP_TRACKER_END--> after the narrative. Do not repeat these instructions in your output.',
+            mes:'End with <!--SP_TRACKER_START-->{tracker JSON}<!--SP_TRACKER_END--> only \u2014 no markdown fences, no commentary after the end marker. Do not repeat these instructions in the narrative.',
             extra: _extra,
         });
         log('Interceptor [inline/together]: injected tracker prompt (~'+Math.round(prompt.length/4)+' tokens) + head/tail anchors as role='+_spRole,
