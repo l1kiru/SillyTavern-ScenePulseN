@@ -48,6 +48,8 @@ import {
     recordWorldInfoScanDone,
     recordWorldInfoEntriesLoaded,
     recordWorldInfoForceActivate,
+    recordPromptReady,
+    recordTextCompletionPrompt,
     cancelSceneSourceTrace,
 } from './src/scene-source-trace.js';
 
@@ -242,6 +244,24 @@ if (event_types.WORLDINFO_FORCE_ACTIVATE) {
         try {
             if (!_sceneSourceTraceGate()) return;
             recordWorldInfoForceActivate(entries);
+        } catch {}
+    });
+}
+if (event_types.CHAT_COMPLETION_PROMPT_READY) {
+    eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, eventData => {
+        try {
+            if (!_sceneSourceTraceGate()) return;
+            if (eventData?.dryRun) return;
+            recordPromptReady(eventData);
+        } catch {}
+    });
+}
+if (event_types.GENERATE_AFTER_COMBINE_PROMPTS) {
+    eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, eventData => {
+        try {
+            if (!_sceneSourceTraceGate()) return;
+            if (Array.isArray(eventData?.prompt)) return;
+            recordTextCompletionPrompt(eventData);
         } catch {}
     });
 }
