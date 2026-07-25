@@ -5,12 +5,6 @@ import { esc } from '../utils.js';
 import { highlightMatchedKeysInChat } from './wi-key-highlight.js';
 import { migrateTraceToV3View, EvidenceLevel } from '../scene-source-trace/migrate.js';
 
-function _isRegexKey(key) {
-    const s = String(key || '').trim();
-    if (!s.startsWith('/')) return false;
-    return s.lastIndexOf('/') > 0;
-}
-
 function _mode(meta = {}, settings = {}) {
     return meta.injectionMethod || settings.injectionMethod || 'inline';
 }
@@ -34,11 +28,14 @@ export function formatLoreChipLabel({ settings = {}, meta = {}, trace = null } =
 }
 
 function _displayKeys(entry) {
+    // Only show keys that were actually matched (engine or inferred) — never dump entry.key list.
     if (Array.isArray(entry?.matchedKeys) && entry.matchedKeys.length) {
         return entry.matchedKeys.map(String).filter(Boolean);
     }
-    const keys = Array.isArray(entry?.keys) ? entry.keys : [];
-    return keys.map(String).filter(k => k && !_isRegexKey(k));
+    const fromTriggers = (Array.isArray(entry?.triggers) ? entry.triggers : [])
+        .filter(tr => tr?.type === 'primary_key' && tr.matchedText)
+        .map(tr => String(tr.matchedText));
+    return [...new Set(fromTriggers)];
 }
 
 function _hasInferredKey(entry) {

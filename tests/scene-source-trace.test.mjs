@@ -72,6 +72,7 @@ globalThis.SillyTavern = {
     }),
 };
 
+const sst = await import('../src/scene-source-trace.js');
 const {
     normalizeWorldInfoEvent,
     startSceneSourceTrace,
@@ -86,7 +87,14 @@ const {
     applyMatchedKeysToEntries,
     trimLorebookForStorage,
     MAX_LOREBOOK_JSON_BYTES,
-} = await import('../src/scene-source-trace.js');
+} = sst;
+// v3 architecture export smoke (claim 4 regression)
+assert.equal(typeof sst.recordWorldInfoScanDone, 'function');
+assert.equal(typeof sst.recordWorldInfoEntriesLoaded, 'function');
+assert.equal(typeof sst.explainWhyNot, 'function');
+assert.equal(typeof sst.applyScanDecisions, 'function');
+assert.equal(typeof sst.inferTriggersForEntry, 'function');
+assert.equal(typeof sst.normalizeScanDepth, 'function');
 const {
     formatLoreChipLabel,
     formatTraceEntryTitle,
@@ -110,6 +118,29 @@ assert.equal(parseWiRegexKey('/(/'), null);
 assert.deepEqual(matchEntryKeys({ keys: ['/(/'], constant: false }, buf).matchedKeys, []);
 assert.equal(matchEntryKeys({ keys: [], constant: true }, buf).matchKind, 'constant');
 assert.equal(buildWiScanBuffer([{ mes: 'a' }, { mes: 'b' }, { mes: 'c' }], 2), 'b\nc');
+assert.equal(buildWiScanBuffer([{ mes: 'SecretKey' }], 0), '');
+
+{
+    const { capturePreGenScanContext } = await import('../src/scene-source-trace/scan-context.js');
+    const empty = capturePreGenScanContext([{ mes: 'SecretKey in chat' }], { depth: 0 });
+    assert.equal(empty.depth, 0);
+    assert.equal(empty.buffer, '');
+    assert.deepEqual(empty.messages, []);
+    assert.deepEqual(empty.messageIds, []);
+}
+
+{
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace(
+        { chatKey: 'c', targetMessageId: 1, swipeId: 0 },
+        { enabled: true, chat: [{ mes: 'SecretKey in chat' }], depth: 0 },
+    );
+    recordWorldInfoActivation([{ world: 'W', uid: 1, comment: 'E', key: ['SecretKey'], content: 'x' }]);
+    const d0 = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    assert.deepEqual(d0.lorebook.entries[0].matchedKeys, []);
+    assert.equal(d0.lorebook.entries[0].matchKind, 'none');
+    assert.equal(d0.settings.scanDepth, 0);
+}
 
 const event = {
     world: 'Chaldea',
@@ -264,6 +295,11 @@ assert.equal(
 );
 assert.equal(formatTraceEntryKeyLine({ matchKind: 'constant', matchedKeys: [] }), 'key - { constant }');
 assert.equal(formatTraceEntryKeyLine({ matchKind: 'none', matchedKeys: [] }), 'key - { — }');
+// Never dump configured entry.keys when matchedKeys is empty
+assert.equal(
+    formatTraceEntryKeyLine({ matchKind: 'none', matchedKeys: [], keys: ['Alpha', 'Beta'] }),
+    'key - { — }',
+);
 const line = formatTraceEntryLine({
     world: 'fate_lorebook',
     title: 'Lancer-class Servant',
