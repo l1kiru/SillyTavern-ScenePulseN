@@ -19,6 +19,15 @@ import {
     snapshotWorldInfoSettings,
     readWiSettingsFromDom,
 } from './scene-source-trace/settings-snapshot.js';
+import {
+    fingerprintContent,
+    extractWiSlotsFromPromptChat,
+    extractTextCompletionSlots,
+    matchFingerprintInSlots,
+} from './scene-source-trace/prompt-insertion.js';
+import { buildInferredSegments, inferTriggerSources } from './scene-source-trace/segments.js';
+import { classifyForceEntries } from './scene-source-trace/force-source.js';
+import { explainWhyNot } from './scene-source-trace/why-not.js';
 
 export const MAX_MATCHED_KEY_LEN = 80;
 export const MAX_LOREBOOK_JSON_BYTES = 65536;
@@ -38,6 +47,14 @@ export {
     WI_LOGIC,
     snapshotWorldInfoSettings,
     readWiSettingsFromDom,
+    fingerprintContent,
+    extractWiSlotsFromPromptChat,
+    extractTextCompletionSlots,
+    matchFingerprintInSlots,
+    buildInferredSegments,
+    inferTriggerSources,
+    classifyForceEntries,
+    explainWhyNot,
 };
 
 let _activeTrace = null;
@@ -267,6 +284,11 @@ export function startSceneSourceTrace(owner, {
         timedEffectsByKey: {},
         decisions: [],
         budgetOverflowed: false,
+        promptSlotsCc: null,
+        promptSlotsTc: null,
+        promptCaptured: false,
+        forceSource: 'external',
+        segmentsExtras: { character: null, persona: null, recurseTexts: [] },
     };
 }
 
@@ -351,13 +373,39 @@ export function recordWorldInfoEntriesLoaded(payload) {
 export function recordWorldInfoForceActivate(entries) {
     if (!_activeTrace) return;
     const list = Array.isArray(entries) ? entries : (entries?.entries || []);
+    const classified = classifyForceEntries(list);
+    _activeTrace.forceSource = classified.source;
     for (const entry of list) {
         const key = entryKey(entry?.world, entry?.uid);
         if (key !== '::') _activeTrace.forceKeys.add(key);
     }
     _pushEvent('force_activate', 'WORLDINFO_FORCE_ACTIVATE', {
-        payload: { count: list.length },
+        payload: { count: list.length, source: classified.source },
     });
+}
+
+export function recordPromptReady(eventData) {
+    if (!_activeTrace || eventData?.dryRun) return;
+    const slots = extractWiSlotsFromPromptChat(eventData?.chat);
+    _activeTrace.promptSlotsCc = slots;
+    _activeTrace.promptCaptured = true;
+    _pushEvent('prompt_ready_cc', 'CHAT_COMPLETION_PROMPT_READY');
+}
+
+export function recordTextCompletionPrompt(eventData) {
+    if (!_activeTrace) return;
+    const slots = extractTextCompletionSlots(eventData);
+    if (!slots) return;
+    _activeTrace.promptSlotsTc = slots;
+    _activeTrace.promptCaptured = true;
+    _pushEvent('prompt_ready_tc', 'GENERATE_AFTER_COMBINE_PROMPTS');
+}
+
+export function setTraceSegmentContext({ character, persona, recurseTexts } = {}) {
+    if (!_activeTrace) return;
+    if (character) _activeTrace.segmentsExtras.character = character;
+    if (persona) _activeTrace.segmentsExtras.persona = persona;
+    if (recurseTexts) _activeTrace.segmentsExtras.recurseTexts = recurseTexts;
 }
 
 function _emptyTrace(owner = null) {
@@ -382,6 +430,8 @@ function _emptyTrace(owner = null) {
             recursionLoops: 0,
             budgetOverflowed: false,
             stickyCount: 0,
+            insertedEntries: 0,
+            possiblyInsertedEntries: 0,
         },
     };
 }
@@ -403,21 +453,71 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
 
     const buffer = trace.scanContext?.buffer || '';
     const settings = trace.settings || {};
+
+    let character = trace.segmentsExtras?.character;
+    let persona = trace.segmentsExtras?.persona;
+    try {
+        const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
+        const chid = ctx?.characterId ?? ctx?.this_chid;
+        const chars = ctx?.characters;
+        if (!character && Array.isArray(chars) && chid != null) character = chars[chid];
+        if (!persona && ctx?.powerUserSettings) persona = { description: ctx.powerUserSettings.persona_description };
+    } catch { /* ignore */ }
+
+    const segments = buildInferredSegments({
+        chat: null, // use buffer-derived window via message rebuild below
+        depth: settings.scanDepth || SCAN_DEPTH_FALLBACK,
+        includeNames: settings.includeNames,
+        character,
+        persona,
+        recurseTexts: trace.segmentsExtras?.recurseTexts || [],
+    });
+    // Rebuild chat segments from scanContext messageIds if we still have chat on context
+    try {
+        const chat = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext?.()?.chat) || [];
+        const pre = buildInferredSegments({
+            chat: Array.isArray(chat) ? chat.slice(0, Math.max(...(trace.scanContext?.messageIds || [0])) + 1) : [],
+            depth: settings.scanDepth || SCAN_DEPTH_FALLBACK,
+            includeNames: settings.includeNames,
+            character,
+            persona,
+            recurseTexts: trace.segmentsExtras?.recurseTexts || [],
+        });
+        if (pre.length) segments.splice(0, segments.length, ...pre);
+    } catch {
+        // fall back: single chat_message segment from buffer
+        if (buffer) segments.unshift({ type: 'chat_message', messageId: null, depth: 1, text: buffer });
+    }
+
     const matched = applyMatchedKeysToEntries(trace.entries, buffer, settings);
 
     let inferredTriggers = 0;
     let stickyCount = 0;
-    const finishedEntries = matched.map(entry => {
+    let insertedEntries = 0;
+    let possiblyInsertedEntries = 0;
+    const promptSlots = trace.promptSlotsCc || trace.promptSlotsTc || null;
+
+    const finishedEntries = matched.map((entry, idx) => {
+        const raw = trace.entries[idx] || entry;
         const key = entryKey(entry.world, entry.uid);
         const forced = trace.forceKeys.has(key);
         const timed = trace.timedEffectsByKey[key] || { sticky: false, cooldown: false, delay: false };
-        let triggers = Array.isArray(entry.triggers) ? entry.triggers.slice() : [];
+        let triggers = inferTriggerSources(raw, segments, settings);
+        if (!triggers.length) triggers = Array.isArray(entry.triggers) ? entry.triggers.slice() : [];
         let matchKind = entry.matchKind || 'none';
         let matchedKeys = Array.isArray(entry.matchedKeys) ? entry.matchedKeys.slice() : [];
+        if (triggers.some(t => t.matchedText)) {
+            matchedKeys = [...new Set(triggers.filter(t => t.matchedText).map(t => t.matchedText))];
+            if (matchKind === 'none') matchKind = 'keys';
+        }
 
         if (forced) {
             triggers = [
-                { type: 'force_activate', evidence: evidence(EvidenceLevel.ENGINE) },
+                {
+                    type: 'force_activate',
+                    evidence: evidence(EvidenceLevel.ENGINE),
+                    forceSource: trace.forceSource || 'external',
+                },
                 ...triggers.filter(t => t.type !== 'unknown'),
             ];
             matchKind = 'force';
@@ -438,12 +538,50 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
             }
         }
 
+        const fp = fingerprintContent(raw.contentHead || '');
+        let promptInsertion = {
+            status: 'unknown',
+            position: null,
+            evidence: evidence(EvidenceLevel.UNKNOWN),
+        };
+        if (trace.promptCaptured && promptSlots) {
+            const hit = matchFingerprintInSlots(fp, promptSlots, { contentHead: raw.contentHead || '' });
+            promptInsertion = {
+                status: hit.status,
+                position: hit.position,
+                evidence: evidence(EvidenceLevel.INFERRED, hit.confidence),
+            };
+            if (hit.status === 'yes') insertedEntries++;
+            else if (hit.status === 'possibly') possiblyInsertedEntries++;
+        }
+
+        const insertedStage = promptInsertion.status === 'yes'
+            ? 'yes'
+            : (promptInsertion.status === 'no' ? 'no'
+                : (promptInsertion.status === 'possibly' ? 'possibly' : 'unknown'));
+
         return {
             world: entry.world || '',
             uid: entry.uid || '',
             title: entry.title || '',
             tokens: entry.tokens || 0,
-            stages: { accepted: { value: true, evidence: EvidenceLevel.ENGINE } },
+            stages: {
+                accepted: { value: true, evidence: EvidenceLevel.ENGINE },
+                rendered: { value: null, evidence: EvidenceLevel.UNKNOWN },
+                inserted: { value: insertedStage, evidence: promptInsertion.evidence.type },
+            },
+            configuration: {
+                constant: !!raw.constant,
+                vectorized: false,
+                selective: Array.isArray(raw.keysecondary) && raw.keysecondary.length > 0,
+                selectiveLogic: raw.selectiveLogic ?? 0,
+                probability: 100,
+                scanDepth: null,
+                caseSensitive: raw.caseSensitive ?? null,
+                matchWholeWords: raw.matchWholeWords ?? null,
+            },
+            contentFingerprint: fp,
+            promptInsertion,
             firstSeenLoop,
             triggers,
             timedEffects: timed,
@@ -493,8 +631,9 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
             recursionLoops,
             budgetOverflowed: !!trace.budgetOverflowed,
             stickyCount,
+            insertedEntries,
+            possiblyInsertedEntries,
         },
-        // Phase 4 may read these before applyScanDecisions is wired in finish
         _decisions: trace.decisions.slice(),
     };
 }
