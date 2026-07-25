@@ -284,6 +284,15 @@ assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: false }, meta: 
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'separate' }, trace: null }), 'Lore —');
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 0, entries: [] } } }), 'Lore 0');
 assert.equal(formatLoreChipLabel({ settings: { sceneSourceTrace: true }, meta: { injectionMethod: 'inline' }, trace: { lorebook: { count: 2, entries: [{}, {}] } } }), 'Lore 2');
+// Together fallback snapshot carries original lore trace on _spMeta (not Lore —)
+assert.equal(
+    formatLoreChipLabel({
+        settings: { sceneSourceTrace: true },
+        meta: { injectionMethod: 'inline', source: 'auto:together:fallback' },
+        trace: { lorebook: { count: 0, entries: [] }, capabilities: { scanDone: true, engineDecisions: false, promptBuildDecisions: false } },
+    }),
+    'Lore 0',
+);
 
 assert.equal(
     formatTraceEntryTitle({ world: 'fate_lorebook', title: 'Lancer-class Servant', matchedKeys: ['Artoria Pendragon'], matchKind: 'keys' }),
