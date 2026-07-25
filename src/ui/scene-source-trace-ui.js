@@ -35,16 +35,20 @@ function _displayKeys(entry) {
     return keys.map(String).filter(k => k && !_isRegexKey(k));
 }
 
-/** world — title — match… / constant / — */
-export function formatTraceEntryLine(entry) {
-    const world = String(entry?.world || '').trim() || '—';
-    const title = String(entry?.title || entry?.comment || entry?.uid || '').trim() || '—';
-    if (entry?.matchKind === 'constant') {
-        return `${world} — ${title} — constant`;
-    }
+export function formatTraceEntryTitle(entry) {
+    return String(entry?.title || entry?.comment || entry?.uid || '').trim() || '—';
+}
+
+export function formatTraceEntryKeyLine(entry) {
+    if (entry?.matchKind === 'constant') return 'key - { constant }';
     const keys = _displayKeys(entry);
-    if (!keys.length) return `${world} — ${title} — —`;
-    return [world, title, ...keys].join(' — ');
+    if (!keys.length) return 'key - { — }';
+    return `key - { ${keys.join(', ')} }`;
+}
+
+/** title + key line (no world — world is the group header) */
+export function formatTraceEntryLine(entry) {
+    return `${formatTraceEntryTitle(entry)}\n${formatTraceEntryKeyLine(entry)}`;
 }
 
 function _entryMatchedKeys(entry) {
@@ -56,7 +60,7 @@ function _entryMatchedKeys(entry) {
 }
 
 /**
- * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array<{world:string, items:Array<{line:string, uid:string, matchedKeys:string[], matchKind:string}>}>, omitted: number }}
+ * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array<{world:string, items:Array<{title:string, keyLine:string, uid:string, tokens:number|null, matchedKeys:string[], matchKind:string}>}>, omitted: number }}
  */
 export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null } = {}) {
     const chip = formatLoreChipLabel({ settings, meta, trace });
@@ -82,8 +86,10 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null }
         if (!map.has(world)) map.set(world, []);
         const matchKind = String(entry.matchKind || (entry.constant ? 'constant' : 'none'));
         map.get(world).push({
-            line: formatTraceEntryLine(entry),
+            title: formatTraceEntryTitle(entry),
+            keyLine: formatTraceEntryKeyLine(entry),
             uid: entry.uid != null ? String(entry.uid) : '',
+            tokens: Number.isFinite(entry.tokens) ? entry.tokens : null,
             matchedKeys: _entryMatchedKeys(entry),
             matchKind,
         });
@@ -142,10 +148,12 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
             for (const item of group.items) {
                 const keysJson = esc(JSON.stringify(Array.isArray(item.matchedKeys) ? item.matchedKeys : []));
                 const kind = esc(item.matchKind || 'none');
+                const summary = `<span class="sp-source-trace-entry-title">${esc(item.title)}</span><span class="sp-source-trace-entry-key">${esc(item.keyLine)}</span>`;
                 if (item.uid) {
-                    html += `<details class="sp-source-trace-entry" data-matched-keys="${keysJson}" data-match-kind="${kind}"><summary><span>${esc(item.line)}</span></summary><div class="sp-source-trace-row"><span>UID</span><strong>${esc(item.uid)}</strong></div></details>`;
+                    const tokenLabel = item.tokens == null ? '—' : `~${item.tokens}`;
+                    html += `<details class="sp-source-trace-entry" data-matched-keys="${keysJson}" data-match-kind="${kind}"><summary>${summary}</summary><div class="sp-source-trace-row"><div class="sp-source-trace-meta"><span>UID</span><strong>${esc(item.uid)}</strong></div><div class="sp-source-trace-meta"><span>${esc(t('Tokens'))}</span><strong>${esc(tokenLabel)}</strong></div></div></details>`;
                 } else {
-                    html += `<div class="sp-source-trace-line" data-matched-keys="${keysJson}" data-match-kind="${kind}">${esc(item.line)}</div>`;
+                    html += `<div class="sp-source-trace-line" data-matched-keys="${keysJson}" data-match-kind="${kind}">${summary}</div>`;
                 }
             }
             html += '</div>';
