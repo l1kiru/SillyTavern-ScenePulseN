@@ -75,15 +75,11 @@
     font-weight: 500;
 }
 
-.sp-source-trace-line,
-.sp-source-trace-entry summary span {
-    display: block;
+.sp-source-trace-entry,
+.sp-source-trace-line {
     min-width: 0;
     max-width: 100%;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 10px;
 }
 
 .sp-source-trace-line {
@@ -98,25 +94,52 @@
     background: color-mix(in srgb, var(--sp-surface) 92%, transparent);
 }
 .sp-source-trace-entry summary {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
     padding: 5px 6px;
     cursor: pointer;
     list-style: none;
 }
+.sp-source-trace-entry-title,
+.sp-source-trace-entry-key,
+.sp-source-trace-line .sp-source-trace-entry-title,
+.sp-source-trace-line .sp-source-trace-entry-key {
+    display: block;
+    min-width: 0;
+    max-width: 100%;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    white-space: normal;
+}
+.sp-source-trace-entry-title {
+    font-size: 10px;
+    font-weight: 600;
+}
+.sp-source-trace-entry-key {
+    font-size: 9px;
+    color: var(--sp-text-dim);
+}
 .sp-source-trace-row {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
     margin: 0 6px 6px;
     padding: 5px;
     border: 1px solid var(--sp-border);
     border-radius: 6px;
     background: color-mix(in srgb, var(--sp-surface) 88%, transparent);
 }
-.sp-source-trace-row span {
+.sp-source-trace-meta span {
     display: block;
     color: var(--sp-text-dim);
     font-size: 9px;
 }
-.sp-source-trace-row strong {
+.sp-source-trace-meta strong {
     display: block;
     font-size: 10px;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .sp-source-trace-omitted {
