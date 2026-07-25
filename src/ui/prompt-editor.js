@@ -370,6 +370,7 @@ function _renderLegacyBanner() {
         <div class="sp-pe-legacy-banner">
             <strong>${t('Heads up:')}</strong>
             ${t('this profile has a legacy "full system prompt" set, which currently overrides the slot system entirely. Your slot edits below will be saved but won\'t take effect until the legacy prompt is cleared.')}
+            ${t('Compatible/Full Together framing and updated Separate slot defaults apply only after you Clear legacy system prompt.')}
             <button class="sp-pe-legacy-clear" type="button">${t('Clear legacy prompt')}</button>
         </div>
     `;
