@@ -277,6 +277,16 @@ console.log('\n── Scenario 12: export shape ──');
     assertEq('prompt preserved', out.systemPrompt, 'gotta catch em all');
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// 13. trackerPromptStyle defaults (Compatible/Full Together framing)
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\n── Scenario 13: trackerPromptStyle defaults ──');
+{
+    assertEq('makeProfile default style', makeProfile({}).trackerPromptStyle, 'compatible');
+    assertEq('makeProfile full style', makeProfile({ trackerPromptStyle: 'full' }).trackerPromptStyle, 'full');
+    assertEq('makeProfile unknown → compatible', makeProfile({ trackerPromptStyle: 'nope' }).trackerPromptStyle, 'compatible');
+}
+
 // ─── Summary ──────────────────────────────────────────────────────────
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 console.log(`${fail === 0 ? 'PASS' : 'FAIL'} ${pass}/${pass + fail}`);
