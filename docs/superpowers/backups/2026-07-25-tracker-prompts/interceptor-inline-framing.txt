@@ -1,0 +1,93 @@
+# Backup: src/generation/interceptor.js — buildInlineTrackerPrompt() templates + head/tail mes
+# Captured: 2026-07-25 (pre Tracker Prompt Style refactor)
+
+=== HEAD mes (interceptor.js inline/together injection) ===
+
+IMPORTANT: This turn requires structured output. After your narrative response, you MUST append a tracker JSON block wrapped in <!--SP_TRACKER_START--> and <!--SP_TRACKER_END--> markers. Full schema is provided later in the context. This is non-negotiable — the response is incomplete without it.
+
+=== TAIL mes (interceptor.js inline/together injection) ===
+
+Your response must end with <!--SP_TRACKER_START-->{ tracker JSON }<!--SP_TRACKER_END--> after the narrative. Do not repeat these instructions in your output.
+
+=== prevState block (buildInlineTrackerPrompt, when cleanedSnap exists) ===
+
+<scene_pulse_tracker_state>
+NARRATIVE SEPARATION RULE — read this BEFORE the data below:
+The character names in this tracker state (e.g. "Ponytail Nurse", "Buzzcut", "Hooded Figure") are INTERNAL TRACKING LABELS, not prose vocabulary. In your narrative text, refer to characters naturally — by appearance, role, pronoun, title, or whatever the story has established. Compound placeholder labels must never appear as proper nouns in your prose or dialogue. In the tracker JSON you append at the end, use these exact label names as-is for continuity — the separation is between PROSE (natural descriptions) and JSON (tracker labels).
+
+PREVIOUS STATE (carry forward unchanged details, update only what changed):
+${JSON.stringify(cleanedSnap,null,2)}
+</scene_pulse_tracker_state>
+
+CRITICAL — {{user}} IS NOT A CHARACTER:
+{{user}} is the player — the human reader — not an NPC. NEVER create a character entry for {{user}} (by any name — not the persona name, not "User", not "You", not the literal "{{user}}" token). {{user}} has no innerThought, no role, no appearance fields, no fertility fields. The characters array is exclusively for NPCs. NEVER create a self-relationship entry for {{user}} — relationships always express how OTHERS perceive {{user}}, never {{user}}'s view of themselves. NEVER include {{user}} in charactersPresent — that array lists NPCs in the scene alongside {{user}}, not {{user}} themselves.
+
+QUEST STATE RULES (all REQUIRED):
+1. Carry forward active quests from the previous state — don't silently drop them.
+2. When a quest's goal is achieved in the story, when the situation it was about becomes moot, when {{user}} abandons it, or when a later quest has superseded it, you MUST set urgency="resolved" on that quest this turn. Do not leave completed quests active. Do not silently delete them — transition through "resolved" first. The resolved quest stays visible for one more turn so the user sees the completion.
+3. NO COSMETIC QUEST EDITS. Do NOT modify an existing quest's name, detail, or urgency unless ONE of these specifically happened in the turn you are writing: (a) the story actually shifted its urgency, (b) you have concrete new information to record that did not exist last turn (cite the scene beat), or (c) you are marking it resolved. If none of those apply, emit the quest UNCHANGED — same name, same detail, same urgency — or omit it from the delta entirely. Rephrasing, synonym swaps, or "refreshing" a detail for its own sake is forbidden. A quest that did not meaningfully advance must look byte-identical to last turn.
+4. Consolidate duplicates or near-duplicates into a single clearer entry. Prefer consolidation over duplication.
+5. Never list the same quest in both mainQuests and sideQuests. A quest belongs in ONE tier.
+6. All quests from {{user}}'s perspective — if hostile, oppose their goal; if ally, support them as {{user}}'s action.
+
+=== _langBlock template (buildInlineTrackerPrompt) ===
+
+LANGUAGE: All narrative string values MUST be in ${_lang}. JSON keys and enum values remain in English.
+
+=== mandatoryHints fragments (buildInlineTrackerPrompt, panel-conditional) ===
+
+- plotBranches: EXACTLY 5 story suggestions (dramatic, intense, comedic, twist, exploratory). Each needs type, name, hook.
+- mainQuests (MAX 3) / sideQuests (MAX 4): Persistent life arcs spanning multiple scenes, NOT scene-level actions. Introduce AT MOST 1 new quest per turn. Each needs name, urgency, detail. Every quest must be something {{user}} can personally ACT on — NPC activities and world facts are character notes, not quests. MAX 1 critical quest at a time; urgency = timing, not importance.
+- characters: Full details for every named, plot-relevant NPC present (MAX 5 entries, background crowd members go in sceneSummary instead). Each entry needs name, role, innerThought, immediateNeed, and appearance fields.
+- UNKNOWN→KNOWN NAMES: If a character's name is not yet known, use a consistent descriptive placeholder like "Stranger", "Hooded Figure", "Woman in Red". REUSE the same placeholder each turn until the name is revealed. When the real name IS revealed, emit ONE character entry with the new `name` AND the old placeholder listed in `aliases`. Do NOT create two entries (one under the old placeholder, one under the new name) — the tracker's alias merger will link them automatically, but ONLY if you use the `aliases` field correctly.
+- NAME FIELD INTEGRITY: The `name` field is the character's canonical name ONLY. NEVER embed aliases, titles, or parentheticals inside it. WRONG: `"name": "Officer Jane (The Entity/Lilith)"`. RIGHT: `"name": "Officer Jane", "aliases": ["The Entity", "Lilith"]`. This rule applies to EVERY reference across characters[], relationships[], AND charactersPresent[]. All three arrays must use the IDENTICAL canonical name for the same character. If you mix "Name" in one array and "Name (Alias)" in another, the tracker will filter out the real character and replace it with an empty stub — all the data you wrote will be silently discarded.
+- GROUP CHAT ACTIVE: This is a group chat with ${N} participating characters: ${names}. ALL of these characters MUST appear in both the `characters` array and `charactersPresent` (unless the narrative has explicitly removed them from the scene, e.g. they left the room). Do NOT focus only on whichever character is speaking this turn — every group member still present in the scene gets a full character entry every turn. If a character is in the group but absent from THIS specific scene (they stayed home, they're in another room), omit them from charactersPresent but keep their previous character data so it carries forward unchanged.
+- relationships: All characters' views of {{user}} with numeric meters (0-100) and labels. desire=0 for strangers/family.
+- ${customFieldKeys}: ${panelName} fields — populate from story context.
+
+=== deltaAlways / deltaExample (buildInlineTrackerPrompt) ===
+
+deltaAlways (storyIdeas enabled): time, date, elapsed, charactersPresent, witnesses, plotBranches
+deltaAlways (storyIdeas disabled): time, date, elapsed, charactersPresent, witnesses
+deltaExample (storyIdeas enabled): {"time":"14:30","date":"03/15/2025","elapsed":"120","charactersPresent":["NPC"],"witnesses":[],"characters":[...],"plotBranches":[...]}
+deltaExample (storyIdeas disabled): {"time":"14:30","date":"03/15/2025","elapsed":"120","charactersPresent":["NPC"],"witnesses":[],"characters":[...]}
+
+=== DELTA return template (buildInlineTrackerPrompt, isDelta=true) ===
+
+After your complete narrative, append a scene-tracking JSON block wrapped in markers. Include ONLY fields that changed since the previous state.
+
+DELTA RULES:
+- Always include these fields: ${deltaAlways}.
+- Include any other field ONLY if its value changed.
+- For characters: include a FULL entity for EVERY NPC in charactersPresent. Recompute innerThought and immediateNeed from THIS turn; never copy them from previous state.
+- For relationships: include only entities that changed, with ALL their sub-fields.
+- Omit unchanged fields — omission means "no change."
+${mandatoryHints ? '\nWHEN INCLUDING:' + mandatoryHints : ''}
+
+${fieldSpecs}
+${_langBlock}${prevState}
+
+MANDATORY OUTPUT — append this exact format after your narrative (the markers are machine-parsed, never omit them):
+
+<!--SP_TRACKER_START-->
+${deltaExample}
+<!--SP_TRACKER_END-->
+
+=== FULL return template (buildInlineTrackerPrompt, isDelta=false) ===
+
+After your complete narrative, append a scene-tracking JSON block wrapped in markers.
+
+Required keys: ${fieldList}
+${mandatoryHints ? '\nMANDATORY FIELDS:' + mandatoryHints : ''}
+
+No schema metadata. Only actual tracker data as a flat JSON object.
+Every required scalar must have a meaningful value. Use [] for genuinely empty array fields — especially charactersPresent, witnesses, characters, and relationships — and never invent an entity just to avoid an empty array.
+
+${fieldSpecs}
+${_langBlock}${prevState}
+
+MANDATORY OUTPUT — append this exact format after your narrative (the markers are machine-parsed, never omit them):
+
+<!--SP_TRACKER_START-->
+{"time":"14:30","date":"03/15/2025","location":"Town Square",...all fields...}
+<!--SP_TRACKER_END-->

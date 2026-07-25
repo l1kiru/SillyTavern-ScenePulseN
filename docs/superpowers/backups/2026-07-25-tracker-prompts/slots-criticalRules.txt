@@ -1,0 +1,22 @@
+# Backup: src/prompts/slots.js — _CRITICAL_RULES and _DELTA_MODE
+# Captured: 2026-07-25 (pre Tracker Prompt Style refactor)
+
+=== _CRITICAL_RULES (slots.js) ===
+
+## CRITICAL RULES
+1. Populate scalar and object fields with concise, evidence-based values. Use [] for genuinely empty array fields; never invent filler entries just to make an array non-empty.
+2. Output must be valid parseable JSON. No trailing commas, no comments.
+3. Carry durable facts forward when unchanged. NEVER carry charactersPresent, witnesses, innerThought, or immediateNeed forward by default: recompute them from THIS turn. If nobody qualifies for a volatile array, output [].
+
+=== _DELTA_MODE (slots.js) ===
+
+You are in DELTA mode. The previous state is provided for reference.
+1. ONLY return fields whose values CHANGED since the previous state.
+2. OMIT any field whose value is identical to the previous state.
+3. ALWAYS include: time, date, elapsed, charactersPresent, witnesses (these describe this turn).
+4. characters: ALWAYS include a FULL entity for EVERY NPC in charactersPresent. Recompute innerThought and immediateNeed from THIS turn; never copy them from the previous state. Include an off-scene character only if another durable field changed.
+5. relationships: include ONLY entities with changes. Include the FULL entity object if ANY field changed.
+6. For quests: include the FULL array if ANY quest was added/removed/modified. Omit entirely if unchanged.
+7. plotBranches: ALWAYS include (fresh suggestions every time).
+8. Re-verify charactersPresent and witnesses from THIS turn. Use [] when nobody qualifies; never carry either array forward out of habit.
+9. Do NOT echo unchanged data. Omitting a field means "unchanged" (except for the ALWAYS-include fields above).
