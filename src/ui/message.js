@@ -22,7 +22,7 @@ import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
 import { processTogetherExtraction, discardTogetherSceneBuild } from '../generation/together-scene-build.js';
 import { rebindInlineCtxForExpectedSwipe } from '../generation/inline-ctx.js';
-import { cancelSceneSourceTrace } from '../scene-source-trace.js';
+import { cancelSceneSourceTrace, finishSceneSourceTrace } from '../scene-source-trace.js';
 import { ensureChatSaved, anyPanelsActive } from '../settings.js';
 import { spAutoShow, spPostGenShow, spSetGenerating } from './mobile.js';
 import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, showChatBanner, clearThoughtLoading } from './loading.js';
@@ -273,10 +273,21 @@ export async function onCharMsg(idx){
                     // a manual cancel as a hard stop on the whole recovery chain.
                     if(!result && shouldSkipAutoSceneRecovery()){
                         log('Together fallback: Tier 2 skipped — user cancelled during Tier 1');
+                        cancelSceneSourceTrace();
                         result=null;
                     } else if(!result){
                         warn('Together mode: falling back to full separate generation ('+msgLen+' chars, '+_failureKind+')');
-                        result=await runManualSceneBuild(idx,'auto:together:fallback',null,{profile:fbProfile,preset:fbPreset});
+                        // Lore belongs to the original visible generation, not the
+                        // separate fallback request. Finish capture before generateTracker
+                        // so Tier 2 cannot pollute or drop the active trace.
+                        const sourceTrace=s.sceneSourceTrace===true
+                            ?finishSceneSourceTrace(_inlineCtx?.owner,{forceEmpty:true})
+                            :null;
+                        result=await runManualSceneBuild(idx,'auto:together:fallback',null,{
+                            profile:fbProfile,
+                            preset:fbPreset,
+                            sceneSourceTrace:sourceTrace,
+                        });
                         if(result){
                             const norm=normalizeTracker(result);
                             updatePanel(norm);spPostGenShow();
