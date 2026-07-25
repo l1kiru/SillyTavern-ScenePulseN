@@ -32,11 +32,25 @@ import {
 {
     const p = parseWiConsoleArgs(['[WI] Entry with primary key match', 'Artoria']);
     assert.equal(p.kind, 'primary_match');
+    assert.equal(p.key, 'Artoria');
     assert.equal(probeWiLogFormat(['[WI] Entry with primary key match']).ok, true);
 }
 
 {
+    const sticky = parseWiConsoleArgs(['[WI] Entry 42', 'activated because active sticky']);
+    assert.equal(sticky.kind, 'sticky');
+    assert.equal(sticky.uid, '42');
+    const primary = parseWiConsoleArgs(['[WI] Entry 7', 'activated by primary key match', 'Artoria']);
+    assert.equal(primary.kind, 'primary_match');
+    assert.equal(primary.uid, '7');
+    assert.equal(primary.key, 'Artoria');
+}
+
+{
     const entry = {
+        world: 'Fate',
+        uid: 42,
+        keys: ['Artoria'],
         stages: { accepted: { value: true, evidence: 'engine' } },
         triggers: [{ type: 'primary_key', matchedText: 'A', evidence: { type: 'inferred' } }],
     };
@@ -46,6 +60,44 @@ import {
     assert.equal(out.stages.accepted.evidence, 'engine');
     assert.ok(out.triggers.some(t => t.evidence.type === 'diagnostic' && t.originalKey === 'Artoria'));
     assert.ok(out.triggers.some(t => t.evidence.type === 'inferred'));
+}
+
+{
+    const a = {
+        world: 'W', uid: 1, keys: ['alpha'],
+        stages: { accepted: { value: true, evidence: 'engine' } },
+        triggers: [],
+    };
+    const b = {
+        world: 'W', uid: 2, keys: ['beta'],
+        stages: { accepted: { value: true, evidence: 'engine' } },
+        triggers: [],
+    };
+    const sticky = { kind: 'sticky', uid: '1' };
+    assert.equal(reconcileDiagnosticEvent(a, sticky).triggers.length, 1);
+    assert.equal(reconcileDiagnosticEvent(b, sticky).triggers.length, 0);
+    // No uid/world → never broadcast sticky to every entry
+    assert.equal(reconcileDiagnosticEvent(a, { kind: 'sticky' }).triggers.length, 0);
+    assert.equal(reconcileDiagnosticEvent(b, { kind: 'sticky' }).triggers.length, 0);
+}
+
+{
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 }, {
+        enabled: true,
+        chat: [{ mes: 'x' }],
+        diagnostics: true,
+    });
+    recordWorldInfoActivation([
+        { world: 'W', uid: 1, comment: 'A', key: ['k'], content: 'x' },
+        { world: 'W', uid: 2, comment: 'B', key: ['k'], content: 'y' },
+    ]);
+    console.debug('[WI] Entry 1', 'activated because active sticky');
+    const trace = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    const e1 = trace.lorebook.entries.find(e => String(e.uid) === '1');
+    const e2 = trace.lorebook.entries.find(e => String(e.uid) === '2');
+    assert.ok(e1.triggers.some(t => t.type === 'sticky' && t.evidence?.type === 'diagnostic'));
+    assert.ok(!e2.triggers.some(t => t.type === 'sticky' && t.evidence?.type === 'diagnostic'));
 }
 
 {
