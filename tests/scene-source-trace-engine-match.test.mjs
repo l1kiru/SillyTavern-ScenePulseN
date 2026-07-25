@@ -124,6 +124,37 @@ import {
 }
 
 {
+    // Buffer would first-hit Alpha; engine primaryMatch.Beta must win alone
+    _resetSceneSourceTraceForTests();
+    startSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 }, {
+        enabled: true, chat: [{ mes: 'Alpha and Beta both here' }],
+    });
+    recordWorldInfoScanDone({
+        state: { current: 1, next: 0, loopCount: 0 },
+        activated: { entries: new Map([['W.1', { world: 'W', uid: 1, key: ['Alpha', 'Beta'], content: 'x', comment: 'E' }]]), text: 'x' },
+        budget: { current: 1, overflowed: false },
+        decisions: [{
+            entry: { world: 'W', uid: 1 },
+            loop: 0,
+            scanState: 'INITIAL',
+            status: 'accepted',
+            reason: 'primary_key',
+            primaryMatch: { matched: true, text: 'Beta', index: 10, originalKey: 'Beta' },
+            secondaryMatches: [],
+            selectiveLogic: 0,
+            selectivePassed: true,
+        }],
+        timedEffects: { isEffectActive: () => false },
+    });
+    recordWorldInfoActivation([{ world: 'W', uid: 1, key: ['Alpha', 'Beta'], comment: 'E', content: 'x' }]);
+    const eng = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    const entry = eng.lorebook.entries[0];
+    assert.deepEqual(entry.matchedKeys, ['Beta']);
+    assert.ok(!entry.triggers.some(t => t.type === 'primary_key' && t.evidence?.type === 'inferred'));
+    assert.equal(entry.triggers.find(t => t.type === 'primary_key')?.matchedText, 'Beta');
+}
+
+{
     const why = explainWhyNot(
         { world: 'Fate', uid: '42', rejection: { reason: 'secondary_failed', evidence: 'engine' },
             selectiveEvaluation: { logic: 'AND_ALL', passed: false, evidence: 'engine' } },

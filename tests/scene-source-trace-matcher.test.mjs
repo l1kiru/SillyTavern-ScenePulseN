@@ -40,4 +40,18 @@ import fixture from './fixtures/wi-artoria-regex.json' with { type: 'json' };
     assert.equal(r.matchKind, 'none');
 }
 
+// ST .find() order: only first matching primary key is authoritative for inferred match
+{
+    const r = inferTriggersForEntry(
+        { key: ['Alpha', 'Beta'], caseSensitive: false },
+        'Beta and Alpha both appear here',
+        {},
+    );
+    assert.equal(r.matchKind, 'keys');
+    assert.deepEqual(r.matchedKeys, ['Alpha']);
+    assert.equal(r.triggers.length, 1);
+    assert.equal(r.triggers[0].matchedText, 'Alpha');
+    assert.equal(r.triggers[0].evidence.type, 'inferred');
+}
+
 console.log('scene-source-trace-matcher.test.mjs: all tests passed');

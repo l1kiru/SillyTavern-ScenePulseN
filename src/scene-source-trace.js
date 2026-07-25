@@ -3,7 +3,7 @@
 
 import { EvidenceLevel, evidence } from './scene-source-trace/evidence.js';
 import { migrateTraceToV3View } from './scene-source-trace/migrate.js';
-import { capturePreGenScanContext } from './scene-source-trace/scan-context.js';
+import { capturePreGenScanContext, normalizeScanDepth } from './scene-source-trace/scan-context.js';
 import {
     entryKey,
     snapshotScanDone,
@@ -42,6 +42,7 @@ export {
     evidence,
     migrateTraceToV3View,
     capturePreGenScanContext,
+    normalizeScanDepth,
     entryKey,
     snapshotScanDone,
     snapshotEntriesLoaded,
@@ -162,22 +163,23 @@ export function normalizeWorldInfoEvent(payload) {
     return out;
 }
 
-/** Build WI-like scan text from the last `depth` chat messages. */
+/** Build WI-like scan text from the last `depth` chat messages. depth 0 → empty. */
 export function buildWiScanBuffer(chat, depth) {
     if (!Array.isArray(chat) || !chat.length) return '';
-    const n = Math.max(1, Number(depth) || SCAN_DEPTH_FALLBACK);
+    const n = normalizeScanDepth(depth, SCAN_DEPTH_FALLBACK);
+    if (n === 0) return '';
     return chat.slice(-n).map(m => String(m?.mes ?? '')).join('\n');
 }
 
 export function resolveScanDepth() {
     try {
         const fromDom = snapshotWorldInfoSettings(readWiSettingsFromDom());
-        if (fromDom.scanDepth > 0) return fromDom.scanDepth;
+        if (Number.isFinite(fromDom.scanDepth) && fromDom.scanDepth >= 0) return fromDom.scanDepth;
         const ctx = typeof SillyTavern !== 'undefined' ? SillyTavern.getContext?.() : null;
         const fromCtx = ctx?.power_user?.world_info_depth;
         const fromGlobal = typeof power_user !== 'undefined' ? power_user?.world_info_depth : undefined;
         const n = Number(fromCtx ?? fromGlobal);
-        if (Number.isFinite(n) && n > 0) return n;
+        if (Number.isFinite(n) && n >= 0) return n;
     } catch { /* ignore */ }
     return SCAN_DEPTH_FALLBACK;
 }
@@ -266,13 +268,20 @@ export function startSceneSourceTrace(owner, {
         return;
     }
     _eventSeq = 0;
-    const scanDepth = depth != null ? Number(depth) : resolveScanDepth();
+    const scanDepth = depth != null && Number.isFinite(Number(depth))
+        ? normalizeScanDepth(depth, SCAN_DEPTH_FALLBACK)
+        : resolveScanDepth();
     const settings = snapshotWorldInfoSettings(
         settingsRaw || readWiSettingsFromDom(),
     );
-    if (!settings.scanDepth && scanDepth) settings.scanDepth = scanDepth;
+    if (!Number.isFinite(settings.scanDepth) || settings.scanDepth < 0) {
+        settings.scanDepth = scanDepth;
+    }
+    const depthForCapture = Number.isFinite(settings.scanDepth) && settings.scanDepth >= 0
+        ? settings.scanDepth
+        : (Number.isFinite(scanDepth) && scanDepth >= 0 ? scanDepth : SCAN_DEPTH_FALLBACK);
     const scanContext = capturePreGenScanContext(chat, {
-        depth: settings.scanDepth || scanDepth || SCAN_DEPTH_FALLBACK,
+        depth: depthForCapture,
         includeNames: includeNames || settings.includeNames,
     });
     _activeTrace = {

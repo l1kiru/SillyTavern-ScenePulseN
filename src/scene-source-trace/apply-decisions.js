@@ -85,23 +85,24 @@ export function applyScanDecisions(traceState, decisions, { phase = 'scan' } = {
         }
 
         if (d.primaryMatch?.matched || d.primaryMatch?.text || d.primaryMatch?.originalKey) {
-            // Drop inferred primary triggers
+            // Engine primary is sole fact — drop all inferred primary triggers
             rec.triggers = (rec.triggers || []).filter(
                 t => !(t.type === 'primary_key' && t.evidence?.type === EvidenceLevel.INFERRED),
             );
             if (d.primaryMatch.matched !== false && (d.primaryMatch.text || d.primaryMatch.originalKey)) {
+                const text = d.primaryMatch.text || '';
+                rec.triggers = (rec.triggers || []).filter(t => t.type !== 'primary_key');
                 rec.triggers.push({
                     type: 'primary_key',
                     originalKey: d.primaryMatch.originalKey || '',
-                    matchedText: d.primaryMatch.text || '',
+                    matchedText: text,
                     matchIndex: Number.isFinite(d.primaryMatch.index) ? d.primaryMatch.index : -1,
                     groups: d.primaryMatch.groups ?? null,
                     evidence: evidence(EvidenceLevel.ENGINE, 1),
                 });
-                if (Array.isArray(rec.matchedKeys) || rec.matchedKeys == null) {
-                    rec.matchedKeys = d.primaryMatch.text ? [d.primaryMatch.text] : [];
-                }
-                if (rec.matchKind === 'none' || !rec.matchKind) rec.matchKind = 'keys';
+                // Always single engine key — never keep buffer multi-hit list
+                rec.matchedKeys = text ? [text] : (d.primaryMatch.originalKey ? [String(d.primaryMatch.originalKey)] : []);
+                rec.matchKind = 'keys';
             }
         }
 

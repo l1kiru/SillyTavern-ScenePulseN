@@ -157,10 +157,14 @@ export function inferTriggersForEntry(entry, buffer, settings = {}) {
     const secondaryKeys = _secondaryOf(entry);
     const logic = entry?.selectiveLogic ?? entry?.selective_logic ?? WI_LOGIC.AND_ANY;
 
-    const primaryHits = [];
+    // ST uses entry.key.find — only the first matching primary is the activation key.
+    let firstPrimary = null;
     for (const key of primaryKeys) {
         const m = matchOneKey(text, key, entry, settings);
-        if (m) primaryHits.push(m);
+        if (m) {
+            firstPrimary = m;
+            break;
+        }
     }
 
     let secondaryHits = 0;
@@ -172,21 +176,23 @@ export function inferTriggersForEntry(entry, buffer, settings = {}) {
         return { triggers: [], matchedKeys: [], matchKind: 'none' };
     }
 
-    if (!primaryHits.length) {
+    if (!firstPrimary) {
         return { triggers: [], matchedKeys: [], matchKind: 'none' };
     }
 
-    const isRegex = (k) => !!parseWiRegexKey(k);
-    const triggers = primaryHits.map(h => ({
-        type: 'primary_key',
-        originalKey: h.originalKey,
-        matchedText: h.hit,
-        matchIndex: h.index,
-        groups: h.groups,
-        evidence: evidence(EvidenceLevel.INFERRED, isRegex(h.originalKey) ? 0.7 : 0.75),
-    }));
-    const matchedKeys = [...new Set(primaryHits.map(h => h.hit))];
-    return { triggers, matchedKeys, matchKind: 'keys' };
+    const isRegex = !!parseWiRegexKey(firstPrimary.originalKey);
+    return {
+        triggers: [{
+            type: 'primary_key',
+            originalKey: firstPrimary.originalKey,
+            matchedText: firstPrimary.hit,
+            matchIndex: firstPrimary.index,
+            groups: firstPrimary.groups,
+            evidence: evidence(EvidenceLevel.INFERRED, isRegex ? 0.7 : 0.75),
+        }],
+        matchedKeys: [firstPrimary.hit],
+        matchKind: 'keys',
+    };
 }
 
 /** Legacy wrapper used by older tests / call sites. */
