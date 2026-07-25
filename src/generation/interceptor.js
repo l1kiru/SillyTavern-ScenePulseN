@@ -315,7 +315,15 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             sceneBuildOperationId:_sceneOp.operationId,
         };
         setInlineGenerationContext(_inlineCtx);
-        startSceneSourceTrace(_owner,{enabled:s.sceneSourceTrace===true});
+        try {
+            const _ctx = SillyTavern.getContext?.() || {};
+            startSceneSourceTrace(_owner, {
+                enabled: s.sceneSourceTrace === true,
+                chat: _ctx.chat,
+            });
+        } catch {
+            startSceneSourceTrace(_owner, { enabled: s.sceneSourceTrace === true });
+        }
         const _genStart = Date.now();
         setInlineGenStartMs(_genStart);
         setInlineExtractionDone(false);

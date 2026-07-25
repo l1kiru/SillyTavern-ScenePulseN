@@ -144,7 +144,7 @@ for (let i = 0; i < 25; i++) {
     recordWorldInfoActivation({ world: 'Book', uid: i, key: 'k' + i, content: 'entry ' + i });
 }
 const trace = finishSceneSourceTrace(owner, { forceEmpty: true });
-assert.equal(trace.v, 2);
+assert.equal(trace.v, 3);
 assert.equal(trace.lorebook.count, 25);
 
 const fat = {
@@ -158,7 +158,32 @@ const fat = {
     })),
 };
 assert.ok(trimLorebookForStorage(fat).omitted > 0);
-assert.ok(JSON.stringify(trimLorebookForStorage(fat)).length <= MAX_LOREBOOK_JSON_BYTES);
+assert.ok(new TextEncoder().encode(JSON.stringify(trimLorebookForStorage(fat))).byteLength <= MAX_LOREBOOK_JSON_BYTES);
+
+// Causal inversion fix: key only in post-gen assistant reply must not match
+{
+    _resetSceneSourceTraceForTests();
+    const chatBefore = [{ mes: 'hello there' }];
+    startSceneSourceTrace(
+        { chatKey: 'c', targetMessageId: 1, swipeId: 0 },
+        { enabled: true, chat: chatBefore, depth: 10 },
+    );
+    recordWorldInfoActivation([{ world: 'W', uid: 1, comment: 'E', key: ['SecretKey'], content: 'x' }]);
+    globalThis.SillyTavern.getContext = () => ({
+        chat: [{ mes: 'hello there' }, { mes: 'SecretKey in assistant reply' }],
+        power_user: { world_info_depth: 10 },
+    });
+    const causal = finishSceneSourceTrace({ chatKey: 'c', targetMessageId: 1, swipeId: 0 });
+    assert.deepEqual(causal.lorebook.entries[0].matchedKeys, []);
+    assert.equal(causal.lorebook.entries[0].matchKind, 'none');
+}
+
+// Artoria compound regex fixture
+{
+    const fixture = (await import('./fixtures/wi-artoria-regex.json', { with: { type: 'json' } })).default;
+    const { matchedKeys } = matchEntryKeys({ keys: [fixture.key] }, 'She saw Арторией Пендрагон yesterday');
+    assert.ok(matchedKeys.some(k => /пендрагон/i.test(k)));
+}
 
 _resetSceneSourceTraceForTests();
 const owner0 = { chatKey: 'chat-b', targetMessageId: 5, swipeId: 0 };
@@ -225,8 +250,9 @@ const modelKeys = buildTraceDrawerModel({
     trace: { lorebook: { count: 1, entries: [{ world: 'A', title: 'B', matchedKeys: ['C'], matchKind: 'keys' }] } },
 });
 assert.equal(modelKeys.groups[0].items[0].title, 'B');
-assert.equal(modelKeys.groups[0].items[0].keyLine, 'key - { C }');
-assert.equal(modelKeys.groups[0].items[0].tokens, null);
+assert.match(modelKeys.groups[0].items[0].keyLine, /\{ C \}/);
+assert.ok(modelKeys.groups[0].items[0].keyLine.includes('Inferred key') || modelKeys.groups[0].items[0].keyLine.startsWith('key'));
+assert.ok(modelKeys.groups[0].items[0].tokens == null || modelKeys.groups[0].items[0].tokens === 0);
 assert.deepEqual(modelKeys.groups[0].items[0].matchedKeys, ['C']);
 assert.equal(modelKeys.groups[0].items[0].matchKind, 'keys');
 
@@ -290,7 +316,7 @@ mounted.chip.click();
 assert.equal(mounted.drawer.hidden, false);
 assert.match(mounted.drawer.innerHTML, /sp-source-trace-entry-title/);
 assert.match(mounted.drawer.innerHTML, /Lancer-class Servant/);
-assert.match(mounted.drawer.innerHTML, /key - \{ Artoria Pendragon \}/);
+assert.match(mounted.drawer.innerHTML, /(?:key|Inferred key) - \{ Artoria Pendragon \}/);
 assert.ok(!mounted.drawer.innerHTML.includes('fate_lorebook —'));
 assert.match(mounted.drawer.innerHTML, /fate_lorebook/);
 assert.match(mounted.drawer.innerHTML, /Artoria Pendragon/);

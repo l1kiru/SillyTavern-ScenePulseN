@@ -148,6 +148,27 @@
     font-size: 9px;
 }
 
+.sp-source-trace-attach,
+.sp-source-trace-budget {
+    color: var(--sp-text-dim);
+    font-size: 9px;
+    margin: 2px 0 4px;
+}
+
+.sp-source-trace-timeline {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid var(--sp-border);
+}
+.sp-source-trace-timeline-title {
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+.sp-source-trace-timeline-row {
+    color: var(--sp-text-dim);
+    font-size: 9px;
+}
+
 /* Temporary WI key match underline in chat (.mes_text) */
 .sp-wi-key-hit {
     text-decoration: underline;

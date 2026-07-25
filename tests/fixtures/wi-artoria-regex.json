@@ -1,0 +1,5 @@
+{
+  "key": "/(?:artoria lancer|lion king|артори(?:я|и|ю|ей) лансер|артори(?:я|и|ю|ей) пендрагон)/i",
+  "positives": ["artoria lancer", "lion king", "Арторией Пендрагон", "артория лансер"],
+  "negatives": ["xyzzy", "artoriax lancer"]
+}

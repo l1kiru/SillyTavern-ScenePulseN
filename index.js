@@ -43,7 +43,13 @@ import {
 } from './src/generation/scene-build-controller.js';
 import { currentChatKey } from './src/message-fingerprint.js';
 import { initSceneBuildUi, reconcileSceneBuildUi, runManualSceneBuild } from './src/ui/scene-build-ui.js';
-import { recordWorldInfoActivation, cancelSceneSourceTrace } from './src/scene-source-trace.js';
+import {
+    recordWorldInfoActivation,
+    recordWorldInfoScanDone,
+    recordWorldInfoEntriesLoaded,
+    recordWorldInfoForceActivate,
+    cancelSceneSourceTrace,
+} from './src/scene-source-trace.js';
 
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
@@ -202,12 +208,40 @@ eventSource.on(event_types.STREAM_TOKEN_RECEIVED, text => {
     try { noteStreamingText(text); } catch {}
 });
 
+function _sceneSourceTraceGate() {
+    const s = getSettings();
+    return !!(s.enabled && s.injectionMethod === 'inline' && s.sceneSourceTrace === true && inlineGenStartMs > 0 && inlineGenerationContext);
+}
+
 if (event_types.WORLD_INFO_ACTIVATED) {
     eventSource.on(event_types.WORLD_INFO_ACTIVATED, payload => {
         try {
-            const s=getSettings();
-            if(!s.enabled||s.injectionMethod!=='inline'||s.sceneSourceTrace!==true||inlineGenStartMs<=0||!inlineGenerationContext)return;
+            if (!_sceneSourceTraceGate()) return;
             recordWorldInfoActivation(payload);
+        } catch {}
+    });
+}
+if (event_types.WORLDINFO_SCAN_DONE) {
+    eventSource.on(event_types.WORLDINFO_SCAN_DONE, args => {
+        try {
+            if (!_sceneSourceTraceGate()) return;
+            recordWorldInfoScanDone(args);
+        } catch {}
+    });
+}
+if (event_types.WORLDINFO_ENTRIES_LOADED) {
+    eventSource.on(event_types.WORLDINFO_ENTRIES_LOADED, payload => {
+        try {
+            if (!_sceneSourceTraceGate()) return;
+            recordWorldInfoEntriesLoaded(payload);
+        } catch {}
+    });
+}
+if (event_types.WORLDINFO_FORCE_ACTIVATE) {
+    eventSource.on(event_types.WORLDINFO_FORCE_ACTIVATE, entries => {
+        try {
+            if (!_sceneSourceTraceGate()) return;
+            recordWorldInfoForceActivate(entries);
         } catch {}
     });
 }
