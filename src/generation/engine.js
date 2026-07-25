@@ -524,6 +524,22 @@ export async function generateTracker(mesIdx,partKey,opts){
 // It returns raw parsed JSON; the caller is responsible for running it through the normal
 // processExtraction pipeline so the result is saved/normalized/displayed identically to
 // every other extraction.
+
+/** Pure builder for the continuation recovery user prompt (JSON-only, no SP markers). */
+export function buildContinuationRecoveryPrompt({narrativeText,deltaInstruction='',prevStateJson=null}={}){
+    const prevState=prevStateJson==null?'':`\n\nPREVIOUS STATE (continuity only — names/aliases/unchanged durable facts; not a license for new story facts):\n${typeof prevStateJson==='string'?prevStateJson:JSON.stringify(prevStateJson,null,2)}`;
+    return `The previous turn produced this narrative:
+
+${narrativeText}
+
+You forgot to append the required tracker JSON block. Output ONLY the tracker JSON for this narrative — no markers, no markdown fences, no explanation. Just a single valid JSON object describing the scene state after this narrative.
+- PREVIOUS STATE is continuity only (names/aliases/unchanged durable facts).
+- New facts and meter changes must come from this narrative only.
+- No markdown fences and no commentary.${deltaInstruction}${prevState}
+
+Output the JSON object now:`;
+}
+
 export async function continuationReprompt(narrativeText, opts){
     if(!getSettings().enabled){log('continuationReprompt: extension disabled, skipping');return null}
     if(generating){warn('continuationReprompt: busy, nonce=',genNonce);return null}
@@ -556,10 +572,10 @@ export async function continuationReprompt(narrativeText, opts){
         externalSignal.addEventListener('abort',()=>{try{continuationAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
     }
     const sceneOpId=opts?.sceneBuildOperationId||opts?.operationId||null;
-    let prevState='';
+    let prevStateJson=null;
     if(lastSnap){
         const _cleanSnap=(s)=>{const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(settings.panels?.storyIdeas===false)delete c.plotBranches;if(Array.isArray(c.charactersPresent)){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c};
-        prevState=`\n\nPREVIOUS STATE (carry forward unchanged details, update only what changed):\n${JSON.stringify(_cleanSnap(lastSnap),null,2)}`;
+        prevStateJson=_cleanSnap(lastSnap);
     }
     // v6.9.1: use the shared shouldUseDelta() helper to respect the
     // periodic refresh counter and the forceFullNextTurn flag.
@@ -567,13 +583,7 @@ export async function continuationReprompt(narrativeText, opts){
     const deltaInstruction=isDelta
         ?`\n\nDELTA MODE: Include ONLY fields that changed since the previous state. Always include ${deltaAlways}. Include a full character entry for every present NPC and recompute innerThought and immediateNeed from this narrative. Use [] when nobody is present or witnessed the scene. Omit other unchanged fields.`
         :'';
-    const prompt=`The previous turn produced this narrative:
-
-${narrativeText}
-
-You forgot to append the required tracker JSON block. Output ONLY the tracker JSON for this narrative — no markers, no markdown fences, no explanation. Just a single valid JSON object describing the scene state after this narrative.${deltaInstruction}${prevState}
-
-Output the JSON object now:`;
+    const prompt=buildContinuationRecoveryPrompt({narrativeText,deltaInstruction,prevStateJson});
     log('Continuation prompt length:',prompt.length,'chars (~',Math.round(prompt.length/4),'tokens)');
     let continuationPromptTokens=0,continuationCompletionTokens=0,continuationStrategy='';
     const doGen=async()=>{
