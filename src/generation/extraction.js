@@ -10,6 +10,52 @@ export const SP_MARKER_START='<!--SP_TRACKER_START-->';
 export const SP_MARKER_END='<!--SP_TRACKER_END-->';
 export const KNOWN_KEYS=['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','characters','relationships','northStar','plotBranches','mainQuests','sideQuests'];
 const KNOWN_WRAPPER_KEYS=['environment','scene','sceneDetails','sceneInfo','sceneAnalysis','questJournal','quests'];
+const _ALT_TRACKER_MARKERS=[
+    [SP_MARKER_START,SP_MARKER_END],
+    ['{{//SP_TRACKER_START}}','{{//SP_TRACKER_END}}'],
+    ['{{SP_TRACKER_START}}','{{SP_TRACKER_END}}'],
+    ['[SP_TRACKER_START]','[SP_TRACKER_END]'],
+    ['**SP_TRACKER_START**','**SP_TRACKER_END**'],
+];
+
+/**
+ * Heuristic reply split (chars/4) for Together: narrative before tracker markers vs tracker block.
+ * @returns {{ narrativeTokens: number, trackerTokens: number, totalTokens: number, foundTracker: boolean }}
+ */
+export function estimateReplyTokenSplit(mesText){
+    const text=String(mesText??'');
+    const est=n=>Math.max(0,Math.round(String(n??'').length/4));
+    if(!text)return{narrativeTokens:0,trackerTokens:0,totalTokens:0,foundTracker:false};
+    for(const[startMark,endMark]of _ALT_TRACKER_MARKERS){
+        const startIdx=text.indexOf(startMark);
+        if(startIdx<0)continue;
+        const endIdx=text.indexOf(endMark,startIdx+startMark.length);
+        const narrative=text.slice(0,startIdx);
+        const tracker=endIdx>=startIdx
+            ?text.slice(startIdx,endIdx+endMark.length)
+            :text.slice(startIdx);
+        return{
+            narrativeTokens:est(narrative),
+            trackerTokens:est(tracker),
+            totalTokens:est(text),
+            foundTracker:true,
+        };
+    }
+    // Fence at end of message (same fallback family as extractInlineTracker)
+    const fence=text.match(/```json\s*\n?([\s\S]*?)```\s*$/);
+    if(fence){
+        const startIdx=fence.index??text.lastIndexOf('```json');
+        if(startIdx>=0){
+            return{
+                narrativeTokens:est(text.slice(0,startIdx)),
+                trackerTokens:est(text.slice(startIdx)),
+                totalTokens:est(text),
+                foundTracker:true,
+            };
+        }
+    }
+    return{narrativeTokens:est(text),trackerTokens:0,totalTokens:est(text),foundTracker:false};
+}
 
 function _codedError(code,message){const e=new Error(message);e.code=code;return e}
 

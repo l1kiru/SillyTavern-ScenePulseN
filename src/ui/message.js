@@ -2,7 +2,7 @@
 import { log, warn, err } from '../logger.js';
 import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
-import { SP_MARKER_START, extractInlineTracker } from '../generation/extraction.js';
+import { SP_MARKER_START, extractInlineTracker, estimateReplyTokenSplit } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
 import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
@@ -181,17 +181,18 @@ export async function onCharMsg(idx){
             }
         }
         if(extracted){
-            // Estimate tokens from together mode -- use full message length (narrative + tracker)
-            const fullMsgLen=(chat[idx]?.mes||'').length+JSON.stringify(extracted).length;
-            const _compTokens=Math.round(fullMsgLen/4);
+            // Estimate tokens from together mode — narrative vs tracker (chars/4)
+            const _parts=estimateReplyTokenSplit(chat[idx]?.mes||'');
+            const _compTokens=_parts.totalTokens||Math.round((chat[idx]?.mes||'').length/4);
             const _elapsed=inlineGenStartMs>0?((Date.now()-inlineGenStartMs)/1000):0;
             setGenMeta({...genMeta, promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed});
             setInlineGenStartMs(0);
-            log('onCharMsg [inline]: extracted tracker from message',idx,'keys=',Object.keys(extracted).length,'~tokens:',_compTokens);
+            log('onCharMsg [inline]: extracted tracker from message',idx,'keys=',Object.keys(extracted).length,'~tokens:',_compTokens,'narrative=',_parts.narrativeTokens,'tracker=',_parts.trackerTokens);
             setInlineExtractionDone(true);setPendingInlineIdx(-1);
             stopStreamingHider();
             await processTogetherExtraction(idx, extracted, 'auto:together', _inlineCtx, {
                 promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed,
+                narrativeTokens:_parts.narrativeTokens, trackerTokens:_parts.trackerTokens,
                 stopHider:false, unlockGen:true,
             });
             try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}

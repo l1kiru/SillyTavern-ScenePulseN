@@ -15,6 +15,7 @@ import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
 import { currentChatKey } from '../message-fingerprint.js';
 import { promptInjectionOwnerMatches } from '../generation/prompt-injection.js';
+import { estimateReplyTokenSplit } from '../generation/extraction.js';
 import {
     _lastPanelUpdate, set_lastPanelUpdate,
     set_cachedNormData,
@@ -1530,13 +1531,36 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         if(_mSource){const srcMap={'auto:together':t('Auto'),'auto:together:backup':t('Backup'),'auto:together:fallback':t('Fallback'),'auto:separate':t('Auto'),'manual:full':t('Full regen'),'manual:settings':t('Settings'),'manual:message':t('Msg regen'),'manual:thoughts':t('Thoughts')};let srcLabel=srcMap[_mSource]||'';if(!srcLabel&&_mSource.startsWith('manual:section:'))srcLabel=_mSource.replace('manual:section:','');const isFallback=_mSource.includes('fallback');const isBackup=_mSource.includes('backup');const cls=isFallback?'sp-gen-src sp-gen-src-warn':isBackup?'sp-gen-src sp-gen-src-warn':'sp-gen-src';if(srcLabel)fhtml+=`<span title="${esc(t('Source: {source}',{source:_mSource}))}" class="${cls}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.4"/><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1" opacity="0.4"/></svg> ${esc(srcLabel)}</span>`}
         // Output tokens: Together labels the full reply; Separate labels tracker-only.
         if(_mTokens>0){
-            const _outLabel = (_meta.injectionMethod === 'inline' || (_mInject === 'inline' && !_meta.injectionMethod))
-                ? t('Reply')
-                : t('Tracker');
-            const _outTitle = _outLabel === t('Reply')
-                ? t('Estimated reply tokens (narrative + tracker)')
-                : t('Tracker data tokens only (excludes narrative)');
-            fhtml+=`<span title="${_outTitle}" class="sp-gen-badge-tracker">${_outLabel}: ~${_mTokens.toLocaleString()}</span>`;
+            const _isTogetherReply = (_meta.injectionMethod === 'inline' || (_mInject === 'inline' && !_meta.injectionMethod));
+            const _outLabel = _isTogetherReply ? t('Reply') : t('Tracker');
+            let _narr = Number(_meta.narrativeTokens);
+            let _track = Number(_meta.trackerTokens);
+            // Historical Together snapshots without split: re-estimate from the open message.
+            if (_isTogetherReply
+                && (!(Number.isFinite(_narr) && _narr >= 0) || !(Number.isFinite(_track) && _track >= 0))
+                && currentSnapshotMesIdx >= 0) {
+                try {
+                    const mes = SillyTavern.getContext()?.chat?.[currentSnapshotMesIdx]?.mes || '';
+                    if (mes) {
+                        const split = estimateReplyTokenSplit(mes);
+                        _narr = split.narrativeTokens;
+                        _track = split.trackerTokens;
+                    }
+                } catch {}
+            }
+            let _outTitle;
+            if (_isTogetherReply && Number.isFinite(_narr) && Number.isFinite(_track) && (_narr > 0 || _track > 0)) {
+                _outTitle = [
+                    t('Estimated reply tokens (narrative + tracker)'),
+                    t('{n} — narrative,', { n: _narr.toLocaleString() }),
+                    t('{n} — tracker JSON.', { n: _track.toLocaleString() }),
+                ].join('\n');
+            } else if (_isTogetherReply) {
+                _outTitle = t('Estimated reply tokens (narrative + tracker)');
+            } else {
+                _outTitle = t('Tracker data tokens only (excludes narrative)');
+            }
+            fhtml+=`<span title="${esc(_outTitle)}" class="sp-gen-badge-tracker">${_outLabel}: ~${_mTokens.toLocaleString()}</span>`;
         }
         // ScenePulse Together context footprint — always visible (not under •••).
         // Historical: from snapshot meta even if current UI mode is Separate.
