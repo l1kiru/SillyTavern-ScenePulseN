@@ -38,7 +38,10 @@ import { noteStreamingText, stopStreamingHider } from './src/generation/streamin
 import { cancelGeneration } from './src/generation/engine.js';
 import { scenePulseInterceptor, noteStreamProgress, clearStallWatchdog } from './src/generation/interceptor.js';
 import { rebindInlineCtxForExpectedSwipe } from './src/generation/inline-ctx.js';
-import { processTogetherExtraction, discardTogetherSceneBuild } from './src/generation/together-scene-build.js';
+import {
+    processTogetherExtraction, discardTogetherSceneBuild,
+    handleTogetherSwipeChange, unlockAfterSwipeCancel,
+} from './src/generation/together-scene-build.js';
 import {
     cancelTogetherSceneBuilds, cancelSceneBuildsForChat, disposeSceneBuilds,
     supersedeSceneBuildsForMessageExceptSwipe,
@@ -636,15 +639,28 @@ if (event_types.MESSAGE_UPDATED) {
 if (event_types.MESSAGE_SWIPED) {
     eventSource.on(event_types.MESSAGE_SWIPED, idx => {
         const id=Number(idx);const message=SillyTavern.getContext().chat?.[id];
-        if(message)_knownSwipeIds.set(id,Math.max(0,Number(message.swipe_id??0)||0));
+        const prevSwipe=_knownSwipeIds.has(id)?_knownSwipeIds.get(id):null;
+        const swipeId=Math.max(0,Number(message?.swipe_id??0)||0);
+        if(message)_knownSwipeIds.set(id,swipeId);
         if(_pendingActiveSwipeDeletion&&Number(_pendingActiveSwipeDeletion.payload?.messageId)===id){
             const pending=_pendingActiveSwipeDeletion;_pendingActiveSwipeDeletion=null;clearTimeout(pending.timer);
             void spOnSwipeDeleted(pending.payload,true);return;
         }
         void onMessageSwiped(id);
         try{
-            const swipeId=Math.max(0,Number(message?.swipe_id??0)||0);
-            supersedeSceneBuildsForMessageExceptSwipe(id,swipeId);
+            // Drop scene builds owned by other swipes on this message.
+            const superseded=supersedeSceneBuildsForMessageExceptSwipe(id,swipeId);
+            // Mid-flight Together: browsing away cancels scene ownership;
+            // expected swipe-generation advance (type=swipe, +1) rebinds.
+            // Unlock generating only when this swipe cancelled work for mesId.
+            if(prevSwipe!=null&&prevSwipe!==swipeId){
+                const togetherResult=handleTogetherSwipeChange(id,swipeId);
+                unlockAfterSwipeCancel({
+                    messageId:id,
+                    supersededCount:superseded,
+                    togetherResult,
+                });
+            }
             reconcileSceneBuildUi();
         }catch{}
     });

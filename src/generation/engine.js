@@ -4,6 +4,7 @@ import { log, warn, err } from '../logger.js';
 import {
     generating, genNonce, genMeta, lastGenSource,
     setGenerating, setCancelRequested, setGenNonce, setGenMeta,
+    setGenerationTargetMesIdx,
     setCurrentSnapshotMesIdx, setLastGenSource, setLastRawResponse, setLastDeltaPayload,
     setInlineGenStartMs, setInlineExtractionDone, setPendingInlineIdx, setInlineGenerationContext,
     addSessionTokens, setLastDeltaSavings, setLastExtractionFailure
@@ -108,7 +109,7 @@ export function cancelGeneration(){
     const oldNonce=genNonce;
     setGenNonce(genNonce+1); // invalidate in-flight generation
     setCancelRequested(true);
-    setGenerating(false);spSetGenerating(false);setBrandState('idle'); // unlock for next generation
+    setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setBrandState('idle'); // unlock for next generation
     // Defensive reset: the inline-generation timestamp gates extraction ownership.
     // If we cancel without clearing it, a subsequent CHARACTER_MESSAGE_RENDERED from
     // ANOTHER extension (MemoryBooks memory insertion, etc.) would be misattributed
@@ -159,7 +160,7 @@ export async function generateTracker(mesIdx,partKey,opts){
     if(!getSettings().enabled){log('generateTracker: extension disabled, skipping');return null}
     if(!canGenerateScene(SillyTavern.getContext(),mesIdx)){log('generateTracker: no selected chat/message to analyze, skipping');return null}
     if(generating){warn('Busy, nonce=',genNonce);return null}
-    setGenerating(true);setCancelRequested(false);spSetGenerating(true);setBrandState('generating');
+    setGenerating(true);setGenerationTargetMesIdx(mesIdx);setCancelRequested(false);spSetGenerating(true);setBrandState('generating');
     const myNonce=genNonce+1;setGenNonce(myNonce);
     const genStartMs=Date.now();
     const targetSwipeId=getActiveSwipeId(mesIdx);
@@ -205,7 +206,7 @@ export async function generateTracker(mesIdx,partKey,opts){
     const stopStOnAbort=opts?.stopStOnAbort!==false;
     if(externalSignal){
         if(externalSignal.aborted){
-            setGenerating(false);spSetGenerating(false);setBrandState('idle');
+            setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setBrandState('idle');
             return null;
         }
         externalSignal.addEventListener('abort',()=>{try{requestAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
@@ -390,22 +391,22 @@ export async function generateTracker(mesIdx,partKey,opts){
     }
     if(sceneOpId&&!isOperationCurrent(sceneOpId)){
         log('POST-GEN: scene build not current',sceneOpId,'— result discarded');
-        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         return null;
     }
     if(getActiveSwipeId(mesIdx)!==targetSwipeId){
         log('POST-GEN: active swipe changed for message',mesIdx,'— result discarded');
-        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         return null;
     }
     const ownerCheck=validateOperationOwner(operationOwner,{requireSource:true});
     if(!ownerCheck.valid){
         log('POST-GEN: owner changed for message',mesIdx,'— result discarded:',ownerCheck.code);
-        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         try{toastr.info(t('Chat changed while ScenePulse was working. Run the tracker again.'),'ScenePulse')}catch{}
         return null;
     }
-    setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');
+    setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');
     if(result){
         terminalFailure=null;
         setLastExtractionFailure(null);
@@ -546,10 +547,10 @@ Output the JSON object now:`;
 export async function continuationReprompt(narrativeText, opts){
     if(!getSettings().enabled){log('continuationReprompt: extension disabled, skipping');return null}
     if(generating){warn('continuationReprompt: busy, nonce=',genNonce);return null}
-    setGenerating(true);setCancelRequested(false);spSetGenerating(true);setBrandState('generating');
+    const mesIdx=Number(opts?.mesIdx);
+    setGenerating(true);setGenerationTargetMesIdx(Number.isFinite(mesIdx)?mesIdx:null);setCancelRequested(false);spSetGenerating(true);setBrandState('generating');
     const myNonce=genNonce+1;setGenNonce(myNonce);
     const startMs=Date.now();
-    const mesIdx=Number(opts?.mesIdx);
     const operationOwner=opts?.owner||captureOperationOwner(mesIdx,opts?.swipeId);
     const rootSettings=getSettings();
     const settings=buildProfileView(rootSettings,getActiveProfile(rootSettings));
@@ -569,7 +570,7 @@ export async function continuationReprompt(narrativeText, opts){
     const stopStOnAbort=opts?.stopStOnAbort!==false;
     if(externalSignal){
         if(externalSignal.aborted){
-            setGenerating(false);spSetGenerating(false);setBrandState('idle');
+            setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setBrandState('idle');
             return null;
         }
         externalSignal.addEventListener('abort',()=>{try{continuationAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
@@ -654,10 +655,10 @@ export async function continuationReprompt(narrativeText, opts){
     }
     if(sceneOpId&&!isOperationCurrent(sceneOpId)){
         log('CONTINUATION POST: scene build not current',sceneOpId,'— discarded');
-        setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         return null;
     }
-    setGenerating(false);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');
+    setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');
     const elapsed=((Date.now()-startMs)/1000);
     if(result){
         log('=== CONTINUATION SUCCESS === elapsed=',elapsed.toFixed(1)+'s','keys=',Object.keys(result).length);

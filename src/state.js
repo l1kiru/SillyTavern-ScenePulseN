@@ -19,6 +19,8 @@ const state = {
     generating: false,
     cancelRequested: false,
     genNonce: 0,
+    /** mesIdx of in-flight generateTracker / continuation; null when idle */
+    generationTargetMesIdx: null,
     genMeta: { promptTokens: 0, completionTokens: 0, elapsed: 0 },
     inlineGenStartMs: 0,
     currentSnapshotMesIdx: -1,
@@ -99,6 +101,15 @@ export function shouldSkipAutoSceneRecovery() { return !!state.cancelRequested; 
 
 export let genNonce = state.genNonce;
 export function setGenNonce(v) { genNonce = state.genNonce = v; }
+
+export let generationTargetMesIdx = state.generationTargetMesIdx;
+export function setGenerationTargetMesIdx(v) {
+    generationTargetMesIdx = state.generationTargetMesIdx = (v == null || v === '' ? null : Number(v));
+    if (generationTargetMesIdx != null && !Number.isFinite(generationTargetMesIdx)) {
+        generationTargetMesIdx = state.generationTargetMesIdx = null;
+    }
+}
+export function getGenerationTargetMesIdx() { return state.generationTargetMesIdx; }
 
 export let genMeta = state.genMeta;
 export function setGenMeta(v) { genMeta = state.genMeta = v; }
