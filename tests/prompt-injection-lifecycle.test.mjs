@@ -208,13 +208,61 @@ _resetPromptInjectionModuleForTests();
     );
     const isRecover = true;
     let meta = null;
-    if (promptInjectionOwnerMatches(plan, { chatKey: 'other', messageId: 99, swipeId: 0 })) {
+    const planVerified = plan.status === 'verified' && plan.verification?.main === 'verified';
+    if (planVerified && promptInjectionOwnerMatches(plan, { chatKey: 'other', messageId: 99, swipeId: 0 })) {
         meta = serializePromptInjectionMeta(plan, 'verified');
     } else if (!isRecover) {
         const rt = getLastPromptInjectionMetrics();
         if (rt?.tokens?.totalInput > 0) meta = { tokens: rt.tokens };
     }
     assert.equal(meta, null);
+}
+
+// ── P1: owner match alone must not serialize pending plan as verified ──
+{
+    _resetPromptInjectionModuleForTests();
+    const plan = buildPromptInjectionPlan({
+        text: 'pending',
+        role: 'system',
+        owner: { chatKey: 'ck', messageId: 7, swipeId: 0 },
+    });
+    beginRequest('chat', plan);
+    assert.equal(promptInjectionOwnerMatches(plan, { chatKey: 'ck', messageId: 7, swipeId: 0 }), true);
+    assert.notEqual(plan.status, 'verified');
+    assert.notEqual(plan.verification.main, 'verified');
+    const planVerified = plan.status === 'verified' && plan.verification?.main === 'verified';
+    assert.equal(planVerified, false);
+    // Mimic pipeline attach policy
+    let attached = null;
+    if (planVerified && promptInjectionOwnerMatches(plan, { chatKey: 'ck', messageId: 7, swipeId: 0 })) {
+        attached = serializePromptInjectionMeta(plan, 'verified');
+    }
+    assert.equal(attached, null);
+}
+
+// ── P2: Separate meta must not show Together runtime SP Context badge ──
+{
+    _resetPromptInjectionModuleForTests();
+    setInlineGenerationContext({ chatKey: 'ck', mesIdx: 4, swipeId: 0 });
+    setLastPromptInjectionMetrics({
+        chatKey: 'ck',
+        messageId: 4,
+        swipeId: 0,
+        tokens: { mainInput: 200, tailInput: 10, totalInput: 210, estimateSource: 'heuristic' },
+        integrity: { main: 'verified', tail: 'verified', hook: 'x' },
+    });
+    assert.equal(
+        resolveSpContextFootprint({ injectionMethod: 'separate' }),
+        null,
+    );
+    // Historical Together badge on its own promptInjection still wins
+    const hist = resolveSpContextFootprint({
+        injectionMethod: 'separate',
+        promptInjection: {
+            tokens: { mainInput: 50, tailInput: 5, totalInput: 55, estimateSource: 'heuristic' },
+        },
+    });
+    assert.equal(hist.totalInput, 55);
 }
 
 // ── Footer refresh from runtime metrics with no snapshot ──
