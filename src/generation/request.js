@@ -1,6 +1,8 @@
 // One bounded request path for separate tracker generation.
 
 import { applyPromptRole } from '../prompts/role.js';
+import { suspendPromptInjection, restorePromptInjection } from './prompt-injection.js';
+import { getActivePromptInjectionRun } from '../state.js';
 
 const MIN_OUTPUT={full:4096,delta:2048,section:2048};
 const MAX_OUTPUT=8192;
@@ -55,12 +57,18 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
     signal?.addEventListener?.('abort',stop,{once:true});
     try{
         if(typeof stContext.generateQuietPrompt==='function'){
-            const value=await stContext.generateQuietPrompt({
-                quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
-                skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
-            });
-            throwIfAborted();
-            return{value,strategy:'quiet'};
+            const hadInjection=!!getActivePromptInjectionRun();
+            if(hadInjection)suspendPromptInjection();
+            try{
+                const value=await stContext.generateQuietPrompt({
+                    quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
+                    skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
+                });
+                throwIfAborted();
+                return{value,strategy:'quiet'};
+            }finally{
+                if(hadInjection)restorePromptInjection();
+            }
         }
         if(typeof stContext.generateRawData==='function'){
             const value=await stContext.generateRawData({

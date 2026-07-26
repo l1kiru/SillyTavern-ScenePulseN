@@ -21,7 +21,9 @@ import {
     currentSnapshotMesIdx,
     currentWeatherType,
     _isTimelineScrub,
-    _sessionTokensUsed, _lastDeltaSavings
+    _sessionTokensUsed, _lastDeltaSavings,
+    getLastPromptInjectionMetrics,
+    inlineGenerationContext,
 } from '../state.js';
 import { updateWeatherOverlay } from './weather.js';
 import { updateTimeTint } from './time-tint.js';
@@ -1434,8 +1436,50 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         if(_mInject==='inline')fhtml+=`<span title="${t('Together')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 7h4l1.5-3 2 6 1.5-3h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${t('Together')}</span>`;
         else fhtml+=`<span title="${t('Separate')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="4.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/><circle cx="9.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/></svg> ${t('Separate')}</span>`;
         if(_mSource){const srcMap={'auto:together':t('Auto'),'auto:together:backup':t('Backup'),'auto:together:fallback':t('Fallback'),'auto:separate':t('Auto'),'manual:full':t('Full regen'),'manual:settings':t('Settings'),'manual:message':t('Msg regen'),'manual:thoughts':t('Thoughts')};let srcLabel=srcMap[_mSource]||'';if(!srcLabel&&_mSource.startsWith('manual:section:'))srcLabel=_mSource.replace('manual:section:','');const isFallback=_mSource.includes('fallback');const isBackup=_mSource.includes('backup');const cls=isFallback?'sp-gen-src sp-gen-src-warn':isBackup?'sp-gen-src sp-gen-src-warn':'sp-gen-src';if(srcLabel)fhtml+=`<span title="${esc(t('Source: {source}',{source:_mSource}))}" class="${cls}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.4"/><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1" opacity="0.4"/></svg> ${esc(srcLabel)}</span>`}
-        // Tracking-only token cost (just the tracker portion, not narrative)
-        if(_mTokens>0)fhtml+=`<span title="${t('Tracker data tokens only (excludes narrative)')}" class="sp-gen-badge-tracker">${t('Tracker')}: ~${_mTokens.toLocaleString()}</span>`;
+        // Output tokens: Together labels the full reply; Separate labels tracker-only.
+        if(_mTokens>0){
+            const _outLabel = (_meta.injectionMethod === 'inline' || (_mInject === 'inline' && !_meta.injectionMethod))
+                ? t('Reply')
+                : t('Tracker');
+            const _outTitle = _outLabel === t('Reply')
+                ? t('Estimated reply tokens (narrative + tracker)')
+                : t('Tracker data tokens only (excludes narrative)');
+            fhtml+=`<span title="${_outTitle}" class="sp-gen-badge-tracker">${_outLabel}: ~${_mTokens.toLocaleString()}</span>`;
+        }
+        // ScenePulse Together context footprint — always visible (not under •••).
+        // Historical: from snapshot meta even if current UI mode is Separate.
+        // Runtime: only when chat/message/swipe match the metrics owner.
+        {
+            const _piMeta = _meta.promptInjection || null;
+            const _rt = getLastPromptInjectionMetrics();
+            let _fp = null;
+            if (_piMeta?.tokens?.totalInput > 0) {
+                _fp = _piMeta.tokens;
+            } else if (_rt?.tokens?.totalInput > 0) {
+                const _ownerOk = inlineGenerationContext
+                    && _rt.chatKey === inlineGenerationContext.chatKey
+                    && _rt.messageId === inlineGenerationContext.mesIdx
+                    && Number(_rt.swipeId) === Number(inlineGenerationContext.swipeId);
+                const _viewingLive = currentSnapshotMesIdx < 0
+                    || (inlineGenerationContext && currentSnapshotMesIdx === inlineGenerationContext.mesIdx);
+                if (_ownerOk || (_viewingLive && !_piMeta)) _fp = _rt.tokens;
+            }
+            if (_fp?.totalInput > 0) {
+                const _approx = _fp.totalInput >= 1000
+                    ? `≈${(_fp.totalInput / 1000).toFixed(1).replace(/\.0$/, '')}K`
+                    : `≈${_fp.totalInput}`;
+                const _tip = [
+                    t('ScenePulse used ≈{n} input tokens:', { n: _fp.totalInput.toLocaleString() }),
+                    t('{n} — required IN_PROMPT,', { n: (_fp.mainInput || 0).toLocaleString() }),
+                    t('{n} — final anchor.', { n: (_fp.tailInput || 0).toLocaleString() }),
+                    '',
+                    t('Includes active custom panels and tracking options for this run.'),
+                    t('Tracker JSON shares the main response limit; there is no separate output reserve.'),
+                ].join('\n');
+                const _aria = t('ScenePulse context footprint ≈{n} tokens', { n: _fp.totalInput.toLocaleString() });
+                fhtml += `<span class="sp-gen-badge-sp-context" title="${esc(_tip)}" aria-label="${esc(_aria)}">${t('SP Context')}: ${_approx}</span>`;
+            }
+        }
         // Delta savings indicator (read from snapshot metadata for historical nodes, fallback to current session)
         const _deltaPct=_meta.deltaSavings||_lastDeltaSavings||0;
         if(_deltaPct>0&&(_meta.deltaMode||s.deltaMode)){
@@ -1458,7 +1502,10 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         fhtml+=`<span class="sp-gen-analytics" title="${t('Token analytics')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><rect x="1.5" y="8" width="2" height="4.5" rx="0.4" fill="currentColor" opacity="0.4"/><rect x="4.5" y="5.5" width="2" height="7" rx="0.4" fill="currentColor" opacity="0.5"/><rect x="7.5" y="3" width="2" height="9.5" rx="0.4" fill="currentColor" opacity="0.6"/><rect x="10.5" y="1" width="2" height="11.5" rx="0.4" fill="currentColor" opacity="0.7"/></svg> ${t('Analytics')}</span>`;
         footer.innerHTML=fhtml;
         for(const item of footer.querySelectorAll(':scope > span')){
-            if(!item.classList.contains('sp-gen-badge-profile')&&!item.classList.contains('sp-gen-summary')&&!item.classList.contains('sp-gen-badge-mode'))item.classList.add('sp-gen-detail');
+            if(!item.classList.contains('sp-gen-badge-profile')
+                &&!item.classList.contains('sp-gen-summary')
+                &&!item.classList.contains('sp-gen-badge-mode')
+                &&!item.classList.contains('sp-gen-badge-sp-context'))item.classList.add('sp-gen-detail');
         }
         if(footer.querySelector('.sp-gen-detail')){
             const diagnostics=document.createElement('button');diagnostics.className='sp-gen-more';diagnostics.type='button';
