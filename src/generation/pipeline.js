@@ -40,7 +40,13 @@ import { serializePromptInjectionMeta, promptInjectionOwnerMatches } from './pro
  */
 export async function processExtraction(mesIdx, extracted, source, opts = {}) {
     const s = getSettings();
-    const { promptTokens = 0, completionTokens = 0, elapsed = 0 } = opts;
+    const {
+        promptTokens = 0,
+        completionTokens = 0,
+        elapsed = 0,
+        narrativeTokens = null,
+        trackerTokens = null,
+    } = opts;
     const sceneOpId = opts.sceneBuildOperationId || opts.operationId || null;
     if (sceneOpId && !isOperationCurrent(sceneOpId)) {
         warn('Pipeline: scene build not current; discarding result for', mesIdx, sceneOpId);
@@ -156,6 +162,8 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         deltaMode: _useDelta,
         deltaTurnsSinceFull: _useDelta ? _prevCounter + 1 : 0,
     };
+    if (narrativeTokens != null) norm._spMeta.narrativeTokens = narrativeTokens;
+    if (trackerTokens != null) norm._spMeta.trackerTokens = trackerTokens;
     if (_together) {
         const chatKey = currentChatKey();
         const plan = getActivePromptInjectionRun();
