@@ -21,7 +21,7 @@ import { classifyTimeChange } from '../temporal-check.js';
 import { currentChatFingerprint, currentChatKey, validateOperationOwner } from '../message-fingerprint.js';
 import { isOperationCurrent } from './scene-build-controller.js';
 import { finishSceneSourceTrace } from '../scene-source-trace.js';
-import { serializePromptInjectionMeta } from './prompt-injection.js';
+import { serializePromptInjectionMeta, promptInjectionOwnerMatches } from './prompt-injection.js';
 
 /**
  * Process extracted tracker data through the full pipeline:
@@ -157,18 +157,28 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         deltaTurnsSinceFull: _useDelta ? _prevCounter + 1 : 0,
     };
     if (_together) {
+        const chatKey = currentChatKey();
         const plan = getActivePromptInjectionRun();
-        const meta = serializePromptInjectionMeta(plan, 'verified')
-            || getLastPromptInjectionMetrics()?.tokens && {
-                v: 1,
-                status: 'verified',
-                apiKind: getLastPromptInjectionMetrics().apiKind,
-                registeredRole: getLastPromptInjectionMetrics().registeredRole,
-                effectiveRole: getLastPromptInjectionMetrics().effectiveRole,
-                tokens: getLastPromptInjectionMetrics().tokens,
-                integrity: getLastPromptInjectionMetrics().integrity,
-                output: { dedicatedReserve: 0, sharesMainResponse: true },
-            };
+        const ownerTarget = { chatKey, messageId: mesIdx, swipeId: targetSwipeId };
+        const isRecover = String(source || '').includes('swipe-recover');
+        let meta = null;
+        if (promptInjectionOwnerMatches(plan, ownerTarget)) {
+            meta = serializePromptInjectionMeta(plan, 'verified');
+        } else if (!isRecover) {
+            const rt = getLastPromptInjectionMetrics();
+            if (rt?.tokens?.totalInput > 0 && promptInjectionOwnerMatches(rt, ownerTarget)) {
+                meta = {
+                    v: 1,
+                    status: 'verified',
+                    apiKind: rt.apiKind,
+                    registeredRole: rt.registeredRole,
+                    effectiveRole: rt.effectiveRole,
+                    tokens: rt.tokens,
+                    integrity: rt.integrity,
+                    output: { dedicatedReserve: 0, sharesMainResponse: true },
+                };
+            }
+        }
         if (meta) norm._spMeta.promptInjection = meta;
     }
     if (s.sceneSourceTrace === true && source.startsWith('auto:together')) {

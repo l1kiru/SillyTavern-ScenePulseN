@@ -528,7 +528,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.10** - Together PromptInjectionPlan via extension prompts, integrity verification, and SP Context footprint badge.
+**Latest: v7.1.11** - PromptInjectionPlan Chat Completion fix, foreign-request ignore, marker-aware footprint, owner-safe snapshot meta.
 
 ## Contributing
 

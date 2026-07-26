@@ -46,6 +46,7 @@ let _wdmFrameId = null;
 let _wdmObserver = null;
 
 export function restoreGenerationMeta(d){
+
     if(!d?._spMeta)return;
     const m=d._spMeta;
     if(m.completionTokens>0||m.elapsed>0){
@@ -54,6 +55,68 @@ export function restoreGenerationMeta(d){
         genMeta.elapsed=m.elapsed||0;
     }
     if(m.source)setLastGenSource(m.source);
+}
+
+/** Resolve SP Context footprint tokens from snapshot meta and/or runtime metrics. */
+export function resolveSpContextFootprint(meta = null) {
+    const _piMeta = meta?.promptInjection || null;
+    const _rt = getLastPromptInjectionMetrics();
+    if (_piMeta?.tokens?.totalInput > 0) return _piMeta.tokens;
+    if (_rt?.tokens?.totalInput > 0) {
+        const _ownerOk = inlineGenerationContext
+            && _rt.chatKey === inlineGenerationContext.chatKey
+            && _rt.messageId === inlineGenerationContext.mesIdx
+            && Number(_rt.swipeId) === Number(inlineGenerationContext.swipeId);
+        const _viewingLive = currentSnapshotMesIdx < 0
+            || (inlineGenerationContext && currentSnapshotMesIdx === inlineGenerationContext.mesIdx);
+        if (_ownerOk || (_viewingLive && !_piMeta)) return _rt.tokens;
+    }
+    return null;
+}
+
+function _spContextBadgeHtml(fp) {
+    if (!(fp?.totalInput > 0)) return '';
+    const _approx = fp.totalInput >= 1000
+        ? `≈${(fp.totalInput / 1000).toFixed(1).replace(/\.0$/, '')}K`
+        : `≈${fp.totalInput}`;
+    const _tip = [
+        t('ScenePulse used ≈{n} input tokens:', { n: fp.totalInput.toLocaleString() }),
+        t('{n} — required IN_PROMPT,', { n: (fp.mainInput || 0).toLocaleString() }),
+        t('{n} — final anchor.', { n: (fp.tailInput || 0).toLocaleString() }),
+        '',
+        t('Includes active custom panels and tracking options for this run.'),
+        t('Tracker JSON shares the main response limit; there is no separate output reserve.'),
+    ].join('\n');
+    const _aria = t('ScenePulse context footprint ≈{n} tokens', { n: fp.totalInput.toLocaleString() });
+    return `<span class="sp-gen-badge-sp-context" title="${esc(_tip)}" aria-label="${esc(_aria)}">${t('SP Context')}: ${_approx}</span>`;
+}
+
+/**
+ * Patch or create the SP Context badge from latest runtime metrics without a full panel rebuild.
+ * Used after commitVerifiedFootprint so a failed first Together attempt still shows the badge.
+ */
+export function refreshSpContextFooter() {
+    const fp = resolveSpContextFootprint(null);
+    if (!(fp?.totalInput > 0)) return false;
+    const body = document.getElementById('sp-panel-body');
+    if (!body) return false;
+    let footer = body.querySelector('.sp-gen-footer');
+    if (!footer) {
+        footer = document.createElement('div');
+        footer.className = 'sp-gen-footer';
+        body.appendChild(footer);
+    }
+    const html = _spContextBadgeHtml(fp);
+    let badge = footer.querySelector('.sp-gen-badge-sp-context');
+    if (badge) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        const next = tmp.firstElementChild;
+        if (next) badge.replaceWith(next);
+    } else {
+        footer.insertAdjacentHTML('beforeend', html);
+    }
+    return true;
 }
 
 // ── Quest mutation index helper ──────────────────────────────────────────
@@ -1450,35 +1513,8 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         // Historical: from snapshot meta even if current UI mode is Separate.
         // Runtime: only when chat/message/swipe match the metrics owner.
         {
-            const _piMeta = _meta.promptInjection || null;
-            const _rt = getLastPromptInjectionMetrics();
-            let _fp = null;
-            if (_piMeta?.tokens?.totalInput > 0) {
-                _fp = _piMeta.tokens;
-            } else if (_rt?.tokens?.totalInput > 0) {
-                const _ownerOk = inlineGenerationContext
-                    && _rt.chatKey === inlineGenerationContext.chatKey
-                    && _rt.messageId === inlineGenerationContext.mesIdx
-                    && Number(_rt.swipeId) === Number(inlineGenerationContext.swipeId);
-                const _viewingLive = currentSnapshotMesIdx < 0
-                    || (inlineGenerationContext && currentSnapshotMesIdx === inlineGenerationContext.mesIdx);
-                if (_ownerOk || (_viewingLive && !_piMeta)) _fp = _rt.tokens;
-            }
-            if (_fp?.totalInput > 0) {
-                const _approx = _fp.totalInput >= 1000
-                    ? `≈${(_fp.totalInput / 1000).toFixed(1).replace(/\.0$/, '')}K`
-                    : `≈${_fp.totalInput}`;
-                const _tip = [
-                    t('ScenePulse used ≈{n} input tokens:', { n: _fp.totalInput.toLocaleString() }),
-                    t('{n} — required IN_PROMPT,', { n: (_fp.mainInput || 0).toLocaleString() }),
-                    t('{n} — final anchor.', { n: (_fp.tailInput || 0).toLocaleString() }),
-                    '',
-                    t('Includes active custom panels and tracking options for this run.'),
-                    t('Tracker JSON shares the main response limit; there is no separate output reserve.'),
-                ].join('\n');
-                const _aria = t('ScenePulse context footprint ≈{n} tokens', { n: _fp.totalInput.toLocaleString() });
-                fhtml += `<span class="sp-gen-badge-sp-context" title="${esc(_tip)}" aria-label="${esc(_aria)}">${t('SP Context')}: ${_approx}</span>`;
-            }
+            const _fp = resolveSpContextFootprint(_meta);
+            if (_fp?.totalInput > 0) fhtml += _spContextBadgeHtml(_fp);
         }
         // Delta savings indicator (read from snapshot metadata for historical nodes, fallback to current session)
         const _deltaPct=_meta.deltaSavings||_lastDeltaSavings||0;

@@ -267,14 +267,16 @@ if (event_types.CHAT_COMPLETION_PROMPT_READY) {
                 if (!eventData?.dryRun) recordPromptReady(eventData);
             }
             if (!shouldHandlePromptHook(eventData, { requirePhase: 'awaiting-intermediate' })) return;
-            if (!(getSettings().enabled && getSettings().injectionMethod === 'inline' && inlineGenStartMs > 0)) return;
+            if (!(getSettings().enabled && getSettings().injectionMethod === 'inline')) return;
             const plan = getActivePromptInjectionRun();
-            if (plan?.currentRequest) plan.currentRequest.apiKind = 'chat';
-            const mat = materializePromptInjection(eventData);
+            if (!plan?.currentRequest) return;
+            plan.currentRequest.apiKind = 'chat';
+            const mat = materializePromptInjection(eventData, plan, { expectedApiKind: 'chat' });
             if (!mat.ok) {
+                if (mat.fatal === false || mat.code === 'SP_PROMPT_NOT_OURS') return;
                 abortPromptInjection({
                     code: mat.code || 'SP_PROMPT_INTEGRITY_FAILURE',
-                    runId: plan?.runId,
+                    runId: plan.runId,
                     observed: mat.observed,
                     detail: mat.detail,
                 });
@@ -297,14 +299,16 @@ if (event_types.GENERATE_AFTER_COMBINE_PROMPTS) {
             }
             if (Array.isArray(eventData?.prompt)) return;
             if (!shouldHandlePromptHook(eventData, { requirePhase: 'awaiting-intermediate' })) return;
-            if (!(getSettings().enabled && getSettings().injectionMethod === 'inline' && inlineGenStartMs > 0)) return;
+            if (!(getSettings().enabled && getSettings().injectionMethod === 'inline')) return;
             const plan = getActivePromptInjectionRun();
-            if (plan?.currentRequest) plan.currentRequest.apiKind = 'text';
-            const mat = materializePromptInjection(eventData);
+            if (!plan?.currentRequest) return;
+            plan.currentRequest.apiKind = 'text';
+            const mat = materializePromptInjection(eventData, plan, { expectedApiKind: 'text' });
             if (!mat.ok) {
+                if (mat.fatal === false || mat.code === 'SP_PROMPT_NOT_OURS') return;
                 abortPromptInjection({
                     code: mat.code || 'SP_PROMPT_INTEGRITY_FAILURE',
-                    runId: plan?.runId,
+                    runId: plan.runId,
                     observed: mat.observed,
                     detail: mat.detail,
                 });
@@ -320,37 +324,42 @@ if (event_types.GENERATE_AFTER_COMBINE_PROMPTS) {
     });
 }
 
-async function _authorityVerify(eventData, authority, apiKind) {
+async function _authorityVerify(eventData, authority, apiKind, dryRunArg) {
     try {
-        if (!shouldHandlePromptHook(eventData)) return;
-        if (!(getSettings().enabled && getSettings().injectionMethod === 'inline' && inlineGenStartMs > 0)) return;
+        if (!shouldHandlePromptHook(eventData, { requireApiKind: apiKind, dryRunArg })) return;
+        if (!(getSettings().enabled && getSettings().injectionMethod === 'inline')) return;
         const plan = getActivePromptInjectionRun();
         if (!plan?.currentRequest) return;
-        if (plan.currentRequest.phase !== 'materialized' && plan.currentRequest.phase !== 'verified') {
-            if (plan.currentRequest.phase === 'awaiting-intermediate') {
-                plan.currentRequest.apiKind = apiKind;
-                const mat = materializePromptInjection(eventData);
-                if (!mat.ok) {
-                    abortPromptInjection({
-                        code: mat.code || 'SP_PROMPT_INTEGRITY_FAILURE',
-                        runId: plan.runId,
-                        observed: mat.observed,
-                        detail: mat.detail,
-                    });
-                    try { discardTogetherSceneBuild(inlineGenerationContext, 'prompt-integrity'); } catch {}
-                    try { cancelSceneSourceTrace(); } catch {}
-                    try { stopStreamingHider({ abort: true }); } catch {}
-                    try { cleanupGenUI(); } catch {}
-                    spSetGenerating(false);
-                    setInlineGenStartMs(0);
-                    setInlineGenerationContext(null);
-                    return;
-                }
-            } else {
+        if (plan.currentRequest.phase === 'verified') return;
+        // Claim apiKind only when still unset (missed intermediate); never overwrite the other API.
+        if (plan.currentRequest.apiKind != null && plan.currentRequest.apiKind !== apiKind) return;
+        if (plan.currentRequest.apiKind == null) plan.currentRequest.apiKind = apiKind;
+
+        if (plan.currentRequest.phase === 'awaiting-intermediate') {
+            const mat = materializePromptInjection(eventData, plan, { expectedApiKind: apiKind });
+            if (!mat.ok) {
+                if (mat.fatal === false || mat.code === 'SP_PROMPT_NOT_OURS') return;
+                abortPromptInjection({
+                    code: mat.code || 'SP_PROMPT_INTEGRITY_FAILURE',
+                    runId: plan.runId,
+                    observed: mat.observed,
+                    detail: mat.detail,
+                });
+                try { discardTogetherSceneBuild(inlineGenerationContext, 'prompt-integrity'); } catch {}
+                try { cancelSceneSourceTrace(); } catch {}
+                try { stopStreamingHider({ abort: true }); } catch {}
+                try { cleanupGenUI(); } catch {}
+                spSetGenerating(false);
+                setInlineGenStartMs(0);
+                setInlineGenerationContext(null);
                 return;
             }
+        } else if (plan.currentRequest.phase !== 'materialized') {
+            return;
         }
+
         const result = verifyPromptInjection(eventData, { authority });
+        if (result.alreadyVerified) return;
         if (!result.ok && result.fatal) {
             abortPromptInjection({
                 code: result.code || 'SP_PROMPT_INTEGRITY_FAILURE',
@@ -366,15 +375,23 @@ async function _authorityVerify(eventData, authority, apiKind) {
             setInlineGenerationContext(null);
             return;
         }
+        if (!result.ok) return;
         if (result.warning) warn('PromptInjection:', result.warning);
         await commitVerifiedFootprint(plan, { tailFound: !!result.tailFound });
+        try {
+            const { refreshSpContextFooter } = await import('./src/ui/update-panel.js');
+            refreshSpContextFooter();
+        } catch {}
     } catch (e) {
         warn(authority + ' prompt-injection:', e?.message);
     }
 }
 
-const _onAuthorityAfterData = (eventData) => { void _authorityVerify(eventData, 'GENERATE_AFTER_DATA', 'text'); };
-const _onAuthoritySettingsReady = (eventData) => { void _authorityVerify(eventData, 'CHAT_COMPLETION_SETTINGS_READY', 'chat'); };
+const _onAuthorityAfterData = (eventData, dryRun) =>
+    _authorityVerify(eventData, 'GENERATE_AFTER_DATA', 'text', dryRun);
+
+const _onAuthoritySettingsReady = (eventData, dryRun) =>
+    _authorityVerify(eventData, 'CHAT_COMPLETION_SETTINGS_READY', 'chat', dryRun);
 
 function _repositionAuthorityHandlers() {
     const makeLast = typeof eventSource.makeLast === 'function'
