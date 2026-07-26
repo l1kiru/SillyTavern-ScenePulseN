@@ -31,6 +31,7 @@ import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
 import { validateExtraction } from './validation.js';
 import { buildRequestSchema, SECTION_FIELDS } from '../schema.js';
 import { buildRecentContext, classifyRequestError, computeResponseLength, correctiveInstruction, requestTracker } from './request.js';
+import { measureTextPrompt } from './request-token-ledger.js';
 import { spSetGenerating, spPostGenShow } from '../ui/mobile.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { cleanupGenUI } from '../ui/loading.js';
@@ -239,7 +240,10 @@ export async function generateTracker(mesIdx,partKey,opts){
             let raw;let rawStr='';let finishReason='';let strategy='';
             const responseLength=computeResponseLength({mode:requestMode,previousSnapshot:lastSnap,attempt:a,lastErrorCode});
             const attemptPrompt=a?`${prompt}\n\nCORRECTION AFTER ATTEMPT ${a}: ${correctiveInstruction(lastErrorCode,validationErrors)}`:prompt;
-            totalPromptTokens+=Math.round((sysPr.length+attemptPrompt.length)/4);
+            {
+                const _pin=await measureTextPrompt(`${sysPr}\n\n${attemptPrompt}`);
+                totalPromptTokens+=_pin.tokens;
+            }
             // Nonce check at every opportunity — if cancelled, bail immediately
             if(myNonce!==genNonce){log('STALE nonce',myNonce,'(current',genNonce+') \u2014 discarding silently');return null}
             try{if(a>0){log(`Retry ${a}/${settings.maxRetries}`);await new Promise(r=>setTimeout(r,1000*a));if(myNonce!==genNonce){log('Retry cancelled during backoff');return null}}
@@ -274,7 +278,10 @@ export async function generateTracker(mesIdx,partKey,opts){
                 const responseTruncated=['length','max_tokens','max_output_tokens','token_limit'].includes(finishLow);
                 if(responseTruncated)lastErrorCode='TRUNCATED';
                 const rawLen=rawStr.length;
-                totalCompletionTokens+=Math.round(rawLen/4);
+                {
+                    const _cout=await measureTextPrompt(rawStr);
+                    totalCompletionTokens+=_cout.tokens;
+                }
                 setLastRawResponse(rawStr); // store for debug copy
                 // v6.15.6: also capture the pair for the inspector's pair browser.
                 // v6.16.0: synthesize a network log entry linked to the pair via id.

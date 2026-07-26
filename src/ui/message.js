@@ -17,7 +17,8 @@ import {
     getLastExtractionFailure, shouldSkipAutoSceneRecovery,
     getActivePromptInjectionRun,
 } from '../state.js';
-import { clearPromptInjection, getTogetherPromptTokens } from '../generation/prompt-injection.js';
+import { clearPromptInjection } from '../generation/prompt-injection.js';
+import { finalizeTogetherRequestTokens } from '../generation/request-token-ledger.js';
 import { continuationReprompt } from '../generation/engine.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
@@ -178,9 +179,17 @@ export async function onCharMsg(idx){
                 }
             }
         }
+        const _plan=getActivePromptInjectionRun();
+        const _ledgerRec=(_plan?.runId&&_plan.currentRequest?.seq!=null)
+            ? await finalizeTogetherRequestTokens({
+                runId:_plan.runId,
+                requestSeq:_plan.currentRequest.seq,
+                rawMes:rawMes||'',
+            })
+            : null;
         if(extracted){
-            const _compTokens=replySplit.totalTokens||Math.round(rawMes.length/4);
-            const _promptTokens=getTogetherPromptTokens();
+            const _compTokens=_ledgerRec?.output??(replySplit.totalTokens||Math.round(rawMes.length/4));
+            const _promptTokens=_ledgerRec?.input??0;
             const _elapsed=inlineGenStartMs>0?((Date.now()-inlineGenStartMs)/1000):0;
             setGenMeta({...genMeta, promptTokens:_promptTokens, completionTokens:_compTokens, elapsed:_elapsed});
             setInlineGenStartMs(0);
@@ -190,6 +199,8 @@ export async function onCharMsg(idx){
             await processTogetherExtraction(idx, extracted, 'auto:together', _inlineCtx, {
                 promptTokens:_promptTokens, completionTokens:_compTokens, elapsed:_elapsed,
                 narrativeTokens:replySplit.narrativeTokens, trackerTokens:replySplit.trackerTokens,
+                tokenSource:_ledgerRec?.source, tokenCoverage:_ledgerRec?.coverage,
+                requestSeqs:_plan?.currentRequest?.seq!=null?[_plan.currentRequest.seq]:undefined,
                 stopHider:false, unlockGen:true,
             });
             try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
