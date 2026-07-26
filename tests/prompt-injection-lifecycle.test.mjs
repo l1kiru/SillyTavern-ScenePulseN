@@ -11,8 +11,10 @@ import {
     extractMainInner,
     findEffectiveMainRole,
     shouldHandlePromptHook,
+    isTextCombinePromptPayload,
     promptInjectionOwnerMatches,
     serializePromptInjectionMeta,
+    abortPromptInjection,
     _resetPromptInjectionModuleForTests,
 } from '../src/generation/prompt-injection.js';
 import {
@@ -288,6 +290,131 @@ _resetPromptInjectionModuleForTests();
     const footer = body.querySelector('.sp-gen-footer');
     assert.ok(footer);
     assert.ok(footer.querySelector('.sp-gen-badge-sp-context'));
+}
+
+// ── P0 ordered CC: empty combine ignored → chat materialize → settings verify ──
+{
+    _resetPromptInjectionModuleForTests();
+    let stopCalls = 0;
+    globalThis.SillyTavern = {
+        getContext() {
+            return { stopGeneration() { stopCalls += 1; } };
+        },
+    };
+
+    const plan = buildPromptInjectionPlan({
+        text: 'ORDERED CC BODY',
+        role: 'system',
+        owner: { chatKey: 'ck', messageId: 11, swipeId: 0 },
+    });
+    beginRequest(null, plan);
+    setActivePromptInjectionRun(plan);
+    setInlineGenStartMs(1);
+    setInlineGenerationContext({ chatKey: 'ck', mesIdx: 11, swipeId: 0 });
+
+    // 1) ST OpenAI noise — must not claim text / materialize / abort
+    const emptyCombine = { prompt: '', dryRun: false };
+    assert.equal(isTextCombinePromptPayload(emptyCombine), false);
+    assert.equal(plan.currentRequest.apiKind, null);
+    // Mimic index.js: early return — do not assign apiKind or materialize
+    if (isTextCombinePromptPayload(emptyCombine)) {
+        plan.currentRequest.apiKind = 'text';
+        materializePromptInjection(emptyCombine, plan, { expectedApiKind: 'text' });
+    }
+    assert.equal(plan.currentRequest.apiKind, null);
+    assert.equal(plan.currentRequest.phase, 'awaiting-intermediate');
+
+    // 2) Chat prompt-ready
+    const chatReady = {
+        chat: [{ mes: plan.main.text + '\n' + plan.tail.text, is_system: true }],
+        dryRun: false,
+    };
+    plan.currentRequest.apiKind = 'chat';
+    const mat = materializePromptInjection(chatReady, plan, { expectedApiKind: 'chat' });
+    assert.equal(mat.ok, true, mat.code);
+    assert.equal(plan.currentRequest.phase, 'materialized');
+
+    // 3) Settings-ready authority
+    const settingsReady = {
+        messages: [{ role: 'system', content: plan.main.text + '\n' + plan.tail.text }],
+    };
+    const ver = verifyPromptInjection(settingsReady, {
+        authority: 'CHAT_COMPLETION_SETTINGS_READY',
+        plan,
+    });
+    assert.equal(ver.ok, true, ver.code);
+    assert.equal(plan.currentRequest.apiKind, 'chat');
+    assert.equal(plan.currentRequest.phase, 'verified');
+    assert.equal(stopCalls, 0);
+    // Happy path must not abort
+    assert.notEqual(plan.status, 'aborted');
+}
+
+// ── END digest corrupted (begin/inner OK) → materialize + verify fail ──
+{
+    _resetPromptInjectionModuleForTests();
+    const plan = buildPromptInjectionPlan({ text: 'END DIGEST', role: 'system' });
+    beginRequest('chat', plan);
+    const badEnd = plan.main.text.replace(
+        `<!--SP_PROMPT_END run="${plan.runId}" digest="${plan.main.digest}"-->`,
+        `<!--SP_PROMPT_END run="${plan.runId}" digest="deadbeef00"-->`,
+    );
+    assert.ok(badEnd.includes('deadbeef00'));
+    assert.ok(badEnd.includes(`digest="${plan.main.digest}"`)); // begin still good
+    const payload = { messages: [{ role: 'system', content: badEnd + '\n' + plan.tail.text }] };
+    const mat = materializePromptInjection(payload, plan);
+    assert.equal(mat.ok, false);
+    assert.equal(mat.fatal, true);
+    assert.equal(mat.code, 'SP_PROMPT_DIGEST_MISMATCH');
+
+    // Fresh plan already materialized with good markers, then verify sees bad END
+    _resetPromptInjectionModuleForTests();
+    const plan2 = buildPromptInjectionPlan({ text: 'END DIGEST 2', role: 'system' });
+    beginRequest('chat', plan2);
+    const good = { messages: [{ role: 'system', content: plan2.main.text + '\n' + plan2.tail.text }] };
+    assert.equal(materializePromptInjection(good, plan2).ok, true);
+    const badVerifyPayload = {
+        messages: [{
+            role: 'system',
+            content: plan2.main.text.replace(
+                `<!--SP_PROMPT_END run="${plan2.runId}" digest="${plan2.main.digest}"-->`,
+                `<!--SP_PROMPT_END run="${plan2.runId}" digest="cafebabe01"-->`,
+            ) + '\n' + plan2.tail.text,
+        }],
+    };
+    const ver = verifyPromptInjection(badVerifyPayload, {
+        authority: 'CHAT_COMPLETION_SETTINGS_READY',
+        plan: plan2,
+    });
+    assert.equal(ver.ok, false);
+    assert.equal(ver.fatal, true);
+    assert.equal(ver.code, 'SP_PROMPT_DIGEST_MISMATCH');
+}
+
+// ── Authority markerless after materialize → fatal MISSING_MAIN ──
+{
+    _resetPromptInjectionModuleForTests();
+    let stopCalls = 0;
+    globalThis.SillyTavern = {
+        getContext() {
+            return { stopGeneration() { stopCalls += 1; } };
+        },
+    };
+    const plan = buildPromptInjectionPlan({ text: 'MARKERLESS', role: 'system' });
+    beginRequest('chat', plan);
+    const good = { messages: [{ role: 'system', content: plan.main.text + '\n' + plan.tail.text }] };
+    assert.equal(materializePromptInjection(good, plan).ok, true);
+    const ver = verifyPromptInjection(
+        { messages: [{ role: 'system', content: 'plain authority payload without SP markers' }] },
+        { authority: 'CHAT_COMPLETION_SETTINGS_READY', plan },
+    );
+    assert.equal(ver.ok, false);
+    assert.equal(ver.fatal, true);
+    assert.equal(ver.code, 'SP_PROMPT_MISSING_MAIN');
+    if (ver.fatal) {
+        abortPromptInjection({ code: ver.code, runId: plan.runId, observed: ver.observed });
+    }
+    assert.equal(stopCalls, 1);
 }
 
 _resetPromptInjectionModuleForTests();

@@ -56,6 +56,7 @@ import {
 } from './src/scene-source-trace.js';
 import {
     shouldHandlePromptHook,
+    isTextCombinePromptPayload,
     materializePromptInjection,
     verifyPromptInjection,
     commitVerifiedFootprint,
@@ -294,10 +295,11 @@ if (event_types.CHAT_COMPLETION_PROMPT_READY) {
 if (event_types.GENERATE_AFTER_COMBINE_PROMPTS) {
     eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, eventData => {
         try {
-            if (_sceneSourceTraceGate() && !Array.isArray(eventData?.prompt)) {
+            // ST OpenAI Chat emits { prompt: '' } here — must not claim Text apiKind.
+            if (!isTextCombinePromptPayload(eventData)) return;
+            if (_sceneSourceTraceGate()) {
                 recordTextCompletionPrompt(eventData);
             }
-            if (Array.isArray(eventData?.prompt)) return;
             if (!shouldHandlePromptHook(eventData, { requirePhase: 'awaiting-intermediate' })) return;
             if (!(getSettings().enabled && getSettings().injectionMethod === 'inline')) return;
             const plan = getActivePromptInjectionRun();
