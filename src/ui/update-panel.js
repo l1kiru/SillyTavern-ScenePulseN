@@ -1575,7 +1575,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             fhtml+=`<span title="${t('Delta mode saved')} ~${_saved} ${t('tokens')} (${t('full output would be')} ~${_fullEst} ${t('tokens')})" class="sp-gen-badge-delta"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M7 2v10M4 5l3-3 3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> -${pct}%</span>`;
         }
         // Session cumulative tokens
-        if(_sessionTokensUsed>0)fhtml+=`<span title="${t('Session total tokens')}" class="sp-gen-badge-session">\u03A3 ${_sessionTokensUsed>1000?(_sessionTokensUsed/1000).toFixed(1)+'k':_sessionTokensUsed}</span>`;
+        if(_sessionTokensUsed>0)fhtml+=`<span title="${esc(t('Estimated session tokens (prompt + completion)'))}" class="sp-gen-badge-session">\u03A3 ${_sessionTokensUsed>1000?(_sessionTokensUsed/1000).toFixed(1)+'k':_sessionTokensUsed}</span>`;
         // Inspect payload button
         if(currentSnapshotMesIdx>=0)fhtml+=`<span class="sp-gen-inspect" title="${t('Inspect')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M9.5 1.5h3v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 1.5L8 6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M7 2H2.5a1 1 0 0 0-1 1v8.5a1 1 0 0 0 1 1H11a1 1 0 0 0 1-1V7" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg> ${t('Inspect')}</span>`;
         // v6.16.1: Debug Inspector shortcut alongside Inspect/Analytics so users

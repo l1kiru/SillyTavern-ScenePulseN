@@ -352,6 +352,7 @@ export function beginRequest(apiKind = null, plan = getActivePromptInjectionRun(
         apiKind: kind,
         phase: 'awaiting-intermediate',
         materializedDigest: null,
+        fullPromptTokens: null,
     };
     plan.verification.main = 'pending';
     plan.verification.tail = 'pending';
@@ -373,6 +374,39 @@ export async function countTokens(text) {
         }
     } catch {}
     return { tokens: Math.round(s.length / 4), source: 'heuristic' };
+}
+
+/**
+ * Canonical prompt text for one ST request payload (avoids double-counting
+ * when both messages and chat arrays are present).
+ * Text: non-empty string prompt. Chat: messages → chat → prompt array.
+ */
+export function extractCanonicalPromptText(payload) {
+    if (payload == null) return '';
+    if (typeof payload === 'string') return payload;
+    const prompt = payload.prompt ?? payload.input ?? null;
+    if (typeof prompt === 'string' && prompt.length > 0) return prompt;
+    let list = null;
+    if (Array.isArray(payload.messages)) list = payload.messages;
+    else if (Array.isArray(payload.chat)) list = payload.chat;
+    else if (Array.isArray(prompt)) list = prompt;
+    if (!list) return '';
+    const parts = [];
+    for (const m of list) parts.push(..._messageToTexts(m));
+    return parts.join('\n');
+}
+
+/** Estimate full request prompt tokens (history + card + lore + SP), not SP-only. */
+export async function estimateRequestPromptTokens(payload) {
+    const text = extractCanonicalPromptText(payload);
+    if (!text) return { tokens: 0, source: 'heuristic' };
+    return countTokens(text);
+}
+
+/** Together session Σ: full verified request tokens stored on currentRequest. */
+export function getTogetherPromptTokens(plan = getActivePromptInjectionRun()) {
+    const n = plan?.currentRequest?.fullPromptTokens;
+    return Number.isFinite(n) && n >= 0 ? Math.round(n) : 0;
 }
 
 export async function measurePromptInjection(plan = getActivePromptInjectionRun(), { provisional = false } = {}) {

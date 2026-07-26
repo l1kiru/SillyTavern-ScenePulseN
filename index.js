@@ -60,6 +60,8 @@ import {
     materializePromptInjection,
     verifyPromptInjection,
     commitVerifiedFootprint,
+    estimateRequestPromptTokens,
+    getTogetherPromptTokens,
     abortPromptInjection,
     clearPromptInjection,
     setAuthorityReposition,
@@ -379,6 +381,12 @@ async function _authorityVerify(eventData, authority, apiKind, dryRunArg) {
         }
         if (!result.ok) return;
         if (result.warning) warn('PromptInjection:', result.warning);
+        try {
+            const counted = await estimateRequestPromptTokens(eventData);
+            if (plan.currentRequest) plan.currentRequest.fullPromptTokens = counted.tokens;
+        } catch (e) {
+            warn('PromptInjection: full prompt token estimate failed:', e?.message);
+        }
         await commitVerifiedFootprint(plan, { tailFound: !!result.tailFound });
         try {
             const { refreshSpContextFooter } = await import('./src/ui/update-panel.js');
@@ -452,13 +460,14 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 log('GENERATION_ENDED: primary extraction SUCCESS for message', targetIdx);
                 setInlineExtractionDone(true); setPendingInlineIdx(-1);
                 const _compTokens = replySplit.totalTokens || Math.round(rawMes.length / 4);
+                const _promptTokens = getTogetherPromptTokens();
                 const _elapsed = inlineGenStartMs > 0 ? ((Date.now() - inlineGenStartMs) / 1000) : 0;
                 setInlineGenStartMs(0);
-                genMeta.promptTokens = 0;
+                genMeta.promptTokens = _promptTokens;
                 genMeta.completionTokens = _compTokens;
                 genMeta.elapsed = _elapsed;
                 await processTogetherExtraction(targetIdx, extracted, 'auto:together', _inlineCtx, {
-                    promptTokens: 0, completionTokens: _compTokens, elapsed: _elapsed,
+                    promptTokens: _promptTokens, completionTokens: _compTokens, elapsed: _elapsed,
                     narrativeTokens: replySplit.narrativeTokens,
                     trackerTokens: replySplit.trackerTokens,
                     stopHider: true, unlockGen: true,
