@@ -64,8 +64,9 @@ assertTrue('cancelled not current', !ctrl.isOperationCurrent(b.operationId));
 
 const s0 = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'together', chatKey });
 const s1 = ctrl.startSceneBuild({ messageId: 1, swipeId: 1, source: 'together', chatKey });
-ctrl.supersedeSceneBuildsForMessageExceptSwipe(1, 1, chatKey);
+const supersededN = ctrl.supersedeSceneBuildsForMessageExceptSwipe(1, 1, chatKey);
 eq('other swipe superseded', ctrl.getSceneBuild(s0.operationId)?.status, 'superseded');
+assertTrue('supersede returns count', supersededN >= 1);
 assertTrue('kept swipe still active', ctrl.isOperationCurrent(s1.operationId));
 
 const c1 = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual', chatKey: 'chat-old' });

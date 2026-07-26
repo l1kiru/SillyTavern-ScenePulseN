@@ -92,7 +92,7 @@ ctx.chat[1].mes = ctx.chat[1].swipes[2];
     eq('parent mismatch does not rebind', next?.swipeId, 1);
 }
 
-// 4) +1 advance without generationType still rebinds
+// 4) +1 advance without generationType=swipe must NOT rebind (browse-away)
 ctx.chat[1].swipe_id = 2;
 {
     const next = rebindInlineCtxForExpectedSwipe(baseCtx({
@@ -100,7 +100,7 @@ ctx.chat[1].swipe_id = 2;
         generationType: 'normal',
         owner: captureOperationOwner(1, 1),
     }), 1);
-    eq('+1 advance rebinds even without swipe type', next?.swipeId, 2);
+    eq('normal +1 browse does not rebind', next?.swipeId, 1);
 }
 
 // 5) After rebind, snapshot write targets active swipe 2 (pipeline uses same swipeId)

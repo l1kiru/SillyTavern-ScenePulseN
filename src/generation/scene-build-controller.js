@@ -239,12 +239,15 @@ export function rebindSceneBuildSwipe(operationId, newSwipeId) {
 
 export function supersedeSceneBuildsForMessageExceptSwipe(messageId, keepSwipeId, chatKey = currentChatKey()) {
     const keep = Math.max(0, Number(keepSwipeId) || 0);
+    let count = 0;
     for (const op of [..._ops.values()]) {
         if (op.chatKey !== chatKey || op.messageId !== Number(messageId)) continue;
         if (!isActiveStatus(op.status)) continue;
         if (op.swipeId === keep) continue;
         supersedeSceneBuild(op.operationId, 'swipe-changed');
+        count += 1;
     }
+    return count;
 }
 
 export function cancelSceneBuildsForChat(chatKey, reason = 'chat-changed') {

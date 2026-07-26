@@ -47,15 +47,23 @@ export function correctiveInstruction(code,errors=[]){
 export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true,stopStOnAbort=true}){
     const routed=applyPromptRole({systemPrompt,prompt});
     let stopped=false;
-    const stop=()=>{
+    let abortReject=null;
+    const abortError=()=>signal?.reason||new DOMException('Aborted','AbortError');
+    const abortPromise=signal
+        ? new Promise((_,rej)=>{abortReject=rej;})
+        : null;
+    const onAbort=()=>{
         if(stopped)return;stopped=true;
-        if(stopStOnAbort===false)return;
-        try{if(typeof stContext.stopGeneration==='function')stContext.stopGeneration()}catch{}
+        if(stopStOnAbort!==false){
+            try{if(typeof stContext.stopGeneration==='function')stContext.stopGeneration()}catch{}
+        }
+        try{abortReject?.(abortError())}catch{}
     };
-    const throwIfAborted=()=>{if(signal?.aborted)throw signal.reason||new DOMException('Aborted','AbortError')};
+    const throwIfAborted=()=>{if(signal?.aborted)throw abortError()};
     throwIfAborted();
-    signal?.addEventListener?.('abort',stop,{once:true});
-    try{
+    if(signal?.aborted)onAbort();
+    else signal?.addEventListener?.('abort',onAbort,{once:true});
+    const run=async()=>{
         if(typeof stContext.generateQuietPrompt==='function'){
             const hadInjection=!!getActivePromptInjectionRun();
             if(hadInjection)suspendPromptInjection();
@@ -87,7 +95,11 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
             return{value,strategy:'raw'};
         }
         throw new Error('SillyTavern exposes no supported generation API');
+    };
+    try{
+        if(abortPromise)return await Promise.race([run(),abortPromise]);
+        return await run();
     }finally{
-        signal?.removeEventListener?.('abort',stop);
+        signal?.removeEventListener?.('abort',onAbort);
     }
 }

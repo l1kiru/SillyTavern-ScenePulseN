@@ -25,9 +25,11 @@ export function rebindInlineCtxForExpectedSwipe(ctx, targetIdx) {
         && currentChatFingerprint(targetIdx - 1) !== ctx.parentFingerprint) {
         return ctx;
     }
+    // Only swipe-generations may advance ownership. A bare frozen+1 while
+    // browsing another sibling mid-flight must NOT rebind (that kept scene
+    // creation alive after MESSAGE_SWIPED).
     const type = String(ctx.generationType || '');
-    const expectedAdvance = type === 'swipe' || active === frozen + 1;
-    if (!expectedAdvance || active < frozen) return ctx;
+    if (type !== 'swipe' || active !== frozen + 1 || active < frozen) return ctx;
 
     const next = {
         ...ctx,
