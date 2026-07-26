@@ -162,11 +162,17 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         const ownerTarget = { chatKey, messageId: mesIdx, swipeId: targetSwipeId };
         const isRecover = String(source || '').includes('swipe-recover');
         let meta = null;
-        if (promptInjectionOwnerMatches(plan, ownerTarget)) {
+        const planVerified = plan
+            && plan.status === 'verified'
+            && plan.verification?.main === 'verified';
+        if (planVerified && promptInjectionOwnerMatches(plan, ownerTarget)) {
             meta = serializePromptInjectionMeta(plan, 'verified');
         } else if (!isRecover) {
             const rt = getLastPromptInjectionMetrics();
-            if (rt?.tokens?.totalInput > 0 && promptInjectionOwnerMatches(rt, ownerTarget)) {
+            // Runtime metrics are only written after a successful verify commit.
+            if (rt?.tokens?.totalInput > 0
+                && rt.integrity?.main === 'verified'
+                && promptInjectionOwnerMatches(rt, ownerTarget)) {
                 meta = {
                     v: 1,
                     status: 'verified',

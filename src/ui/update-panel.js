@@ -60,8 +60,11 @@ export function restoreGenerationMeta(d){
 /** Resolve SP Context footprint tokens from snapshot meta and/or runtime metrics. */
 export function resolveSpContextFootprint(meta = null) {
     const _piMeta = meta?.promptInjection || null;
-    const _rt = getLastPromptInjectionMetrics();
+    // Historical Together badge from snapshot meta always wins when present.
     if (_piMeta?.tokens?.totalInput > 0) return _piMeta.tokens;
+    // Separate snapshots must not inherit SP Context from a prior Together attempt.
+    if (meta?.injectionMethod === 'separate') return null;
+    const _rt = getLastPromptInjectionMetrics();
     if (_rt?.tokens?.totalInput > 0) {
         const _ownerOk = inlineGenerationContext
             && _rt.chatKey === inlineGenerationContext.chatKey
