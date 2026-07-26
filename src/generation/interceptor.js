@@ -126,6 +126,12 @@ export function clearStallWatchdog(){
     _streamStarted = false;
 }
 
+/** Last buildInlineTrackerPrompt() parts for SP Context footprint breakdown. */
+let _lastInlineTrackerPromptParts = { instructions: '', previousState: '' };
+export function getLastInlineTrackerPromptParts() {
+    return _lastInlineTrackerPromptParts;
+}
+
 // Build compact inline prompt for "together" mode — tells the AI to append tracker JSON
 export function buildInlineTrackerPrompt(){
     const s=getSettings();
@@ -250,8 +256,10 @@ QUEST STATE RULES (all REQUIRED):
     const outputFormat=getTogetherOutputFormatBlock({isDelta,deltaAlways,deltaExample,fieldList});
     const overrideReminder='\nThese always-include / WHEN INCLUDING / MANDATORY FIELDS lists override omit-unchanged from the framing rules above.';
 
+    let instructionsHead;
+    let instructionsTail;
     if(isDelta){
-        return `${rulesBlock}
+        instructionsHead = `${rulesBlock}
 
 DELTA RULES:
 - Always include these fields: ${deltaAlways}.
@@ -263,12 +271,12 @@ ${mandatoryHints?'\nWHEN INCLUDING:'+mandatoryHints:''}
 ${overrideReminder}
 
 ${fieldSpecs}
-${_langBlock}${prevState}
+${_langBlock}`;
+        instructionsTail = `
 
 ${outputFormat}`;
-    }
-
-    return `${rulesBlock}
+    } else {
+        instructionsHead = `${rulesBlock}
 
 Required keys: ${fieldList}
 ${mandatoryHints?'\nMANDATORY FIELDS:'+mandatoryHints:''}
@@ -278,9 +286,19 @@ No schema metadata. Only actual tracker data as a flat JSON object.
 Every required scalar must have a meaningful value. Use [] for genuinely empty array fields \u2014 especially charactersPresent, witnesses, characters, and relationships \u2014 and never invent an entity just to avoid an empty array.
 
 ${fieldSpecs}
-${_langBlock}${prevState}
+${_langBlock}`;
+        instructionsTail = `
 
 ${outputFormat}`;
+    }
+    const previousState = prevState || '';
+    const text = instructionsHead + previousState + instructionsTail;
+    // Footprint split: instructions (profile/rules/panels/schema) vs previous-state JSON block.
+    _lastInlineTrackerPromptParts = {
+        instructions: instructionsHead + instructionsTail,
+        previousState,
+    };
+    return text;
 }
 
 export const scenePulseInterceptor=async function(chat,cs,abort,type){
@@ -397,6 +415,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         {
         clearPromptAbortReason();
         const prompt = buildInlineTrackerPrompt();
+        const promptParts = getLastInlineTrackerPromptParts();
         const _spRole = getActivePromptRole();
         const _isDelta = !hasStaleSnapshotBefore(_targetMesIdx) && shouldUseDelta(_baseSnapshot);
         const _frozenSchema = buildRequestSchema(getActiveSchema(), { mode: _isDelta ? 'delta' : 'full' });
@@ -429,6 +448,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
                 chatKey: currentChatKey(),
                 messageId: _targetMesIdx,
                 swipeId: _targetSwipeId,
+                promptParts,
             });
             registerPromptInjection(plan);
             repositionAuthorityHandlers();

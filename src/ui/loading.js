@@ -5,7 +5,8 @@ import { t } from '../i18n.js';
 import {
     elapsedInterval, setElapsedInterval,
     _tpLoadingTimerId, set_tpLoadingTimerId,
-    _tpBannerTimerId, set_tpBannerTimerId
+    _tpBannerTimerId, set_tpBannerTimerId,
+    _inlineWaitTimerId, set_inlineWaitTimerId,
 } from '../state.js';
 import { spDetectMode } from './mobile.js';
 import { cancelGeneration } from '../generation/engine.js';
@@ -40,11 +41,24 @@ export function startElapsedTimer(){
     },1000));
 }
 export function stopElapsedTimer(){if(elapsedInterval){clearInterval(elapsedInterval);setElapsedInterval(null)}}
+export function clearInlineWaitBanner(){
+    try {
+        if (_inlineWaitTimerId) {
+            clearInterval(_inlineWaitTimerId);
+            set_inlineWaitTimerId(null);
+        }
+        const w = document.getElementById('sp-inline-wait');
+        if (w) w.remove();
+    } catch {}
+}
+
 export function cleanupGenUI(){
     hideStopButton();stopElapsedTimer();
     // Clear all loading overlays -- panel, fixed, and thought
     clearLoadingOverlay(document.getElementById('sp-panel-body'));
     clearThoughtLoading();
+    // Together "Updating scene data…" banner (integrity abort / early stop)
+    clearInlineWaitBanner();
 }
 
 // ── Loading overlay helpers -- transparent overlays that sit on top of existing content ──

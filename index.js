@@ -19,9 +19,9 @@ import {
     set_cachedNormData,
     setPrevLocation, setPrevTimePeriod,
     resetSessionTokens,
-    _inlineWaitTimerId, set_inlineWaitTimerId,
     getActivePromptInjectionRun,
     getPromptAbortReason, clearPromptAbortReason,
+    setLastPromptInjectionMetrics, setLastPromptInjectionFailure,
 } from './src/state.js';
 import {
     getSettings, anyPanelsActive,
@@ -421,7 +421,7 @@ setAuthorityReposition(_repositionAuthorityHandlers);
 // CRITICAL: Save chat the INSTANT generation ends, BEFORE other extensions
 // can trigger profile switches that cause CHAT_CHANGED → chat reload → message loss.
 eventSource.on(event_types.GENERATION_ENDED, async () => {
-    try { if(_inlineWaitTimerId){clearInterval(_inlineWaitTimerId);set_inlineWaitTimerId(null)} const w = document.getElementById('sp-inline-wait'); if (w) w.remove(); } catch {}
+    try { cleanupGenUI(); } catch {}
     clearThoughtLoading();
     try { clearStallWatchdog(); } catch {}
     // Nested quiet ended while Together is still mid-flight — restore prompts.
@@ -547,6 +547,11 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
     if (generating) cancelGeneration();
     try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
     clearPromptAbortReason();
+    // Drop runtime SP Context so the next chat cannot inherit the previous Together footprint.
+    setLastPromptInjectionMetrics(null);
+    setLastPromptInjectionFailure(null);
+    setInlineGenerationContext(null);
+    setInlineGenStartMs(0);
     cancelSceneSourceTrace();
     const tp = document.getElementById('sp-thought-panel');
     if (tp) { tp.classList.remove('sp-tp-visible'); const tpb = document.getElementById('sp-tp-body'); if (tpb) tpb.innerHTML = ''; }

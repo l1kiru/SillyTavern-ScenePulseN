@@ -8,11 +8,13 @@ import { relPhaseFamily } from '../rel-phase.js';
 import { markStart as _spPmStart, markEnd as _spPmEnd } from '../perf-monitor.js';
 import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, buildProfileView, getActivePanels, canGenerateScene } from '../settings.js';
+import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId } from '../settings.js';
 import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
 import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
+import { currentChatKey } from '../message-fingerprint.js';
+import { promptInjectionOwnerMatches } from '../generation/prompt-injection.js';
 import {
     _lastPanelUpdate, set_lastPanelUpdate,
     set_cachedNormData,
@@ -65,16 +67,24 @@ export function resolveSpContextFootprint(meta = null) {
     // Separate snapshots must not inherit SP Context from a prior Together attempt.
     if (meta?.injectionMethod === 'separate') return null;
     const _rt = getLastPromptInjectionMetrics();
-    if (_rt?.tokens?.totalInput > 0) {
-        const _ownerOk = inlineGenerationContext
-            && _rt.chatKey === inlineGenerationContext.chatKey
-            && _rt.messageId === inlineGenerationContext.mesIdx
-            && Number(_rt.swipeId) === Number(inlineGenerationContext.swipeId);
-        const _viewingLive = currentSnapshotMesIdx < 0
-            || (inlineGenerationContext && currentSnapshotMesIdx === inlineGenerationContext.mesIdx);
-        if (_ownerOk || (_viewingLive && !_piMeta)) return _rt.tokens;
+    if (!(_rt?.tokens?.totalInput > 0)) return null;
+    const viewMesIdx = currentSnapshotMesIdx >= 0
+        ? currentSnapshotMesIdx
+        : inlineGenerationContext?.mesIdx;
+    if (viewMesIdx == null) return null;
+    let viewSwipeId;
+    if (currentSnapshotMesIdx >= 0) {
+        try { viewSwipeId = getActiveSwipeId(viewMesIdx); } catch { viewSwipeId = 0; }
+    } else {
+        viewSwipeId = inlineGenerationContext?.swipeId;
     }
-    return null;
+    if (viewSwipeId == null) return null;
+    if (!promptInjectionOwnerMatches(_rt, {
+        chatKey: currentChatKey(),
+        messageId: viewMesIdx,
+        swipeId: viewSwipeId,
+    })) return null;
+    return _rt.tokens;
 }
 
 function _spContextBadgeHtml(fp) {
@@ -82,14 +92,31 @@ function _spContextBadgeHtml(fp) {
     const _approx = fp.totalInput >= 1000
         ? `≈${(fp.totalInput / 1000).toFixed(1).replace(/\.0$/, '')}K`
         : `≈${fp.totalInput}`;
-    const _tip = [
+    const _instr = Number(fp.instructionsInput) || 0;
+    const _prev = Number(fp.previousStateInput) || 0;
+    const _tipLines = [
         t('ScenePulse used ≈{n} input tokens:', { n: fp.totalInput.toLocaleString() }),
-        t('{n} — required IN_PROMPT,', { n: (fp.mainInput || 0).toLocaleString() }),
-        t('{n} — final anchor.', { n: (fp.tailInput || 0).toLocaleString() }),
+    ];
+    if (_instr > 0 || _prev > 0) {
+        _tipLines.push(t('{n} — extension instructions (profile, rules, panels, schema),', { n: _instr.toLocaleString() }));
+        _tipLines.push(t('{n} — previous tracker state JSON,', { n: _prev.toLocaleString() }));
+        _tipLines.push(t('{n} — final anchor.', { n: (fp.tailInput || 0).toLocaleString() }));
+        // Markers / join overhead sit inside mainInput but outside the two parts.
+        const _partsSum = _instr + _prev;
+        const _overhead = Math.max(0, (Number(fp.mainInput) || 0) - _partsSum);
+        if (_overhead > 0) {
+            _tipLines.push(t('{n} — integrity markers / framing.', { n: _overhead.toLocaleString() }));
+        }
+    } else {
+        _tipLines.push(t('{n} — required IN_PROMPT,', { n: (fp.mainInput || 0).toLocaleString() }));
+        _tipLines.push(t('{n} — final anchor.', { n: (fp.tailInput || 0).toLocaleString() }));
+    }
+    _tipLines.push(
         '',
         t('Includes active custom panels and tracking options for this run.'),
         t('Tracker JSON shares the main response limit; there is no separate output reserve.'),
-    ].join('\n');
+    );
+    const _tip = _tipLines.join('\n');
     const _aria = t('ScenePulse context footprint ≈{n} tokens', { n: fp.totalInput.toLocaleString() });
     return `<span class="sp-gen-badge-sp-context" title="${esc(_tip)}" aria-label="${esc(_aria)}">${t('SP Context')}: ${_approx}</span>`;
 }
@@ -1497,7 +1524,6 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             }
         } catch {}
         if(currentSnapshotMesIdx>=0)fhtml+=`<span title="${t('Message index')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 11V3a1 1 0 0 1 1-1h5l4 4v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.1"/><path d="M7 2v4h4" stroke="currentColor" stroke-width="0.9" opacity="0.5"/></svg> #${currentSnapshotMesIdx}</span>`;
-        if(_mTokens>0)fhtml+=`<span title="${t('Estimated tokens')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><rect x="1" y="3" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.1"/><line x1="4" y1="6" x2="4" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.6"/><line x1="7" y1="5" x2="7" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><line x1="10" y1="7" x2="10" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.4"/></svg> ~${_mTokens.toLocaleString()}</span>`;
         if(_mElapsed>0)fhtml+=`<span class="sp-gen-summary" title="${t('Generation time')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.1"/><path d="M7 4v3.5l2.5 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg> ${_mElapsed.toFixed(1)}s</span>`;
         if(_mInject==='inline')fhtml+=`<span title="${t('Together')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 7h4l1.5-3 2 6 1.5-3h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${t('Together')}</span>`;
         else fhtml+=`<span title="${t('Separate')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="4.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/><circle cx="9.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/></svg> ${t('Separate')}</span>`;
