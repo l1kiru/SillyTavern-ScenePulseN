@@ -63,14 +63,17 @@ import {
     materializePromptInjection,
     verifyPromptInjection,
     commitVerifiedFootprint,
-    estimateRequestPromptTokens,
-    getTogetherPromptTokens,
     abortPromptInjection,
     clearPromptInjection,
     setAuthorityReposition,
     restorePromptInjection,
     getSuspendDepth,
 } from './src/generation/prompt-injection.js';
+import {
+    scheduleRequestInputMeasure,
+    finalizeTogetherRequestTokens,
+    resetRequestTokenLedger,
+} from './src/generation/request-token-ledger.js';
 
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
@@ -384,11 +387,16 @@ async function _authorityVerify(eventData, authority, apiKind, dryRunArg) {
         }
         if (!result.ok) return;
         if (result.warning) warn('PromptInjection:', result.warning);
+        // Non-blocking: copy payload and tokenize off the critical path so ST can fetch.
         try {
-            const counted = await estimateRequestPromptTokens(eventData);
-            if (plan.currentRequest) plan.currentRequest.fullPromptTokens = counted.tokens;
+            scheduleRequestInputMeasure({
+                runId: plan.runId,
+                requestSeq: plan.currentRequest?.seq,
+                payload: eventData,
+                apiKind: plan.currentRequest?.apiKind || apiKind,
+            });
         } catch (e) {
-            warn('PromptInjection: full prompt token estimate failed:', e?.message);
+            warn('PromptInjection: schedule token measure failed:', e?.message);
         }
         await commitVerifiedFootprint(plan, { tailFound: !!result.tailFound });
         try {
@@ -452,6 +460,16 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 warn('GENERATION_ENDED: target swipe changed; discarding inline tracker for',targetIdx);
                 discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
                 cancelSceneSourceTrace();
+                try {
+                    const _p = getActivePromptInjectionRun();
+                    if (_p?.runId && _p.currentRequest?.seq != null) {
+                        await finalizeTogetherRequestTokens({
+                            runId: _p.runId,
+                            requestSeq: _p.currentRequest.seq,
+                            rawMes: '',
+                        });
+                    }
+                } catch {}
                 try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
                 setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
                 return;
@@ -459,11 +477,19 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             log('GENERATION_ENDED: primary extraction attempt for message', targetIdx);
             // Split BEFORE extract — extractInlineTracker strips tracker from mes.
             const { extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(targetIdx);
+            const _plan = getActivePromptInjectionRun();
+            const _ledgerRec = (_plan?.runId && _plan.currentRequest?.seq != null)
+                ? await finalizeTogetherRequestTokens({
+                    runId: _plan.runId,
+                    requestSeq: _plan.currentRequest.seq,
+                    rawMes: rawMes || '',
+                })
+                : null;
             if (extracted) {
                 log('GENERATION_ENDED: primary extraction SUCCESS for message', targetIdx);
                 setInlineExtractionDone(true); setPendingInlineIdx(-1);
-                const _compTokens = replySplit.totalTokens || Math.round(rawMes.length / 4);
-                const _promptTokens = getTogetherPromptTokens();
+                const _compTokens = _ledgerRec?.output ?? replySplit.totalTokens ?? Math.round(rawMes.length / 4);
+                const _promptTokens = _ledgerRec?.input ?? 0;
                 const _elapsed = inlineGenStartMs > 0 ? ((Date.now() - inlineGenStartMs) / 1000) : 0;
                 setInlineGenStartMs(0);
                 genMeta.promptTokens = _promptTokens;
@@ -473,6 +499,9 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                     promptTokens: _promptTokens, completionTokens: _compTokens, elapsed: _elapsed,
                     narrativeTokens: replySplit.narrativeTokens,
                     trackerTokens: replySplit.trackerTokens,
+                    tokenSource: _ledgerRec?.source,
+                    tokenCoverage: _ledgerRec?.coverage,
+                    requestSeqs: _plan?.currentRequest?.seq != null ? [_plan.currentRequest.seq] : undefined,
                     stopHider: true, unlockGen: true,
                 });
                 try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
@@ -482,6 +511,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             } else {
                 const msgLen = (chat[targetIdx]?.mes || '').length;
                 log('GENERATION_ENDED: primary extraction failed for message', targetIdx, '(' + msgLen + ' chars), deferring to onCharMsg');
+                // Ledger already charged for this request (API spend), even if tracker missing.
                 setPendingInlineIdx(targetIdx);
                 spSetGenerating(false);
                 stopStreamingHider();
@@ -577,6 +607,7 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
     resetColorMap();
     invalidateSettingsCache();
     resetSessionTokens();
+    try { resetRequestTokenLedger(); } catch {}
     if(_pendingActiveSwipeDeletion?.timer)clearTimeout(_pendingActiveSwipeDeletion.timer);
     _pendingActiveSwipeDeletion=null;
     _rememberSwipeIds();
