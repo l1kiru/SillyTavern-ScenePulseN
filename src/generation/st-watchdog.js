@@ -40,10 +40,13 @@ import {
     setPendingInlineIdx,
     setInlineGenerationContext,
     setCancelRequested,
+    getActivePromptInjectionRun,
 } from '../state.js';
 import { spSetGenerating } from '../ui/mobile.js';
 import { cleanupGenUI } from '../ui/loading.js';
 import { stopStreamingHider } from './streaming.js';
+import { clearPromptInjection } from './prompt-injection.js';
+import { cancelSceneSourceTrace } from '../scene-source-trace.js';
 
 const POLL_INTERVAL_MS = 3000;
 const GRACE_PERIOD_MS = 5000;          // ignore the first 5s; ST may not have started yet
@@ -98,8 +101,10 @@ function _check() {
         setInlineGenStartMs(0);
         setInlineExtractionDone(false);
         setPendingInlineIdx(-1);
+        try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
         setInlineGenerationContext(null);
         setCancelRequested(false);
+        try { cancelSceneSourceTrace(); } catch {}
         try { stopStreamingHider({abort:true}); } catch {}
         try { cleanupGenUI(); } catch {}
         try {

@@ -21,7 +21,7 @@
 import { t } from '../i18n.js';
 import { esc, spConfirm } from '../utils.js';
 import { debugLog } from '../logger.js';
-import { getLastRawResponse, getLastExtractionFailure, generating, genMeta, lastGenSource, currentSnapshotMesIdx } from '../state.js';
+import { getLastRawResponse, getLastExtractionFailure, generating, genMeta, lastGenSource, currentSnapshotMesIdx, getActivePromptInjectionRun, getLastPromptInjectionMetrics, getLastPromptInjectionFailure } from '../state.js';
 import { getPairs as rawGetPairs } from '../raw-pairs.js';
 import { getEntries as netGetEntries, addChangeListener as netAddChangeListener, clearAll as netClearAll, entryCount as netEntryCount } from '../network-log.js';
 import { runDoctor, DOCTOR_STEPS, runSingleDoctorCheck } from '../doctor.js';
@@ -457,7 +457,46 @@ function _overviewTab(panel, ctx = {}) {
     const mode = settings?.injectionMethod === 'separate' ? t('Separate') : t('Together');
     const requestStatus = latestRequest
         ? `${latestRequest.status ?? t('transport error')} · ${(latestRequest.latencyMs / 1000).toFixed(1)}s`
-        : t('No request captured');
+        : '—';
+    const piRun = (() => { try { return getActivePromptInjectionRun(); } catch { return null; } })();
+    const piMetrics = (() => { try { return getLastPromptInjectionMetrics(); } catch { return null; } })();
+    const piFail = (() => { try { return getLastPromptInjectionFailure(); } catch { return null; } })();
+    let piHtml = '';
+    if (piFail) {
+        piHtml = `
+                <section class="sp-di-overview-card sp-di-overview-card-wide">
+                    <div class="sp-di-overview-card-title">${t('Prompt injection')}</div>
+                    <dl>
+                        <div><dt>${t('Status')}</dt><dd class="sp-di-value-error">${esc(t('blocked before send'))}</dd></div>
+                        <div><dt>${t('Code')}</dt><dd>${esc(piFail.code || 'SP_PROMPT_INTEGRITY_FAILURE')}</dd></div>
+                        <div><dt>${t('Observed markers')}</dt><dd>begin=${esc(String(piFail.observed?.begin ?? '?'))}, end=${esc(String(piFail.observed?.end ?? '?'))}</dd></div>
+                        <div><dt>${t('Network request')}</dt><dd>${esc(t('not sent'))}</dd></div>
+                    </dl>
+                </section>`;
+    } else {
+        const tokens = piMetrics?.tokens || piRun?.verifiedTokens || piRun?.provisionalTokens;
+        const status = piRun?.status || (piMetrics ? 'verified' : '—');
+        const mainT = tokens?.mainInput != null ? `≈${tokens.mainInput.toLocaleString()} t` : '—';
+        const tailT = tokens?.tailInput != null ? `≈${tokens.tailInput.toLocaleString()} t` : '—';
+        const totalT = tokens?.totalInput != null ? `≈${tokens.totalInput.toLocaleString()} t` : '—';
+        const role = piMetrics?.effectiveRole || piRun?.effectiveRole || piRun?.registeredRole || '—';
+        const hook = piMetrics?.integrity?.hook || piRun?.verification?.finalHook || '—';
+        const seq = piRun?.currentRequest?.seq != null ? String(piRun.currentRequest.seq) : '—';
+        const phase = piRun?.currentRequest?.phase || '—';
+        piHtml = `
+                <section class="sp-di-overview-card sp-di-overview-card-wide">
+                    <div class="sp-di-overview-card-title">${t('Prompt injection')}</div>
+                    <dl>
+                        <div><dt>${t('Status')}</dt><dd>${esc(status)}</dd></div>
+                        <div><dt>${t('Request')}</dt><dd>seq=${esc(seq)} · ${esc(phase)}</dd></div>
+                        <div><dt>${t('Main')}</dt><dd>IN_PROMPT · ${esc(role)} · ${esc(mainT)}</dd></div>
+                        <div><dt>${t('Tail')}</dt><dd>IN_CHAT depth 0 · ${esc(tailT)}</dd></div>
+                        <div><dt>${t('Total ScenePulse input')}</dt><dd>${esc(totalT)}</dd></div>
+                        <div><dt>${t('Final verification')}</dt><dd>${esc(hook)}</dd></div>
+                        <div><dt>${t('Output quota')}</dt><dd>${esc(t('shared with narrative'))}</dd></div>
+                    </dl>
+                </section>`;
+    }
     const summaryText = [
         `ScenePulse ${VERSION}`,
         `Status: ${stateLabel}${stateDetail ? ' — ' + stateDetail : ''}`,
@@ -527,6 +566,7 @@ function _overviewTab(panel, ctx = {}) {
                     </div>
                     ${failure ? `<div class="sp-di-overview-failure"><strong>${esc(failure.code || t('Failure'))}</strong><span>${esc(failure.message || '')}</span></div>` : ''}
                 </section>
+                ${piHtml}
             </div>
         </div>
     `;

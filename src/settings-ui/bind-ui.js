@@ -248,6 +248,10 @@ export function bindUI(){const s=getSettings();
             hidePanel();
             const tp=document.getElementById('sp-thought-panel');if(tp)tp.classList.remove('sp-tp-visible');
             try{
+                import('../generation/prompt-injection.js').then(async m=>{
+                    const { getActivePromptInjectionRun } = await import('../state.js');
+                    m.clearPromptInjection(getActivePromptInjectionRun()?.runId || null);
+                });
                 import('../generation/scene-build-controller.js').then(m=>m.disposeSceneBuilds());
                 import('../ui/scene-build-ui.js').then(m=>{m.disposeSceneBuildUi();});
             }catch{}

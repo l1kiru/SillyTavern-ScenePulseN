@@ -30,6 +30,12 @@ const state = {
     inlineExtractionDone: false,
     inlineGenerationContext: null,
 
+    // ── Prompt injection (Together extension prompts) ──
+    activePromptInjectionRun: null,
+    lastPromptInjectionMetrics: null,
+    lastPromptInjectionFailure: null,
+    promptAbortReason: null,
+
     // ── Mobile ──
     _spMobileMinimized: false,
 
@@ -129,6 +135,23 @@ export function setInlineExtractionDone(v) { inlineExtractionDone = state.inline
 
 export let inlineGenerationContext = state.inlineGenerationContext;
 export function setInlineGenerationContext(v) { inlineGenerationContext = state.inlineGenerationContext = v; }
+
+export let activePromptInjectionRun = state.activePromptInjectionRun;
+export function setActivePromptInjectionRun(v) { activePromptInjectionRun = state.activePromptInjectionRun = v; }
+export function getActivePromptInjectionRun() { return state.activePromptInjectionRun; }
+
+export let lastPromptInjectionMetrics = state.lastPromptInjectionMetrics;
+export function setLastPromptInjectionMetrics(v) { lastPromptInjectionMetrics = state.lastPromptInjectionMetrics = v; }
+export function getLastPromptInjectionMetrics() { return state.lastPromptInjectionMetrics; }
+
+export let lastPromptInjectionFailure = state.lastPromptInjectionFailure;
+export function setLastPromptInjectionFailure(v) { lastPromptInjectionFailure = state.lastPromptInjectionFailure = v; }
+export function getLastPromptInjectionFailure() { return state.lastPromptInjectionFailure; }
+
+export let promptAbortReason = state.promptAbortReason;
+export function setPromptAbortReason(v) { promptAbortReason = state.promptAbortReason = v; }
+export function getPromptAbortReason() { return state.promptAbortReason; }
+export function clearPromptAbortReason() { promptAbortReason = state.promptAbortReason = null; }
 
 // ── Mobile state ──
 export let _spMobileMinimized = state._spMobileMinimized;

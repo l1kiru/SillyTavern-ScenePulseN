@@ -19,7 +19,9 @@ import {
     set_cachedNormData,
     setPrevLocation, setPrevTimePeriod,
     resetSessionTokens,
-    _inlineWaitTimerId, set_inlineWaitTimerId
+    _inlineWaitTimerId, set_inlineWaitTimerId,
+    getActivePromptInjectionRun,
+    getPromptAbortReason, clearPromptAbortReason,
 } from './src/state.js';
 import {
     getSettings, anyPanelsActive,
@@ -52,6 +54,17 @@ import {
     recordTextCompletionPrompt,
     cancelSceneSourceTrace,
 } from './src/scene-source-trace.js';
+import {
+    shouldHandlePromptHook,
+    materializePromptInjection,
+    verifyPromptInjection,
+    commitVerifiedFootprint,
+    abortPromptInjection,
+    clearPromptInjection,
+    setAuthorityReposition,
+    restorePromptInjection,
+    getSuspendDepth,
+} from './src/generation/prompt-injection.js';
 
 // ── UI ──
 import { spSetGenerating } from './src/ui/mobile.js';
@@ -250,34 +263,152 @@ if (event_types.WORLDINFO_FORCE_ACTIVATE) {
 if (event_types.CHAT_COMPLETION_PROMPT_READY) {
     eventSource.on(event_types.CHAT_COMPLETION_PROMPT_READY, eventData => {
         try {
-            if (!_sceneSourceTraceGate()) return;
-            if (eventData?.dryRun) return;
-            recordPromptReady(eventData);
-        } catch {}
+            if (_sceneSourceTraceGate()) {
+                if (!eventData?.dryRun) recordPromptReady(eventData);
+            }
+            if (!shouldHandlePromptHook(eventData, { requirePhase: 'awaiting-intermediate' })) return;
+            if (!(getSettings().enabled && getSettings().injectionMethod === 'inline' && inlineGenStartMs > 0)) return;
+            const plan = getActivePromptInjectionRun();
+            if (plan?.currentRequest) plan.currentRequest.apiKind = 'chat';
+            const mat = materializePromptInjection(eventData);
+            if (!mat.ok) {
+                abortPromptInjection({
+                    code: mat.code || 'SP_PROMPT_INTEGRITY_FAILURE',
+                    runId: plan?.runId,
+                    observed: mat.observed,
+                    detail: mat.detail,
+                });
+                try { discardTogetherSceneBuild(inlineGenerationContext, 'prompt-integrity'); } catch {}
+                try { cancelSceneSourceTrace(); } catch {}
+                try { stopStreamingHider({ abort: true }); } catch {}
+                try { cleanupGenUI(); } catch {}
+                spSetGenerating(false);
+                setInlineGenStartMs(0);
+                setInlineGenerationContext(null);
+            }
+        } catch (e) { warn('CHAT_COMPLETION_PROMPT_READY prompt-injection:', e?.message); }
     });
 }
 if (event_types.GENERATE_AFTER_COMBINE_PROMPTS) {
     eventSource.on(event_types.GENERATE_AFTER_COMBINE_PROMPTS, eventData => {
         try {
-            if (!_sceneSourceTraceGate()) return;
+            if (_sceneSourceTraceGate() && !Array.isArray(eventData?.prompt)) {
+                recordTextCompletionPrompt(eventData);
+            }
             if (Array.isArray(eventData?.prompt)) return;
-            recordTextCompletionPrompt(eventData);
-        } catch {}
+            if (!shouldHandlePromptHook(eventData, { requirePhase: 'awaiting-intermediate' })) return;
+            if (!(getSettings().enabled && getSettings().injectionMethod === 'inline' && inlineGenStartMs > 0)) return;
+            const plan = getActivePromptInjectionRun();
+            if (plan?.currentRequest) plan.currentRequest.apiKind = 'text';
+            const mat = materializePromptInjection(eventData);
+            if (!mat.ok) {
+                abortPromptInjection({
+                    code: mat.code || 'SP_PROMPT_INTEGRITY_FAILURE',
+                    runId: plan?.runId,
+                    observed: mat.observed,
+                    detail: mat.detail,
+                });
+                try { discardTogetherSceneBuild(inlineGenerationContext, 'prompt-integrity'); } catch {}
+                try { cancelSceneSourceTrace(); } catch {}
+                try { stopStreamingHider({ abort: true }); } catch {}
+                try { cleanupGenUI(); } catch {}
+                spSetGenerating(false);
+                setInlineGenStartMs(0);
+                setInlineGenerationContext(null);
+            }
+        } catch (e) { warn('GENERATE_AFTER_COMBINE_PROMPTS prompt-injection:', e?.message); }
     });
 }
+
+async function _authorityVerify(eventData, authority, apiKind) {
+    try {
+        if (!shouldHandlePromptHook(eventData)) return;
+        if (!(getSettings().enabled && getSettings().injectionMethod === 'inline' && inlineGenStartMs > 0)) return;
+        const plan = getActivePromptInjectionRun();
+        if (!plan?.currentRequest) return;
+        if (plan.currentRequest.phase !== 'materialized' && plan.currentRequest.phase !== 'verified') {
+            if (plan.currentRequest.phase === 'awaiting-intermediate') {
+                plan.currentRequest.apiKind = apiKind;
+                const mat = materializePromptInjection(eventData);
+                if (!mat.ok) {
+                    abortPromptInjection({
+                        code: mat.code || 'SP_PROMPT_INTEGRITY_FAILURE',
+                        runId: plan.runId,
+                        observed: mat.observed,
+                        detail: mat.detail,
+                    });
+                    try { discardTogetherSceneBuild(inlineGenerationContext, 'prompt-integrity'); } catch {}
+                    try { cancelSceneSourceTrace(); } catch {}
+                    try { stopStreamingHider({ abort: true }); } catch {}
+                    try { cleanupGenUI(); } catch {}
+                    spSetGenerating(false);
+                    setInlineGenStartMs(0);
+                    setInlineGenerationContext(null);
+                    return;
+                }
+            } else {
+                return;
+            }
+        }
+        const result = verifyPromptInjection(eventData, { authority });
+        if (!result.ok && result.fatal) {
+            abortPromptInjection({
+                code: result.code || 'SP_PROMPT_INTEGRITY_FAILURE',
+                runId: plan.runId,
+                observed: result.observed,
+            });
+            try { discardTogetherSceneBuild(inlineGenerationContext, 'prompt-integrity'); } catch {}
+            try { cancelSceneSourceTrace(); } catch {}
+            try { stopStreamingHider({ abort: true }); } catch {}
+            try { cleanupGenUI(); } catch {}
+            spSetGenerating(false);
+            setInlineGenStartMs(0);
+            setInlineGenerationContext(null);
+            return;
+        }
+        if (result.warning) warn('PromptInjection:', result.warning);
+        await commitVerifiedFootprint(plan, { tailFound: !!result.tailFound });
+    } catch (e) {
+        warn(authority + ' prompt-injection:', e?.message);
+    }
+}
+
+const _onAuthorityAfterData = (eventData) => { void _authorityVerify(eventData, 'GENERATE_AFTER_DATA', 'text'); };
+const _onAuthoritySettingsReady = (eventData) => { void _authorityVerify(eventData, 'CHAT_COMPLETION_SETTINGS_READY', 'chat'); };
+
+function _repositionAuthorityHandlers() {
+    const makeLast = typeof eventSource.makeLast === 'function'
+        ? (evt, fn) => eventSource.makeLast(evt, fn)
+        : null;
+    if (!makeLast) return;
+    if (event_types.GENERATE_AFTER_DATA) makeLast(event_types.GENERATE_AFTER_DATA, _onAuthorityAfterData);
+    if (event_types.CHAT_COMPLETION_SETTINGS_READY) makeLast(event_types.CHAT_COMPLETION_SETTINGS_READY, _onAuthoritySettingsReady);
+}
+
+function _wireAuthorityHandlersOnce() {
+    if (event_types.GENERATE_AFTER_DATA) {
+        if (typeof eventSource.makeLast === 'function') eventSource.makeLast(event_types.GENERATE_AFTER_DATA, _onAuthorityAfterData);
+        else eventSource.on(event_types.GENERATE_AFTER_DATA, _onAuthorityAfterData);
+    }
+    if (event_types.CHAT_COMPLETION_SETTINGS_READY) {
+        if (typeof eventSource.makeLast === 'function') eventSource.makeLast(event_types.CHAT_COMPLETION_SETTINGS_READY, _onAuthoritySettingsReady);
+        else eventSource.on(event_types.CHAT_COMPLETION_SETTINGS_READY, _onAuthoritySettingsReady);
+    }
+}
+
+_wireAuthorityHandlersOnce();
+setAuthorityReposition(_repositionAuthorityHandlers);
 
 // CRITICAL: Save chat the INSTANT generation ends, BEFORE other extensions
 // can trigger profile switches that cause CHAT_CHANGED → chat reload → message loss.
 eventSource.on(event_types.GENERATION_ENDED, async () => {
     try { if(_inlineWaitTimerId){clearInterval(_inlineWaitTimerId);set_inlineWaitTimerId(null)} const w = document.getElementById('sp-inline-wait'); if (w) w.remove(); } catch {}
     clearThoughtLoading();
-    // v6.27.16: ST signaled normal completion — disarm the stall watchdog
-    // so it can't fire late and reset a generation that finished cleanly.
     try { clearStallWatchdog(); } catch {}
-    // ── PRIMARY EXTRACTION for Together/Inline mode ──
-    // Guard: only extract when ScenePulse actually injected a prompt (inlineGenStartMs > 0).
-    // Other extensions (e.g. MemoryBooks) may trigger GENERATION_ENDED for their own quiet
-    // generations — we must NOT attempt extraction from messages we didn't inject into.
+    // Nested quiet ended while Together is still mid-flight — restore prompts.
+    try {
+        if (getSuspendDepth() > 0 && inlineGenStartMs > 0) restorePromptInjection();
+    } catch {}
     const s = getSettings();
     if (s.enabled && s.injectionMethod === 'inline' && !inlineExtractionDone && anyPanelsActive() && inlineGenStartMs > 0) {
         const { chat } = SillyTavern.getContext();
@@ -291,6 +422,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 warn('GENERATION_ENDED: target swipe changed; discarding inline tracker for',targetIdx);
                 discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
                 cancelSceneSourceTrace();
+                try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
                 setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
                 return;
             }
@@ -310,6 +442,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                     promptTokens: 0, completionTokens: _compTokens, elapsed: _elapsed,
                     stopHider: true, unlockGen: true,
                 });
+                try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
                 setInlineGenerationContext(null);
                 log('GENERATION_ENDED: pipeline complete');
                 return;
@@ -317,33 +450,21 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 const msgLen = (chat[targetIdx]?.mes || '').length;
                 log('GENERATION_ENDED: primary extraction failed for message', targetIdx, '(' + msgLen + ' chars), deferring to onCharMsg');
                 setPendingInlineIdx(targetIdx);
-                // v6.27.14: also release the UI lock here. Previously this
-                // branch ONLY set pendingInlineIdx, leaving spSetGenerating
-                // active until onCharMsg eventually unlocked. But on
-                // ECONNRESET / provider drops (NanoGPT under load was the
-                // user-reported case), the assistant message never reaches
-                // a renderable state, onCharMsg never fires, and the
-                // "generating…" pill hangs forever. The deferred extraction
-                // continues to be retried in onCharMsg if a message does
-                // eventually render — that path doesn't need the UI to
-                // stay locked while it waits.
                 spSetGenerating(false);
                 stopStreamingHider();
-                // Keep active source-trace for deferred onCharMsg finish.
+                // Keep extension prompts until onCharMsg / next run decides;
+                // metrics already committed after authority for footer.
             }
         } else {
             log('GENERATION_ENDED: no assistant message found, deferring to onCharMsg');
-            // v6.27.14: same logic — no message to extract from, no reason
-            // to keep the UI locked. onCharMsg can still fire later if a
-            // delayed renderer pushes the message in.
             spSetGenerating(false);
             stopStreamingHider();
-            // Keep active source-trace for deferred onCharMsg finish.
         }
     } else {
+        // Foreign quiet / unrelated GENERATION_ENDED — do NOT clear our Together prompts.
         spSetGenerating(false);
         stopStreamingHider();
-        cancelSceneSourceTrace();
+        if (!(inlineGenStartMs > 0)) cancelSceneSourceTrace();
     }
     try { await ensureChatSaved(); log('GENERATION_ENDED: chat saved preemptively'); }
     catch (e) { warn('GENERATION_ENDED save failed:', e); }
@@ -357,14 +478,12 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
 // only auto-fallback / separate-after-message are skipped via cancelRequested.
 // Keep active source-trace until finish/discard, same as inlineGenStartMs.
 eventSource.on(event_types.GENERATION_STOPPED, () => {
-    // v6.27.16: user-initiated stop — disarm the stall watchdog regardless
-    // of whether `generating` is true (defensive: guards against a
-    // late-firing watchdog after manual stop already cleared state).
     try { clearStallWatchdog(); } catch {}
+    const integrityAbort = getPromptAbortReason();
     const hadInline = inlineGenStartMs > 0 || pendingInlineIdx >= 0;
     const hadEngine = generating;
     setCancelRequested(true);
-    try { cancelTogetherSceneBuilds('reply-stopped'); } catch {}
+    try { cancelTogetherSceneBuilds(integrityAbort ? 'prompt-integrity' : 'reply-stopped'); } catch {}
 
     if (hadEngine) {
         const oldNonce = genNonce;
@@ -372,11 +491,16 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
         setGenerating(false);
         log('CANCEL (ST stop): nonce', oldNonce, '→', genNonce);
     }
-    if (hadEngine || hadInline) {
-        log('ST generation_stopped — skip auto scene recovery for this turn');
+    if (hadEngine || hadInline || integrityAbort) {
+        log(integrityAbort
+            ? 'ST generation_stopped — integrity abort ' + integrityAbort.code
+            : 'ST generation_stopped — skip auto scene recovery for this turn');
         spSetGenerating(false);
         try { stopStreamingHider({abort:true}); } catch {}
         cleanupGenUI();
+        if (hadInline || integrityAbort) {
+            try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
+        }
         const entry = getLatestSnapshotEntry();
         const snap = entry?.status === 'stale' ? null : (entry?.snapshot ?? null);
         const body = document.getElementById('sp-panel-body');
@@ -388,10 +512,10 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
             if (body) renderEmptyState();
         }
     } else {
-        // Separate-mode narrative stop: no SP engine lock yet, but mark cancel
-        // so the delayed onCharMsg auto-gen does not analyze a truncated reply.
         log('ST generation_stopped — marked cancel for pending auto-gen');
     }
+    // Clear programmatic abort reason after handling so the next run starts clean.
+    if (integrityAbort) clearPromptAbortReason();
 });
 
 eventSource.on(event_types.CHAT_CHANGED, async () => {
@@ -402,6 +526,8 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
         reconcileSceneBuildUi();
     } catch (e) { warn('CHAT_CHANGED scene-build:', e); }
     if (generating) cancelGeneration();
+    try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
+    clearPromptAbortReason();
     cancelSceneSourceTrace();
     const tp = document.getElementById('sp-thought-panel');
     if (tp) { tp.classList.remove('sp-tp-visible'); const tpb = document.getElementById('sp-tp-body'); if (tpb) tpb.innerHTML = ''; }

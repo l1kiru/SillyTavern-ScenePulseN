@@ -2,6 +2,15 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.10] — 2026-07-26
+
+#### Added — PromptInjectionPlan (Together delivery)
+
+- Together mode registers the tracker instruction via SillyTavern `setExtensionPrompt` (`IN_PROMPT` main + `IN_CHAT` depth-0 tail) instead of mutating `chat` with `unshift`/`splice`/`push`.
+- Run + request scoped integrity: trust-then-materialize digests, authoritative checks on `GENERATE_AFTER_DATA` (Text) and `CHAT_COMPLETION_SETTINGS_READY` (Chat) with `makeLast` reposition per run.
+- Verified ScenePulse context footprint in the generation footer (`SP Context` badge, always visible) and Debug Inspector; historical snapshots keep their own metadata even when the UI mode is Separate.
+- Frozen `requestSchema` / `deltaMode` / `baseSnapshot` for Together extraction; owner-aware cleanup; quiet suspend/restore; no token budget abort or Separate fallback for size/integrity failures (Tier-2 after broken tracker output is unchanged).
+
 ### [7.1.9] — 2026-07-25
 
 #### Changed — Scene Source Trace UX

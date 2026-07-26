@@ -33,7 +33,7 @@ import { startStreamingHider, stopStreamingHider } from './streaming.js';
 import { showChatBanner, cleanupGenUI } from '../ui/loading.js';
 import { startStWatchdog } from './st-watchdog.js';
 import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
-import { getActivePromptRole, promptRoleFlags } from '../prompts/role.js';
+import { getActivePromptRole } from '../prompts/role.js';
 import {
     normalizeTrackerPromptStyle,
     getTogetherRulesBlock,
@@ -42,6 +42,20 @@ import {
 import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
 import { startSceneBuild, updateSceneBuild } from './scene-build-controller.js';
 import { startSceneSourceTrace, cancelSceneSourceTrace } from '../scene-source-trace.js';
+import { buildRequestSchema } from '../schema.js';
+import {
+    buildPromptInjectionPlan,
+    purgeStalePromptKeys,
+    registerPromptInjection,
+    beginRequest,
+    measurePromptInjection,
+    clearPromptInjection,
+    repositionAuthorityHandlers,
+    suspendPromptInjection,
+    restorePromptInjection,
+    getSuspendDepth,
+} from './prompt-injection.js';
+import { getActivePromptInjectionRun, clearPromptAbortReason } from '../state.js';
 
 // ── Stall watchdog (v6.27.16) ─────────────────────────────────────
 //
@@ -71,7 +85,12 @@ function _onStallFire(genStart){
     setInlineGenStartMs(0);
     setInlineExtractionDone(false);
     setPendingInlineIdx(-1);
+    try {
+        const run = getActivePromptInjectionRun();
+        clearPromptInjection(run?.runId || null);
+    } catch {}
     setInlineGenerationContext(null);
+    try { cancelSceneSourceTrace(); } catch {}
     try { stopStreamingHider({abort:true}); } catch {}
     try { cleanupGenUI(); } catch {}
     try {
@@ -266,7 +285,19 @@ ${outputFormat}`;
 
 export const scenePulseInterceptor=async function(chat,cs,abort,type){
     const s=getSettings();
-    if(!s.enabled||type==='quiet')return;
+    if(!s.enabled)return;
+    if(type==='quiet'){
+        // Nested quiet while Together prompts are registered — suspend so
+        // foreign/our quiet does not inherit the ScenePulse extension prompts.
+        try {
+            if (getActivePromptInjectionRun()) suspendPromptInjection();
+        } catch {}
+        return;
+    }
+    // Resume after nested quiet suspend before starting / continuing Together.
+    try {
+        while (getSuspendDepth() > 0) restorePromptInjection();
+    } catch {}
     // New ST generation cycle — prior user Stop must not block this turn's
     // auto-recovery / separate auto-gen.
     setCancelRequested(false);
@@ -281,7 +312,9 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _stuck = inlineGenStartMs<=0 || (Date.now()-inlineGenStartMs)>60000;
         if(_stuck){
             log('Interceptor: generating flag stuck (startMs='+inlineGenStartMs+') — force resetting');
-            setGenerating(false);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenStartMs(0);setInlineGenerationContext(null);
+            setGenerating(false);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenStartMs(0);
+            try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
+            setInlineGenerationContext(null);
             cancelSceneSourceTrace();
         } else {
             log('Interceptor: skipped \u2014 manual/partial generation in progress');return;
@@ -360,47 +393,58 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         // stopped streaming"; ST watchdog handles "ST itself stopped."
         startStWatchdog();
 
-        // ── TOGETHER MODE: Inject inline tracker prompt ──
+        // ── TOGETHER MODE: register extension prompts (PromptInjectionPlan) ──
         {
-        const prompt=buildInlineTrackerPrompt();
-        // v6.27.20 (issue #16 followup): apply the active profile's
-        // systemPromptRole to the three injected messages. Pre-v6.27.20
-        // these were hardcoded to is_system:true regardless of the
-        // user's choice — applyPromptRole() handled separate-mode but
-        // never applied to the together-mode injection. Reported by
-        // rgwb10 against v6.27.6: "changed setting to User, prompt
-        // inspector still shows system."
+        clearPromptAbortReason();
+        const prompt = buildInlineTrackerPrompt();
         const _spRole = getActivePromptRole();
-        const _isSys = _spRole === 'system';
-        // 'assistant' role: both flags false. ST treats it as an
-        // assistant turn — rarely useful, shipped for parity with the
-        // separate-mode applyPromptRole() helper.
-        const _flags = promptRoleFlags(_spRole);
-        const _extra = { isSmallSys: _isSys };
-
-        // Head anchor — short planning reminder at the START of the context.
-        // Counters lost-in-the-middle behavior on long prompts: as the injected schema spec
-        // grows past ~3k tokens, the appendix instruction at the end loses attention weight.
-        // A 30-token reminder near the start primes the model's planning phase to know
-        // structured output is required *before* it begins narrative generation.
-        chat.unshift({
-            ..._flags,
-            mes:'IMPORTANT: After your complete narrative, append tracker JSON between <!--SP_TRACKER_START--> and <!--SP_TRACKER_END-->. Do not put tracker data in the story. Full rules and schema appear later in the context.',
-            extra: _extra,
-        });
-        chat.splice(Math.max(0,chat.length-1),0,{
-            ..._flags,
-            mes:prompt,
-            extra: _extra,
-        });
-        chat.push({
-            ..._flags,
-            mes:'End with <!--SP_TRACKER_START-->{tracker JSON}<!--SP_TRACKER_END--> only \u2014 no markdown fences, no commentary after the end marker. Do not repeat these instructions in the narrative.',
-            extra: _extra,
-        });
-        log('Interceptor [inline/together]: injected tracker prompt (~'+Math.round(prompt.length/4)+' tokens) + head/tail anchors as role='+_spRole,
-            'type=',type,'mesIdx=',_targetMesIdx,'swipeId=',_targetSwipeId,
-            'state: extDone=',inlineExtractionDone,'pendingIdx=',pendingInlineIdx,'generating=',generating);
+        const _isDelta = !hasStaleSnapshotBefore(_targetMesIdx) && shouldUseDelta(_baseSnapshot);
+        const _frozenSchema = buildRequestSchema(getActiveSchema(), { mode: _isDelta ? 'delta' : 'full' });
+        // New user-facing Together run: purge stale keys. Tool recursion reuses
+        // the active plan via beginRequest only (no purge / no new SceneBuild).
+        const _existing = getActivePromptInjectionRun();
+        const _reuseToolChain = !!(
+            _existing
+            && _existing.owner?.chatKey === currentChatKey()
+            && _existing.owner?.messageId === _targetMesIdx
+            && type === 'continue'
+        );
+        let plan;
+        if (_reuseToolChain) {
+            plan = _existing;
+            beginRequest('chat', plan);
+        } else {
+            purgeStalePromptKeys();
+            plan = buildPromptInjectionPlan({
+                text: prompt,
+                role: _spRole,
+                owner: {
+                    chatKey: currentChatKey(),
+                    messageId: _targetMesIdx,
+                    swipeId: _targetSwipeId,
+                },
+                frozenRequestSchema: _frozenSchema,
+                frozenDeltaMode: _isDelta,
+                baseSnapshot: _baseSnapshot,
+                chatKey: currentChatKey(),
+                messageId: _targetMesIdx,
+                swipeId: _targetSwipeId,
+            });
+            registerPromptInjection(plan);
+            repositionAuthorityHandlers();
+            beginRequest('chat', plan);
+            try { await measurePromptInjection(plan, { provisional: true }); } catch {}
+        }
+        _inlineCtx.frozenRequestSchema = plan.frozenRequestSchema;
+        _inlineCtx.frozenDeltaMode = plan.frozenDeltaMode;
+        _inlineCtx.promptInjection = {
+            runId: plan.runId,
+            registeredRole: plan.registeredRole,
+        };
+        setInlineGenerationContext(_inlineCtx);
+        log('Interceptor [inline/together]: setExtensionPrompt main+IN_PROMPT / tail+IN_CHAT role=' + _spRole,
+            'run=', plan.runId, 'type=', type, 'mesIdx=', _targetMesIdx, 'swipeId=', _targetSwipeId,
+            'reuse=', !!_reuseToolChain);
         startStreamingHider();
         }
         // Show waiting animation on panel (both tool calling and inline)
@@ -421,7 +465,9 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             showChatBanner('Awaiting scene data');
         }catch(e){}
     } else {
-        // SEPARATE MODE: Just embed previous snapshot data for context
+        // SEPARATE MODE: clear any leftover Together extension prompts, then
+        // optionally embed previous snapshot data for context.
+        try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
         if(!s.embedSnapshots)return;
         const snap=getLatestSnapshot();if(!snap){log('Interceptor: no snapshot to embed');return}
         const snapJson=JSON.stringify(snap,null,2);

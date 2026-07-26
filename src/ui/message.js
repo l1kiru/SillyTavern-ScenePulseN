@@ -15,8 +15,10 @@ import {
     inlineGenStartMs, setInlineGenStartMs,
     pendingInlineIdx, setPendingInlineIdx,
     _inlineWaitTimerId, set_inlineWaitTimerId,
-    getLastExtractionFailure, shouldSkipAutoSceneRecovery
+    getLastExtractionFailure, shouldSkipAutoSceneRecovery,
+    getActivePromptInjectionRun,
 } from '../state.js';
+import { clearPromptInjection } from '../generation/prompt-injection.js';
 import { continuationReprompt } from '../generation/engine.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
@@ -140,6 +142,7 @@ export async function onCharMsg(idx){
             warn('onCharMsg [inline]: target swipe changed; discarding tracker for',idx);
             discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
             cancelSceneSourceTrace();
+            try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
             setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
             return;
         }
@@ -192,6 +195,7 @@ export async function onCharMsg(idx){
                 promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed,
                 stopHider:false, unlockGen:true,
             });
+            try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
             setInlineGenerationContext(null);
             log('onCharMsg [inline]: pipeline complete');
         } else {
@@ -277,6 +281,8 @@ export async function onCharMsg(idx){
                         result=null;
                     } else if(!result){
                         warn('Together mode: falling back to full separate generation ('+msgLen+' chars, '+_failureKind+')');
+                        // Clear Together extension prompts before Separate recovery.
+                        try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
                         // Lore belongs to the original visible generation, not the
                         // separate fallback request. Finish capture before generateTracker
                         // so Tier 2 cannot pollute or drop the active trace.

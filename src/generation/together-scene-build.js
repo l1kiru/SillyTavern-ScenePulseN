@@ -21,6 +21,8 @@ export async function processTogetherExtraction(mesIdx, extracted, source, inlin
         expectedParentFingerprint: baseOpts.expectedParentFingerprint ?? inlineCtx?.parentFingerprint,
         owner: baseOpts.owner ?? inlineCtx?.owner,
         sceneBuildOperationId: opId,
+        frozenRequestSchema: baseOpts.frozenRequestSchema ?? inlineCtx?.frozenRequestSchema,
+        frozenDeltaMode: baseOpts.frozenDeltaMode ?? inlineCtx?.frozenDeltaMode,
     });
     if (opId && isOperationCurrent(opId)) {
         if (result) settleSceneBuild(opId, 'ready');
