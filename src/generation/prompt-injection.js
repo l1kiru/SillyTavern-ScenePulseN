@@ -177,6 +177,32 @@ export function findMainBlocks(flatText) {
     return { begins, ends, beginCount: begins.length, endCount: ends.length };
 }
 
+/**
+ * True only for real Text Completion combine payloads (non-empty string prompt).
+ * ST OpenAI Chat emits GENERATE_AFTER_COMBINE_PROMPTS({ prompt: '' }) — must not claim text.
+ */
+export function isTextCombinePromptPayload(eventData) {
+    return typeof eventData?.prompt === 'string' && eventData.prompt.length > 0;
+}
+
+/** Validate begin/end marker runId + source digest against the active plan. */
+function _checkMainMarkerIntegrity(begins, ends, plan) {
+    const beginRun = begins[0][1];
+    const beginDigest = begins[0][2];
+    const endRun = ends[0][1];
+    const endDigest = ends[0][2];
+    if (beginRun !== plan.runId) {
+        return { ok: false, code: 'SP_PROMPT_FOREIGN_RUN', foreignRunId: beginRun };
+    }
+    if (endRun !== plan.runId) {
+        return { ok: false, code: 'SP_PROMPT_FOREIGN_RUN', foreignRunId: endRun };
+    }
+    if (beginDigest !== plan.main.digest || endDigest !== plan.main.digest) {
+        return { ok: false, code: 'SP_PROMPT_DIGEST_MISMATCH' };
+    }
+    return { ok: true };
+}
+
 export function hasAnySpPromptMarkers(flatText) {
     const s = String(flatText || '');
     return s.includes('SP_PROMPT_BEGIN') || s.includes('SP_PROMPT_END') || s.includes('SP_PROMPT_TAIL');
@@ -511,7 +537,7 @@ export function materializePromptInjection(payload, plan = getActivePromptInject
         }
         return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed: { begin: 0, end: 0 } };
     }
-    const { beginCount, endCount, begins } = findMainBlocks(flat);
+    const { beginCount, endCount, begins, ends } = findMainBlocks(flat);
     const observed = { begin: beginCount, end: endCount };
     if (beginCount === 0 && endCount === 0 && !hasAnySpPromptMarkers(flat)) {
         return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed };
@@ -522,13 +548,15 @@ export function materializePromptInjection(payload, plan = getActivePromptInject
     if (beginCount > 1 || endCount > 1) {
         return { ok: false, fatal: true, code: 'SP_PROMPT_DUPLICATE_MAIN', observed };
     }
-    const markerRun = begins[0][1];
-    if (markerRun !== plan.runId) {
-        return { ok: false, fatal: true, code: 'SP_PROMPT_FOREIGN_RUN', observed, foreignRunId: markerRun };
-    }
-    const digestInMarker = begins[0][2];
-    if (digestInMarker !== plan.main.digest) {
-        return { ok: false, fatal: true, code: 'SP_PROMPT_DIGEST_MISMATCH', observed };
+    const markerCheck = _checkMainMarkerIntegrity(begins, ends, plan);
+    if (!markerCheck.ok) {
+        return {
+            ok: false,
+            fatal: true,
+            code: markerCheck.code,
+            observed,
+            foreignRunId: markerCheck.foreignRunId,
+        };
     }
     const inner = extractMainInner(flat, plan.runId);
     if (inner == null) {
@@ -601,16 +629,14 @@ export function verifyPromptInjection(payload, { authority = null, plan = getAct
     }
     const flat = flattenPayloadText(payload);
     if (!flat) {
-        // Empty on authority after we claimed this apiKind → delivery failure; else ignore.
-        if (plan.currentRequest.apiKind) {
-            return { ok: false, code: 'SP_PROMPT_UNREADABLE_PAYLOAD', fatal: true, observed: { begin: 0, end: 0 } };
-        }
-        return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed: { begin: 0, end: 0 } };
+        // Authority empty payload after claiming apiKind → delivery failure.
+        return { ok: false, code: 'SP_PROMPT_UNREADABLE_PAYLOAD', fatal: true, observed: { begin: 0, end: 0 } };
     }
-    const { beginCount, endCount } = findMainBlocks(flat);
+    const { beginCount, endCount, begins, ends } = findMainBlocks(flat);
     const observed = { begin: beginCount, end: endCount };
+    // Authority: missing main is always fatal (do not ship markerless prompts).
     if (beginCount === 0 && endCount === 0 && !hasAnySpPromptMarkers(flat)) {
-        return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed };
+        return { ok: false, fatal: true, code: 'SP_PROMPT_MISSING_MAIN', observed };
     }
     if (beginCount !== 1 || endCount !== 1) {
         return {
@@ -618,6 +644,16 @@ export function verifyPromptInjection(payload, { authority = null, plan = getAct
             code: beginCount === 0 ? 'SP_PROMPT_MISSING_MAIN' : 'SP_PROMPT_DUPLICATE_MAIN',
             fatal: true,
             observed,
+        };
+    }
+    const markerCheck = _checkMainMarkerIntegrity(begins, ends, plan);
+    if (!markerCheck.ok) {
+        return {
+            ok: false,
+            fatal: true,
+            code: markerCheck.code,
+            observed,
+            foreignRunId: markerCheck.foreignRunId,
         };
     }
     const inner = extractMainInner(flat, plan.runId);
