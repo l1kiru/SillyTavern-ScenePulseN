@@ -15,7 +15,7 @@ import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
 import { currentChatKey } from '../message-fingerprint.js';
 import { promptInjectionOwnerMatches } from '../generation/prompt-injection.js';
-import { estimateReplyTokenSplit } from '../generation/extraction.js';
+import { resolveReplyTokenTipParts } from '../generation/extraction.js';
 import {
     _lastPanelUpdate, set_lastPanelUpdate,
     set_cachedNormData,
@@ -1533,30 +1533,27 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         if(_mTokens>0){
             const _isTogetherReply = (_meta.injectionMethod === 'inline' || (_mInject === 'inline' && !_meta.injectionMethod));
             const _outLabel = _isTogetherReply ? t('Reply') : t('Tracker');
-            let _narr = Number(_meta.narrativeTokens);
-            let _track = Number(_meta.trackerTokens);
-            // Historical Together snapshots without split: re-estimate from the open message.
-            if (_isTogetherReply
-                && (!(Number.isFinite(_narr) && _narr >= 0) || !(Number.isFinite(_track) && _track >= 0))
-                && currentSnapshotMesIdx >= 0) {
-                try {
-                    const mes = SillyTavern.getContext()?.chat?.[currentSnapshotMesIdx]?.mes || '';
-                    if (mes) {
-                        const split = estimateReplyTokenSplit(mes);
-                        _narr = split.narrativeTokens;
-                        _track = split.trackerTokens;
-                    }
-                } catch {}
-            }
             let _outTitle;
-            if (_isTogetherReply && Number.isFinite(_narr) && Number.isFinite(_track) && (_narr > 0 || _track > 0)) {
-                _outTitle = [
-                    t('Estimated reply tokens (narrative + tracker)'),
-                    t('{n} — narrative,', { n: _narr.toLocaleString() }),
-                    t('{n} — tracker JSON.', { n: _track.toLocaleString() }),
-                ].join('\n');
-            } else if (_isTogetherReply) {
-                _outTitle = t('Estimated reply tokens (narrative + tracker)');
+            if (_isTogetherReply) {
+                let _liveMes = null;
+                if (currentSnapshotMesIdx >= 0) {
+                    try { _liveMes = SillyTavern.getContext()?.chat?.[currentSnapshotMesIdx]?.mes || null; } catch {}
+                }
+                const _tipParts = resolveReplyTokenTipParts({
+                    narrativeTokens: _meta.narrativeTokens,
+                    trackerTokens: _meta.trackerTokens,
+                    completionTokens: _mTokens,
+                    liveMes: _liveMes,
+                });
+                if (_tipParts) {
+                    _outTitle = [
+                        t('Estimated reply tokens (narrative + tracker)'),
+                        t('{n} — narrative,', { n: _tipParts.narrativeTokens.toLocaleString() }),
+                        t('{n} — tracker JSON.', { n: _tipParts.trackerTokens.toLocaleString() }),
+                    ].join('\n');
+                } else {
+                    _outTitle = t('Estimated reply tokens (narrative + tracker)');
+                }
             } else {
                 _outTitle = t('Tracker data tokens only (excludes narrative)');
             }

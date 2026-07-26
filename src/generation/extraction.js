@@ -57,6 +57,59 @@ export function estimateReplyTokenSplit(mesText){
     return{narrativeTokens:est(text),trackerTokens:0,totalTokens:est(text),foundTracker:false};
 }
 
+/**
+ * Resolve narrative/tracker tip parts for the Reply badge.
+ * Rejects post-strip / inconsistent meta; live mes only when markers still present.
+ * @returns {{ narrativeTokens: number, trackerTokens: number }|null}
+ */
+export function resolveReplyTokenTipParts({
+    narrativeTokens = null,
+    trackerTokens = null,
+    completionTokens = 0,
+    liveMes = null,
+} = {}) {
+    const total = Math.max(0, Number(completionTokens) || 0);
+    // null/undefined must stay "missing" — Number(null)===0 would skip liveMes fallback.
+    let narr = narrativeTokens == null ? NaN : Number(narrativeTokens);
+    let track = trackerTokens == null ? NaN : Number(trackerTokens);
+    if ((!Number.isFinite(narr) || narr < 0 || !Number.isFinite(track) || track < 0) && liveMes) {
+        const split = estimateReplyTokenSplit(liveMes);
+        if (split.foundTracker) {
+            narr = split.narrativeTokens;
+            track = split.trackerTokens;
+        }
+    }
+    if (!Number.isFinite(narr) || narr < 0 || !Number.isFinite(track) || track < 0) return null;
+    if (narr <= 0 && track <= 0) return null;
+    const sum = narr + track;
+    const consistent = track > 0 || (total > 0 && sum >= total * 0.9);
+    if (!consistent) {
+        // Bad save after strip: narrative≈cleaned mes, tracker=0, completion=full reply.
+        if (narr > 0 && total > narr + 20) {
+            track = Math.max(0, total - narr);
+        } else {
+            return null;
+        }
+    }
+    return { narrativeTokens: narr, trackerTokens: track };
+}
+
+/**
+ * Split reply tokens from raw mes, then extract (which may strip the tracker).
+ * Callers must use replySplit — never re-split chat[i].mes after extract.
+ */
+export function extractInlineTrackerWithReplySplit(mesIdx) {
+    let rawMes = '';
+    try {
+        rawMes = String(SillyTavern.getContext()?.chat?.[mesIdx]?.mes || '');
+    } catch {
+        rawMes = '';
+    }
+    const replySplit = estimateReplyTokenSplit(rawMes);
+    const extracted = extractInlineTracker(mesIdx);
+    return { extracted, replySplit, rawMes };
+}
+
 function _codedError(code,message){const e=new Error(message);e.code=code;return e}
 
 export function recordExtractionFailure(code,message,rawCandidate,mesIdx,opts={}){

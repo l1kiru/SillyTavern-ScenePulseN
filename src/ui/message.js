@@ -2,7 +2,7 @@
 import { log, warn, err } from '../logger.js';
 import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
-import { SP_MARKER_START, extractInlineTracker, estimateReplyTokenSplit } from '../generation/extraction.js';
+import { SP_MARKER_START, extractInlineTracker, extractInlineTrackerWithReplySplit } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
 import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
@@ -162,37 +162,33 @@ export async function onCharMsg(idx){
         clearThoughtLoading();
         setPendingInlineIdx(idx);
         log('onCharMsg [inline]: GENERATION_ENDED missed, retrying as fallback');
-        // Streaming may not have finished -- retry extraction with delay if message is empty
-        let extracted=extractInlineTracker(idx);
+        // Streaming may not have finished -- retry extraction with delay if message is empty.
+        // Always split BEFORE extract (extract strips tracker from mes).
+        let { extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(idx);
         if(!extracted){
-            const msgLen=(chat[idx]?.mes||'').length;
+            const msgLen=rawMes.length;
             if(msgLen<100){
                 log('onCharMsg [inline]: message too short ('+msgLen+' chars), waiting 2s for streaming...');
                 await new Promise(r=>setTimeout(r,2000));
-                // Re-read chat in case it updated
-                const{chat:freshChat}=SillyTavern.getContext();
-                if(freshChat[idx])extracted=extractInlineTracker(idx);
+                ({ extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(idx));
                 if(!extracted){
                     log('onCharMsg [inline]: retry after 2s, still no tracker, waiting 4s more...');
                     await new Promise(r=>setTimeout(r,4000));
-                    const{chat:freshChat2}=SillyTavern.getContext();
-                    if(freshChat2[idx])extracted=extractInlineTracker(idx);
+                    ({ extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(idx));
                 }
             }
         }
         if(extracted){
-            // Estimate tokens from together mode — narrative vs tracker (chars/4)
-            const _parts=estimateReplyTokenSplit(chat[idx]?.mes||'');
-            const _compTokens=_parts.totalTokens||Math.round((chat[idx]?.mes||'').length/4);
+            const _compTokens=replySplit.totalTokens||Math.round(rawMes.length/4);
             const _elapsed=inlineGenStartMs>0?((Date.now()-inlineGenStartMs)/1000):0;
             setGenMeta({...genMeta, promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed});
             setInlineGenStartMs(0);
-            log('onCharMsg [inline]: extracted tracker from message',idx,'keys=',Object.keys(extracted).length,'~tokens:',_compTokens,'narrative=',_parts.narrativeTokens,'tracker=',_parts.trackerTokens);
+            log('onCharMsg [inline]: extracted tracker from message',idx,'keys=',Object.keys(extracted).length,'~tokens:',_compTokens,'narrative=',replySplit.narrativeTokens,'tracker=',replySplit.trackerTokens);
             setInlineExtractionDone(true);setPendingInlineIdx(-1);
             stopStreamingHider();
             await processTogetherExtraction(idx, extracted, 'auto:together', _inlineCtx, {
                 promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed,
-                narrativeTokens:_parts.narrativeTokens, trackerTokens:_parts.trackerTokens,
+                narrativeTokens:replySplit.narrativeTokens, trackerTokens:replySplit.trackerTokens,
                 stopHider:false, unlockGen:true,
             });
             try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}

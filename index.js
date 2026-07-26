@@ -33,7 +33,7 @@ import { resetColorMap } from './src/color.js';
 import { initI18n } from './src/i18n.js';
 
 // ── Generation ──
-import { extractInlineTracker, estimateReplyTokenSplit } from './src/generation/extraction.js';
+import { extractInlineTrackerWithReplySplit } from './src/generation/extraction.js';
 import { noteStreamingText, stopStreamingHider } from './src/generation/streaming.js';
 import { cancelGeneration } from './src/generation/engine.js';
 import { scenePulseInterceptor, noteStreamProgress, clearStallWatchdog } from './src/generation/interceptor.js';
@@ -446,13 +446,12 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 return;
             }
             log('GENERATION_ENDED: primary extraction attempt for message', targetIdx);
-            const fullMsgLen = (chat[targetIdx]?.mes || '').length;
-            let extracted = extractInlineTracker(targetIdx);
+            // Split BEFORE extract — extractInlineTracker strips tracker from mes.
+            const { extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(targetIdx);
             if (extracted) {
                 log('GENERATION_ENDED: primary extraction SUCCESS for message', targetIdx);
                 setInlineExtractionDone(true); setPendingInlineIdx(-1);
-                const _parts = estimateReplyTokenSplit(chat[targetIdx]?.mes || '');
-                const _compTokens = _parts.totalTokens || Math.round(fullMsgLen / 4);
+                const _compTokens = replySplit.totalTokens || Math.round(rawMes.length / 4);
                 const _elapsed = inlineGenStartMs > 0 ? ((Date.now() - inlineGenStartMs) / 1000) : 0;
                 setInlineGenStartMs(0);
                 genMeta.promptTokens = 0;
@@ -460,8 +459,8 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 genMeta.elapsed = _elapsed;
                 await processTogetherExtraction(targetIdx, extracted, 'auto:together', _inlineCtx, {
                     promptTokens: 0, completionTokens: _compTokens, elapsed: _elapsed,
-                    narrativeTokens: _parts.narrativeTokens,
-                    trackerTokens: _parts.trackerTokens,
+                    narrativeTokens: replySplit.narrativeTokens,
+                    trackerTokens: replySplit.trackerTokens,
                     stopHider: true, unlockGen: true,
                 });
                 try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
