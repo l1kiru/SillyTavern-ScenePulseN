@@ -14,7 +14,6 @@ import {
     inlineGenerationContext, setInlineGenerationContext,
     inlineGenStartMs, setInlineGenStartMs,
     pendingInlineIdx, setPendingInlineIdx,
-    _inlineWaitTimerId, set_inlineWaitTimerId,
     getLastExtractionFailure, shouldSkipAutoSceneRecovery,
     getActivePromptInjectionRun,
 } from '../state.js';
@@ -27,7 +26,7 @@ import { rebindInlineCtxForExpectedSwipe } from '../generation/inline-ctx.js';
 import { cancelSceneSourceTrace, finishSceneSourceTrace } from '../scene-source-trace.js';
 import { ensureChatSaved, anyPanelsActive } from '../settings.js';
 import { spAutoShow, spPostGenShow, spSetGenerating } from './mobile.js';
-import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, showChatBanner, clearThoughtLoading } from './loading.js';
+import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, showChatBanner, clearThoughtLoading, clearInlineWaitBanner } from './loading.js';
 import { updatePanel } from './update-panel.js';
 import { updateThoughts } from './thoughts.js';
 import { createPanel, hidePanel } from './panel.js';
@@ -159,7 +158,7 @@ export async function onCharMsg(idx){
         }
         // FALLBACK: GENERATION_ENDED didn't extract (empty msg, timing issue)
         // Remove waiting indicators
-        try{if(_inlineWaitTimerId){clearInterval(_inlineWaitTimerId);set_inlineWaitTimerId(null)}const w=document.getElementById('sp-inline-wait');if(w)w.remove()}catch{}
+        clearInlineWaitBanner();
         clearThoughtLoading();
         setPendingInlineIdx(idx);
         log('onCharMsg [inline]: GENERATION_ENDED missed, retrying as fallback');

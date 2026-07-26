@@ -459,7 +459,9 @@ function _overviewTab(panel, ctx = {}) {
         ? `${latestRequest.status ?? t('transport error')} · ${(latestRequest.latencyMs / 1000).toFixed(1)}s`
         : '—';
     const piRun = (() => { try { return getActivePromptInjectionRun(); } catch { return null; } })();
-    const piMetrics = (() => { try { return getLastPromptInjectionMetrics(); } catch { return null; } })();
+    const piMetricsRaw = (() => { try { return getLastPromptInjectionMetrics(); } catch { return null; } })();
+    // Runtime metrics only for the open chat — never paint another chat's verified footprint.
+    const piMetrics = (piMetricsRaw && piMetricsRaw.chatKey === currentChatKey()) ? piMetricsRaw : null;
     const piFail = (() => { try { return getLastPromptInjectionFailure(); } catch { return null; } })();
     let piHtml = '';
     if (piFail) {
@@ -474,13 +476,18 @@ function _overviewTab(panel, ctx = {}) {
                     </dl>
                 </section>`;
     } else {
-        const tokens = piMetrics?.tokens || piRun?.verifiedTokens || piRun?.provisionalTokens;
-        const status = piRun?.status || (piMetrics ? 'verified' : '—');
+        const tokens = piRun
+            ? (piRun.verifiedTokens || piRun.provisionalTokens || piMetrics?.tokens)
+            : piMetrics?.tokens;
+        const status = piRun?.status
+            || (piMetrics?.integrity?.main === 'verified' ? 'verified' : '—');
         const mainT = tokens?.mainInput != null ? `≈${tokens.mainInput.toLocaleString()} t` : '—';
+        const instrT = tokens?.instructionsInput != null ? `≈${tokens.instructionsInput.toLocaleString()} t` : '—';
+        const prevT = tokens?.previousStateInput != null ? `≈${tokens.previousStateInput.toLocaleString()} t` : '—';
         const tailT = tokens?.tailInput != null ? `≈${tokens.tailInput.toLocaleString()} t` : '—';
         const totalT = tokens?.totalInput != null ? `≈${tokens.totalInput.toLocaleString()} t` : '—';
-        const role = piMetrics?.effectiveRole || piRun?.effectiveRole || piRun?.registeredRole || '—';
-        const hook = piMetrics?.integrity?.hook || piRun?.verification?.finalHook || '—';
+        const role = piRun?.effectiveRole || piRun?.registeredRole || piMetrics?.effectiveRole || '—';
+        const hook = piRun?.verification?.finalHook || piMetrics?.integrity?.hook || '—';
         const seq = piRun?.currentRequest?.seq != null ? String(piRun.currentRequest.seq) : '—';
         const phase = piRun?.currentRequest?.phase || '—';
         piHtml = `
@@ -490,6 +497,8 @@ function _overviewTab(panel, ctx = {}) {
                         <div><dt>${t('Status')}</dt><dd>${esc(status)}</dd></div>
                         <div><dt>${t('Request')}</dt><dd>seq=${esc(seq)} · ${esc(phase)}</dd></div>
                         <div><dt>${t('Main')}</dt><dd>IN_PROMPT · ${esc(role)} · ${esc(mainT)}</dd></div>
+                        <div><dt>${t('Instructions')}</dt><dd>${esc(instrT)}</dd></div>
+                        <div><dt>${t('Previous state')}</dt><dd>${esc(prevT)}</dd></div>
                         <div><dt>${t('Tail')}</dt><dd>IN_CHAT depth 0 · ${esc(tailT)}</dd></div>
                         <div><dt>${t('Total ScenePulse input')}</dt><dd>${esc(totalT)}</dd></div>
                         <div><dt>${t('Final verification')}</dt><dd>${esc(hook)}</dd></div>

@@ -270,6 +270,7 @@ export function buildPromptInjectionPlan({
     chatKey,
     messageId,
     swipeId,
+    promptParts = null,
 } = {}) {
     clearPromptAbortReason();
     setLastPromptInjectionFailure(null);
@@ -282,6 +283,14 @@ export function buildPromptInjectionPlan({
     const sourceDigest = digestText(sourceText);
     const mainText = _wrapMain(runId, sourceText, sourceDigest);
     const tailText = _wrapTail(runId);
+    const instructionsRaw = promptParts?.instructions != null ? String(promptParts.instructions) : '';
+    const previousStateRaw = promptParts?.previousState != null ? String(promptParts.previousState) : '';
+    const instructionsText = instructionsRaw
+        ? normalizeNewlines(_substituteParams(instructionsRaw, ctx))
+        : '';
+    const previousStateText = previousStateRaw
+        ? normalizeNewlines(_substituteParams(previousStateRaw, ctx))
+        : '';
 
     const plan = {
         runId,
@@ -299,6 +308,8 @@ export function buildPromptInjectionPlan({
             sourceText,
             digest: sourceDigest,
             tokens: null,
+            instructionsText,
+            previousStateText,
         },
         tail: {
             key: `${TAIL_KEY_PREFIX}${runId}`,
@@ -713,6 +724,17 @@ export async function commitVerifiedFootprint(plan = getActivePromptInjectionRun
         if (tail.source === 'heuristic') estimateSource = 'heuristic';
     }
     if (main.source === 'heuristic') estimateSource = 'heuristic';
+    let instructionsInput = 0;
+    let previousStateInput = 0;
+    if (plan.main.instructionsText || plan.main.previousStateText) {
+        const [instr, prev] = await Promise.all([
+            countTokens(plan.main.instructionsText || ''),
+            countTokens(plan.main.previousStateText || ''),
+        ]);
+        instructionsInput = instr.tokens;
+        previousStateInput = prev.tokens;
+        if (instr.source === 'heuristic' || prev.source === 'heuristic') estimateSource = 'heuristic';
+    }
     const metrics = {
         chatKey: plan.owner?.chatKey ?? null,
         messageId: plan.owner?.messageId ?? null,
@@ -721,6 +743,8 @@ export async function commitVerifiedFootprint(plan = getActivePromptInjectionRun
         requestSeq: plan.currentRequest?.seq ?? null,
         tokens: {
             mainInput: main.tokens,
+            instructionsInput,
+            previousStateInput,
             tailInput: tailFound ? tailTokens : 0,
             totalInput: main.tokens + (tailFound ? tailTokens : 0),
             estimateSource,
@@ -748,6 +772,8 @@ export function serializePromptInjectionMeta(plan = getActivePromptInjectionRun(
     if (!plan) return null;
     const tokens = plan.verifiedTokens || {
         mainInput: plan.main.tokens || 0,
+        instructionsInput: 0,
+        previousStateInput: 0,
         tailInput: plan.tail.tokens || 0,
         totalInput: (plan.main.tokens || 0) + (plan.tail.tokens || 0),
         estimateSource: plan.estimateSource || 'heuristic',
@@ -760,6 +786,8 @@ export function serializePromptInjectionMeta(plan = getActivePromptInjectionRun(
         effectiveRole: plan.effectiveRole,
         tokens: {
             mainInput: tokens.mainInput,
+            instructionsInput: tokens.instructionsInput || 0,
+            previousStateInput: tokens.previousStateInput || 0,
             tailInput: tokens.tailInput,
             totalInput: tokens.totalInput,
             estimateSource: tokens.estimateSource,

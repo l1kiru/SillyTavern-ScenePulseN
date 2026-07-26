@@ -23,8 +23,25 @@ import {
     setLastPromptInjectionMetrics,
     getLastPromptInjectionMetrics,
     setActivePromptInjectionRun,
+    setCurrentSnapshotMesIdx,
 } from '../src/state.js';
+import { currentChatKey } from '../src/message-fingerprint.js';
 import { resolveSpContextFootprint, refreshSpContextFooter } from '../src/ui/update-panel.js';
+
+function stubChat(chatId = 'chatA', characterId = 'char1') {
+    const prev = globalThis.SillyTavern;
+    globalThis.SillyTavern = {
+        getContext() {
+            return {
+                groupId: '',
+                characterId,
+                chatId,
+                ...(typeof prev?.getContext === 'function' ? {} : {}),
+            };
+        },
+    };
+    return currentChatKey();
+}
 
 function makeEl() {
     const el = {
@@ -183,6 +200,31 @@ _resetPromptInjectionModuleForTests();
     assert.ok(getLastPromptInjectionMetrics().tokens.totalInput >= metrics.tokens.mainInput);
 }
 
+// ── Footprint split: instructions vs previous-state JSON ──
+{
+    _resetPromptInjectionModuleForTests();
+    const plan = buildPromptInjectionPlan({
+        text: 'INSTR BLOCK\n\nPREV_JSON_HERE',
+        role: 'system',
+        owner: { chatKey: 'ck', messageId: 1, swipeId: 0 },
+        promptParts: {
+            instructions: 'INSTR BLOCK\n\n',
+            previousState: 'PREV_JSON_HERE',
+        },
+    });
+    beginRequest('chat', plan);
+    const payload = { messages: [{ role: 'system', content: plan.main.text + '\n' + plan.tail.text }] };
+    assert.equal(materializePromptInjection(payload, plan).ok, true);
+    assert.equal(verifyPromptInjection(payload, { authority: 'CHAT_COMPLETION_SETTINGS_READY', plan }).ok, true);
+    const metrics = await commitVerifiedFootprint(plan, { tailFound: true });
+    assert.ok(metrics.tokens.instructionsInput > 0);
+    assert.ok(metrics.tokens.previousStateInput > 0);
+    assert.ok(
+        metrics.tokens.instructionsInput + metrics.tokens.previousStateInput
+        <= metrics.tokens.mainInput,
+    );
+}
+
 // ── Pipeline-style owner match: swipe-recover must not take stale runtime ──
 {
     _resetPromptInjectionModuleForTests();
@@ -245,9 +287,11 @@ _resetPromptInjectionModuleForTests();
 // ── P2: Separate meta must not show Together runtime SP Context badge ──
 {
     _resetPromptInjectionModuleForTests();
-    setInlineGenerationContext({ chatKey: 'ck', mesIdx: 4, swipeId: 0 });
+    const key = stubChat('chatSep');
+    setCurrentSnapshotMesIdx(-1);
+    setInlineGenerationContext({ chatKey: key, mesIdx: 4, swipeId: 0 });
     setLastPromptInjectionMetrics({
-        chatKey: 'ck',
+        chatKey: key,
         messageId: 4,
         swipeId: 0,
         tokens: { mainInput: 200, tailInput: 10, totalInput: 210, estimateSource: 'heuristic' },
@@ -270,9 +314,11 @@ _resetPromptInjectionModuleForTests();
 // ── Footer refresh from runtime metrics with no snapshot ──
 {
     _resetPromptInjectionModuleForTests();
-    setInlineGenerationContext({ chatKey: 'ck', mesIdx: 3, swipeId: 0 });
+    const key = stubChat('chatLive');
+    setCurrentSnapshotMesIdx(-1);
+    setInlineGenerationContext({ chatKey: key, mesIdx: 3, swipeId: 0 });
     setLastPromptInjectionMetrics({
-        chatKey: 'ck',
+        chatKey: key,
         messageId: 3,
         swipeId: 0,
         tokens: { mainInput: 80, tailInput: 5, totalInput: 85, estimateSource: 'heuristic' },
@@ -417,7 +463,73 @@ _resetPromptInjectionModuleForTests();
     assert.equal(stopCalls, 1);
 }
 
+// ── Stale SP Context: chat-switch clear + owner/swipe gates ──
+{
+    _resetPromptInjectionModuleForTests();
+    const keyA = stubChat('chatA');
+    setCurrentSnapshotMesIdx(-1);
+    setInlineGenerationContext({ chatKey: keyA, mesIdx: 2, swipeId: 0 });
+    setLastPromptInjectionMetrics({
+        chatKey: keyA,
+        messageId: 2,
+        swipeId: 0,
+        tokens: { mainInput: 100, tailInput: 5, totalInput: 105, estimateSource: 'heuristic' },
+        integrity: { main: 'verified', tail: 'verified', hook: 'x' },
+    });
+    assert.equal(resolveSpContextFootprint(null)?.totalInput, 105);
+
+    // Simulate CHAT_CHANGED cleanup
+    setLastPromptInjectionMetrics(null);
+    setInlineGenerationContext(null);
+    setInlineGenStartMs(0);
+    assert.equal(resolveSpContextFootprint(null), null);
+
+    // Runtime for chat A while viewing chat B
+    const keyB = stubChat('chatB');
+    setInlineGenerationContext({ chatKey: keyB, mesIdx: 2, swipeId: 0 });
+    setLastPromptInjectionMetrics({
+        chatKey: keyA,
+        messageId: 2,
+        swipeId: 0,
+        tokens: { mainInput: 100, tailInput: 5, totalInput: 105, estimateSource: 'heuristic' },
+    });
+    assert.equal(resolveSpContextFootprint(null), null);
+
+    // Matching viewed mes+swipe → ok
+    stubChat('chatA');
+    assert.equal(currentChatKey(), keyA);
+    setInlineGenerationContext({ chatKey: keyA, mesIdx: 2, swipeId: 0 });
+    setLastPromptInjectionMetrics({
+        chatKey: keyA,
+        messageId: 2,
+        swipeId: 0,
+        tokens: { mainInput: 100, tailInput: 5, totalInput: 105, estimateSource: 'heuristic' },
+    });
+    assert.equal(resolveSpContextFootprint(null)?.totalInput, 105);
+
+    // Same mes, wrong swipe
+    setInlineGenerationContext({ chatKey: keyA, mesIdx: 2, swipeId: 0 });
+    setLastPromptInjectionMetrics({
+        chatKey: keyA,
+        messageId: 2,
+        swipeId: 1,
+        tokens: { mainInput: 100, tailInput: 5, totalInput: 105, estimateSource: 'heuristic' },
+    });
+    assert.equal(resolveSpContextFootprint(null), null);
+
+    // Separate + runtime still hidden; historical promptInjection still shown
+    assert.equal(resolveSpContextFootprint({ injectionMethod: 'separate' }), null);
+    assert.equal(
+        resolveSpContextFootprint({
+            injectionMethod: 'separate',
+            promptInjection: { tokens: { mainInput: 9, tailInput: 1, totalInput: 10 } },
+        })?.totalInput,
+        10,
+    );
+}
+
 _resetPromptInjectionModuleForTests();
 setInlineGenStartMs(0);
 setInlineGenerationContext(null);
+setCurrentSnapshotMesIdx(-1);
 console.log('prompt-injection-lifecycle.test.mjs: all tests passed');
