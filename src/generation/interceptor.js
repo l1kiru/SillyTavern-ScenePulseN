@@ -412,7 +412,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         let plan;
         if (_reuseToolChain) {
             plan = _existing;
-            beginRequest('chat', plan);
+            beginRequest(null, plan);
         } else {
             purgeStalePromptKeys();
             plan = buildPromptInjectionPlan({
@@ -432,7 +432,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             });
             registerPromptInjection(plan);
             repositionAuthorityHandlers();
-            beginRequest('chat', plan);
+            beginRequest(null, plan);
             try { await measurePromptInjection(plan, { provisional: true }); } catch {}
         }
         _inlineCtx.frozenRequestSchema = plan.frozenRequestSchema;

@@ -2,6 +2,16 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.11] — 2026-07-26
+
+#### Fixed — PromptInjectionPlan Chat Completion + lifecycle
+
+- Read SillyTavern `CHAT_COMPLETION_PROMPT_READY` payloads from `{ chat: [...] }` so Chat Completion materialize/verify no longer aborts as unreadable.
+- Authority handlers are apiKind-gated and awaitable; dry-run (event flag or second listener arg) never commits metrics; Text/Chat authorities are mutually exclusive and verify once per request.
+- Foreign quiet/raw prompts without SP markers return `SP_PROMPT_NOT_OURS` (ignore) instead of aborting an active Together run.
+- Footprint token count includes integrity markers; footer can refresh the SP Context badge from runtime metrics after verify even when no snapshot exists yet.
+- Snapshot `_spMeta.promptInjection` only attaches when plan/runtime metrics owner-match the saved message; swipe-recover no longer inherits stale runtime metrics.
+
 ### [7.1.10] — 2026-07-26
 
 #### Added — PromptInjectionPlan (Together delivery)

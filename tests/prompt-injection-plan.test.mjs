@@ -25,6 +25,10 @@ import {
     isAllowedRoleTransition,
     normalizePromptRoleName,
 } from '../src/prompts/role.js';
+import {
+    setInlineGenStartMs,
+    setInlineGenerationContext,
+} from '../src/state.js';
 
 _resetPromptInjectionModuleForTests();
 
@@ -141,8 +145,13 @@ assert.equal(meta.output.sharesMainResponse, true);
 // Hook gating
 assert.equal(shouldHandlePromptHook({ dryRun: true }), false);
 assert.equal(shouldHandlePromptHook({ quiet: true }), false);
-assert.equal(shouldHandlePromptHook({}), true); // plan5 has currentRequest
-
+assert.equal(shouldHandlePromptHook({}), false); // no mid-flight Together yet
+setInlineGenStartMs(Date.now());
+setInlineGenerationContext({ chatKey: 'c1', mesIdx: 1, swipeId: 0 });
+assert.equal(shouldHandlePromptHook({}), true); // plan5 has currentRequest + mid-flight
+assert.equal(shouldHandlePromptHook({}, { dryRunArg: true }), false);
+setInlineGenStartMs(0);
+setInlineGenerationContext(null);
 // Suspend counter
 assert.equal(getSuspendDepth(), 0);
 suspendPromptInjection(plan5);

@@ -21,6 +21,7 @@ import {
     clearPromptAbortReason,
     getPromptAbortReason,
     inlineGenerationContext,
+    inlineGenStartMs,
 } from '../state.js';
 
 export const MAIN_KEY_PREFIX = 'scenepulse-main-';
@@ -131,11 +132,9 @@ export function extractPayloadTexts(payload) {
     if (Array.isArray(payload.messages)) {
         for (const m of payload.messages) texts.push(..._messageToTexts(m));
     }
-    if (payload.chat_completion_source != null && Array.isArray(payload.messages) === false && payload.prompt == null) {
-        // settings-ready may nest chat body
-        if (payload.chat?.messages) {
-            for (const m of payload.chat.messages) texts.push(..._messageToTexts(m));
-        }
+    // SillyTavern CHAT_COMPLETION_PROMPT_READY uses { chat: [...], dryRun }
+    if (Array.isArray(payload.chat)) {
+        for (const m of payload.chat) texts.push(..._messageToTexts(m));
     }
     return texts;
 }
@@ -155,6 +154,18 @@ function _messageToTexts(m) {
     return out;
 }
 
+/** Map ST chat-message flags / role field → system|user|assistant. */
+function _messageRoleName(m) {
+    if (!m || typeof m !== 'object') return null;
+    const fromRole = normalizePromptRoleName(m.role);
+    if (fromRole) return fromRole;
+    if (m.is_system) return 'system';
+    if (m.is_user) return 'user';
+    // Neither flag → assistant turn in ST chat arrays
+    if (m.is_user === false && m.is_system === false) return 'assistant';
+    return null;
+}
+
 /** Flatten all payload text for marker scanning. */
 export function flattenPayloadText(payload) {
     return extractPayloadTexts(payload).join('\n');
@@ -164,6 +175,11 @@ export function findMainBlocks(flatText) {
     const begins = [...String(flatText).matchAll(new RegExp(BEGIN_RE.source, 'g'))];
     const ends = [...String(flatText).matchAll(new RegExp(END_RE.source, 'g'))];
     return { begins, ends, beginCount: begins.length, endCount: ends.length };
+}
+
+export function hasAnySpPromptMarkers(flatText) {
+    const s = String(flatText || '');
+    return s.includes('SP_PROMPT_BEGIN') || s.includes('SP_PROMPT_END') || s.includes('SP_PROMPT_TAIL');
 }
 
 export function extractMainInner(flatText, runId) {
@@ -179,6 +195,19 @@ export function extractMainInner(flatText, runId) {
     return normalizeNewlines(inner);
 }
 
+/** Full main block including begin/end integrity markers (for token footprint). */
+export function extractMainBlock(flatText, runId) {
+    const begin = `<!--SP_PROMPT_BEGIN run="${runId}"`;
+    const endTag = `<!--SP_PROMPT_END run="${runId}"`;
+    const bIdx = flatText.indexOf(begin);
+    if (bIdx < 0) return null;
+    const eIdx = flatText.indexOf(endTag, bIdx);
+    if (eIdx < 0) return null;
+    const afterEnd = flatText.indexOf('-->', eIdx);
+    if (afterEnd < 0) return null;
+    return normalizeNewlines(flatText.slice(bIdx, afterEnd + 3));
+}
+
 export function findTail(flatText, runId) {
     const re = new RegExp(`<!--SP_PROMPT_TAIL\\s+run="${runId}"\\s*-->`);
     return re.test(flatText);
@@ -186,13 +215,17 @@ export function findTail(flatText, runId) {
 
 export function findEffectiveMainRole(payload, runId) {
     if (!payload || typeof payload !== 'object') return null;
-    const messages = payload.messages || payload.prompt;
-    if (!Array.isArray(messages)) return null;
+    const lists = [];
+    if (Array.isArray(payload.messages)) lists.push(payload.messages);
+    if (Array.isArray(payload.prompt)) lists.push(payload.prompt);
+    if (Array.isArray(payload.chat)) lists.push(payload.chat);
     const needle = `<!--SP_PROMPT_BEGIN run="${runId}"`;
-    for (const m of messages) {
-        const texts = _messageToTexts(m);
-        if (texts.some(t => t.includes(needle))) {
-            return normalizePromptRoleName(m.role);
+    for (const messages of lists) {
+        for (const m of messages) {
+            const texts = _messageToTexts(m);
+            if (texts.some(t => t.includes(needle))) {
+                return _messageRoleName(m);
+            }
         }
     }
     return null;
@@ -272,12 +305,14 @@ export function buildPromptInjectionPlan({
     return plan;
 }
 
-export function beginRequest(apiKind, plan = getActivePromptInjectionRun()) {
+export function beginRequest(apiKind = null, plan = getActivePromptInjectionRun()) {
     if (!plan) return null;
     const prev = plan.currentRequest?.seq || 0;
+    // apiKind is claimed by the matching intermediate hook (or first authority fallback).
+    const kind = apiKind === 'text' || apiKind === 'chat' ? apiKind : null;
     plan.currentRequest = {
         seq: prev + 1,
-        apiKind: apiKind === 'text' ? 'text' : 'chat',
+        apiKind: kind,
         phase: 'awaiting-intermediate',
         materializedDigest: null,
     };
@@ -285,6 +320,7 @@ export function beginRequest(apiKind, plan = getActivePromptInjectionRun()) {
     plan.verification.tail = 'pending';
     plan.verification.finalHook = null;
     plan.materializedText = null;
+    plan.materializedBlock = null;
     plan.materializeTransform = null;
     setActivePromptInjectionRun(plan);
     return plan.currentRequest;
@@ -427,56 +463,84 @@ export function clearPromptInjection(runId = null) {
     return true;
 }
 
-export function shouldHandlePromptHook(eventData = {}, { requirePhase = null } = {}) {
-    if (eventData?.dryRun) return false;
+export function shouldHandlePromptHook(eventData = {}, {
+    requirePhase = null,
+    requireApiKind = null,
+    dryRunArg = undefined,
+} = {}) {
+    if (eventData?.dryRun || dryRunArg === true) return false;
     if (eventData?.quiet || eventData?.type === 'quiet') return false;
-    if (eventData?.generate_raw || eventData?.generateRaw) return false;
     const plan = getActivePromptInjectionRun();
     if (!plan || !plan.currentRequest) return false;
-    // Together owner must be mid-flight
-    if (!(inlineGenerationContext && inlineGenerationContext.chatKey != null)) {
-        // still allow if plan owner matches and inline ctx briefly null — prefer plan presence
+    // Together must be mid-flight with an owner context.
+    if (!(inlineGenStartMs > 0 && inlineGenerationContext && inlineGenerationContext.chatKey != null)) {
+        return false;
     }
     if (requirePhase && plan.currentRequest.phase !== requirePhase) return false;
+    // Enforce only once intermediate (or authority) has claimed an apiKind.
+    if (requireApiKind && plan.currentRequest.apiKind != null
+        && plan.currentRequest.apiKind !== requireApiKind) return false;
     return true;
+}
+
+/** Owner match for attaching runtime / plan metrics to a saved message. */
+export function promptInjectionOwnerMatches(candidate, { chatKey, messageId, swipeId } = {}) {
+    if (!candidate || chatKey == null || messageId == null) return false;
+    const cKey = candidate.chatKey ?? candidate.owner?.chatKey;
+    const cMes = candidate.messageId ?? candidate.owner?.messageId;
+    const cSwipe = candidate.swipeId ?? candidate.owner?.swipeId;
+    return cKey === chatKey
+        && Number(cMes) === Number(messageId)
+        && Number(cSwipe) === Number(swipeId ?? 0);
 }
 
 /**
  * Intermediate materialize: trust candidate only if it matches sourceText under allowlist.
  */
-export function materializePromptInjection(payload, plan = getActivePromptInjectionRun()) {
+export function materializePromptInjection(payload, plan = getActivePromptInjectionRun(), {
+    expectedApiKind = null,
+} = {}) {
     if (!plan?.currentRequest) {
-        return { ok: false, code: 'SP_PROMPT_NO_ACTIVE_REQUEST' };
+        return { ok: false, fatal: false, code: 'SP_PROMPT_NO_ACTIVE_REQUEST' };
     }
     const flat = flattenPayloadText(payload);
     if (!flat) {
-        return { ok: false, code: 'SP_PROMPT_UNREADABLE_PAYLOAD', observed: { begin: 0, end: 0 } };
+        // Empty payload on a foreign/unexpected event → ignore; expected hook → fatal.
+        if (expectedApiKind && plan.currentRequest.apiKind === expectedApiKind) {
+            return { ok: false, fatal: true, code: 'SP_PROMPT_UNREADABLE_PAYLOAD', observed: { begin: 0, end: 0 } };
+        }
+        return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed: { begin: 0, end: 0 } };
     }
     const { beginCount, endCount, begins } = findMainBlocks(flat);
     const observed = { begin: beginCount, end: endCount };
+    if (beginCount === 0 && endCount === 0 && !hasAnySpPromptMarkers(flat)) {
+        return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed };
+    }
     if (beginCount === 0 || endCount === 0) {
-        return { ok: false, code: 'SP_PROMPT_MISSING_MAIN', observed };
+        return { ok: false, fatal: true, code: 'SP_PROMPT_MISSING_MAIN', observed };
     }
     if (beginCount > 1 || endCount > 1) {
-        return { ok: false, code: 'SP_PROMPT_DUPLICATE_MAIN', observed };
+        return { ok: false, fatal: true, code: 'SP_PROMPT_DUPLICATE_MAIN', observed };
     }
     const markerRun = begins[0][1];
     if (markerRun !== plan.runId) {
-        return { ok: false, code: 'SP_PROMPT_FOREIGN_RUN', observed, foreignRunId: markerRun };
+        return { ok: false, fatal: true, code: 'SP_PROMPT_FOREIGN_RUN', observed, foreignRunId: markerRun };
     }
     const digestInMarker = begins[0][2];
     if (digestInMarker !== plan.main.digest) {
-        return { ok: false, code: 'SP_PROMPT_DIGEST_MISMATCH', observed };
+        return { ok: false, fatal: true, code: 'SP_PROMPT_DIGEST_MISMATCH', observed };
     }
     const inner = extractMainInner(flat, plan.runId);
     if (inner == null) {
-        return { ok: false, code: 'SP_PROMPT_MISSING_MAIN', observed };
+        return { ok: false, fatal: true, code: 'SP_PROMPT_MISSING_MAIN', observed };
     }
     const match = matchAllowlistedTransform(plan.main.sourceText, inner);
     if (!match.ok) {
-        return { ok: false, code: 'SP_PROMPT_DIGEST_MISMATCH', observed, detail: 'candidate_not_allowlisted' };
+        return { ok: false, fatal: true, code: 'SP_PROMPT_DIGEST_MISMATCH', observed, detail: 'candidate_not_allowlisted' };
     }
+    const fullBlock = extractMainBlock(flat, plan.runId);
     plan.materializedText = match.transformed;
+    plan.materializedBlock = fullBlock || plan.main.text;
     plan.materializeTransform = match.transform;
     plan.currentRequest.materializedDigest = digestText(match.transformed);
     plan.currentRequest.phase = 'materialized';
@@ -487,7 +551,14 @@ export function materializePromptInjection(payload, plan = getActivePromptInject
         const eff = findEffectiveMainRole(payload, plan.runId);
         if (eff) {
             if (!isAllowedRoleTransition(plan.registeredRole, eff)) {
-                return { ok: false, code: 'SP_PROMPT_ROLE_MISMATCH', observed, registeredRole: plan.registeredRole, effectiveRole: eff };
+                return {
+                    ok: false,
+                    fatal: true,
+                    code: 'SP_PROMPT_ROLE_MISMATCH',
+                    observed,
+                    registeredRole: plan.registeredRole,
+                    effectiveRole: eff,
+                };
             }
             plan.effectiveRole = eff;
         }
@@ -495,6 +566,7 @@ export function materializePromptInjection(payload, plan = getActivePromptInject
     setActivePromptInjectionRun(plan);
     return {
         ok: true,
+        fatal: false,
         transform: match.transform,
         materializedDigest: plan.currentRequest.materializedDigest,
         tailFound,
@@ -507,19 +579,39 @@ export function materializePromptInjection(payload, plan = getActivePromptInject
  */
 export function verifyPromptInjection(payload, { authority = null, plan = getActivePromptInjectionRun() } = {}) {
     if (!plan?.currentRequest) {
-        return { ok: false, code: 'SP_PROMPT_NO_ACTIVE_REQUEST', fatal: true };
+        return { ok: false, code: 'SP_PROMPT_NO_ACTIVE_REQUEST', fatal: false };
     }
-    if (plan.currentRequest.phase !== 'materialized' && plan.currentRequest.phase !== 'verified') {
-        // Allow authority to run materialize+verify if intermediate was skipped (rare)
-        const mat = materializePromptInjection(payload, plan);
-        if (!mat.ok) return { ...mat, fatal: true };
+    // Already verified this request seq — idempotent.
+    if (plan.currentRequest.phase === 'verified') {
+        return {
+            ok: true,
+            fatal: false,
+            alreadyVerified: true,
+            tailFound: plan.verification.tail === 'verified',
+            warning: plan.verification.tail === 'missing' ? 'SP_PROMPT_TAIL_MISSING' : null,
+            observed: null,
+            authority: plan.verification.finalHook,
+        };
+    }
+    if (plan.currentRequest.phase !== 'materialized') {
+        const mat = materializePromptInjection(payload, plan, {
+            expectedApiKind: plan.currentRequest.apiKind,
+        });
+        if (!mat.ok) return { ...mat, fatal: mat.fatal !== false };
     }
     const flat = flattenPayloadText(payload);
     if (!flat) {
-        return { ok: false, code: 'SP_PROMPT_UNREADABLE_PAYLOAD', fatal: true, observed: { begin: 0, end: 0 } };
+        // Empty on authority after we claimed this apiKind → delivery failure; else ignore.
+        if (plan.currentRequest.apiKind) {
+            return { ok: false, code: 'SP_PROMPT_UNREADABLE_PAYLOAD', fatal: true, observed: { begin: 0, end: 0 } };
+        }
+        return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed: { begin: 0, end: 0 } };
     }
     const { beginCount, endCount } = findMainBlocks(flat);
     const observed = { begin: beginCount, end: endCount };
+    if (beginCount === 0 && endCount === 0 && !hasAnySpPromptMarkers(flat)) {
+        return { ok: false, fatal: false, code: 'SP_PROMPT_NOT_OURS', observed };
+    }
     if (beginCount !== 1 || endCount !== 1) {
         return {
             ok: false,
@@ -553,6 +645,8 @@ export function verifyPromptInjection(payload, { authority = null, plan = getAct
             plan.effectiveRole = eff;
         }
     }
+    const fullBlock = extractMainBlock(flat, plan.runId);
+    if (fullBlock) plan.materializedBlock = fullBlock;
     const tailFound = findTail(flat, plan.runId);
     plan.verification.main = 'verified';
     plan.verification.tail = tailFound ? 'verified' : 'missing';
@@ -572,8 +666,9 @@ export function verifyPromptInjection(payload, { authority = null, plan = getAct
 }
 
 export async function commitVerifiedFootprint(plan = getActivePromptInjectionRun(), { tailFound = true } = {}) {
-    if (!plan?.materializedText) return null;
-    const main = await countTokens(plan.materializedText);
+    if (!plan?.materializedText && !plan?.materializedBlock) return null;
+    const mainText = plan.materializedBlock || plan.main.text || plan.materializedText;
+    const main = await countTokens(mainText);
     let tailTokens = 0;
     let estimateSource = main.source;
     if (tailFound) {
