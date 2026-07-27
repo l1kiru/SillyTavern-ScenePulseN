@@ -20,7 +20,8 @@ import { record as recordNetwork } from '../network-log.js';
 import {
     getSettings, getActiveSchema, getActivePrompt, getTrackerData,
     getLatestSnapshot, getLatestSnapshotEntry, getPrevSnapshot, getActiveSwipeId, saveSnapshot, getTrustedSnapshotFor, ensureChatSaved,
-    getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore, buildProfileView,
+    getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, rearmForceFullAfterFailedFullRun,
+    hasStaleSnapshotBefore, buildProfileView,
     canGenerateScene, captureCharacterCustomFieldSpecs, getActivePanels, sanitizeCharacterCustomFields
 } from '../settings.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
@@ -170,7 +171,10 @@ export async function generateTracker(mesIdx,partKey,opts){
     const settings=buildProfileView(rootSettings,getActiveProfile(rootSettings));
     const characterCustomFieldSpecs=captureCharacterCustomFieldSpecs();
     const useDelta=!hasStaleSnapshotBefore(mesIdx)&&shouldUseDelta(baseSnapshot);
-    clearForceFullState();
+    // Section regen must not consume a pending whole-tracker force-full.
+    const consumeForceFull=!partKey;
+    if(consumeForceFull)clearForceFullState();
+    const rearmOnFail=()=>{if(consumeForceFull)rearmForceFullAfterFailedFullRun(useDelta)};
     let requestFields=partKey?(SECTION_FIELDS[partKey]||[]):[];
     if(partKey?.startsWith('custom_')){
         const panel=getActivePanels(settings).find(item=>
@@ -210,6 +214,7 @@ export async function generateTracker(mesIdx,partKey,opts){
     if(externalSignal){
         if(externalSignal.aborted){
             setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setBrandState('idle');
+            rearmOnFail();
             return null;
         }
         externalSignal.addEventListener('abort',()=>{try{requestAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
@@ -394,11 +399,13 @@ export async function generateTracker(mesIdx,partKey,opts){
     if(sceneOpId&&!isOperationCurrent(sceneOpId)){
         log('POST-GEN: scene build not current',sceneOpId,'— result discarded');
         setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        rearmOnFail();
         return null;
     }
     if(getActiveSwipeId(mesIdx)!==targetSwipeId){
         log('POST-GEN: active swipe changed for message',mesIdx,'— result discarded');
         setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        rearmOnFail();
         return null;
     }
     const ownerCheck=validateOperationOwner(operationOwner,{requireSource:true});
@@ -406,6 +413,7 @@ export async function generateTracker(mesIdx,partKey,opts){
         log('POST-GEN: owner changed for message',mesIdx,'— result discarded:',ownerCheck.code);
         setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         try{toastr.info(t('Chat changed while ScenePulse was working. Run the tracker again.'),'ScenePulse')}catch{}
+        rearmOnFail();
         return null;
     }
     setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');
@@ -510,6 +518,7 @@ export async function generateTracker(mesIdx,partKey,opts){
         if(body&&!terminalFailure)body.innerHTML='<div class="sp-error"><div style="font-weight:700;margin-bottom:4px">Generation Failed</div><div style="font-size:10px">Network timeout or API issue. Try \u27f3 Regen or check debug log.</div></div>';
         if(terminalFailure){try{const{showJsonRecovery}=await import('../ui/json-recovery.js');showJsonRecovery({mesIdx,failure:terminalFailure,stripInline:false,onRetry:async()=>{setLastGenSource('manual:recovery');await generateTracker(mesIdx,partKey,opts)}})}catch(e){warn('Recovery UI:',e?.message)}}
         warn('Generation returned null for',mesIdx);
+        rearmOnFail();
     }
     return result;
 }

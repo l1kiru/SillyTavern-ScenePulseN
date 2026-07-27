@@ -2,6 +2,14 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### Unreleased
+
+#### Fixed — Force-full and structure reconcile lifecycle
+
+- Failed whole-tracker full requests re-arm force-full so the retry cannot slip into delta (Separate + Together terminals).
+- Section regen no longer consumes a pending whole-tracker force-full flag.
+- Reset Settings and create-from-template profile activation run `reconcileTrackerStructureChange` like other structural edits.
+
 ### [7.1.14] — 2026-07-27
 
 #### Added — Character-scoped custom panels

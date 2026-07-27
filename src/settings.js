@@ -976,10 +976,21 @@ export function forceFullStateRefresh() {
 
 /**
  * Consume the force-full flag after a concrete request has captured its
- * delta/full decision.
+ * delta/full decision. Mid-flight structural edits can re-arm the flag for
+ * the *following* turn. If this full run fails, call
+ * rearmForceFullAfterFailedFullRun(false) so the debt is not lost.
  */
 export function clearForceFullState() {
     _forceFullNextTurn = false;
+}
+
+/**
+ * Restore force-full after a terminal failure of a whole-tracker full run.
+ * No-op when the failed run was delta (preserves mid-flight re-arms).
+ */
+export function rearmForceFullAfterFailedFullRun(ranAsDelta) {
+    if (ranAsDelta) return;
+    forceFullStateRefresh();
 }
 
 // v6.22.1: Wiki Permanence Archive — guarantees the Character Wiki shows
