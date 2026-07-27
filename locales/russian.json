@@ -942,6 +942,8 @@
   "Show all settings (not just non-defaults)": "Показать все настройки, включая стандартные",
   "Show current OpenRouter pricing, context windows, and roleplay popularity while browsing templates. This is read-only and does not change prompts, samplers, or generation.": "Показывать в каталоге актуальные цены OpenRouter, размеры контекста и популярность в ролевых играх. Это режим только для чтения: промпты, сэмплеры и генерация не изменяются.",
   "Show developer tools": "Инструменты разработчика",
+  "Console debugging": "Отладка через консоль",
+  "When enabled, ScenePulse writes detailed activity to the browser console. Off by default — only the extension init line is logged.": "Когда включено, ScenePulse пишет подробную активность в консоль браузера. По умолчанию выключено — в консоль попадает только строка инициализации расширения.",
   "Show empty fields": "Показать пустые поля",
   "Show in Last Response": "Показать в последнем ответе",
   "show live model data while browsing templates": "показывать актуальные данные моделей в каталоге",

@@ -1,5 +1,5 @@
 // src/ui/mobile.js — Mobile/Tablet detection & responsive UI
-import { SP_MOBILE_MAX, SP_TABLET_MAX, MASCOT_SVG, LOG } from '../constants.js';
+import { SP_MOBILE_MAX, SP_TABLET_MAX, MASCOT_SVG } from '../constants.js';
 import { t } from '../i18n.js';
 import { log } from '../logger.js';
 import { _spMobileMinimized, set_spMobileMinimized } from '../state.js';
@@ -77,15 +77,15 @@ export function spUpdateFab(){
             btn.innerHTML=MASCOT_SVG;
             btn.addEventListener('click',(e)=>{e.preventDefault();e.stopPropagation();spRestorePanel()});
             anchor.appendChild(btn);
-            console.log(LOG,'FAB: injected into ST UI, anchor='+anchor.id);
+            log('FAB: injected into ST UI, anchor='+anchor.id);
         }else{
-            console.log(LOG,'FAB: no ST anchor found');
+            log('FAB: no ST anchor found');
         }
     }
     if(btn){
         btn.classList.add('sp-st-restore','interactable');
         btn.style.display=shouldShow?'flex':'none';
-        console.log(LOG,'FAB:','mode='+mode,'panelVis='+panelVis,'show='+shouldShow,'btnDisplay='+btn.style.display);
+        log('FAB:','mode='+mode,'panelVis='+panelVis,'show='+shouldShow,'btnDisplay='+btn.style.display);
     }
     // Also update the floating FAB as fallback
     const fab=document.getElementById('sp-mobile-fab');

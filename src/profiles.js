@@ -41,7 +41,7 @@ const CONFIG_SCALAR_KEYS = new Set([
     'contextMessages', 'maxRetries', 'promptMode', 'embedSnapshots',
     'embedRole', 'autoGenerate', 'showThoughts', 'showEmptyFields',
     'sceneTransitions', 'sceneSourceTrace', 'sceneSourceTraceDiagnostics',
-    'openSections',
+    'consoleDebug', 'openSections',
 ]);
 const PROFILE_CONFIG_KEYS = new Set(['panels', 'fieldToggles', 'dashCards', 'customPanels']);
 

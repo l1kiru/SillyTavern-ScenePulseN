@@ -942,6 +942,8 @@
   "Show all settings (not just non-defaults)": "Show all settings (not just non-defaults)",
   "Show current OpenRouter pricing, context windows, and roleplay popularity while browsing templates. This is read-only and does not change prompts, samplers, or generation.": "Show current OpenRouter pricing, context windows, and roleplay popularity while browsing templates. This is read-only and does not change prompts, samplers, or generation.",
   "Show developer tools": "Show developer tools",
+  "Console debugging": "Console debugging",
+  "When enabled, ScenePulse writes detailed activity to the browser console. Off by default — only the extension init line is logged.": "When enabled, ScenePulse writes detailed activity to the browser console. Off by default — only the extension init line is logged.",
   "Show empty fields": "Show empty fields",
   "Show in Last Response": "Show in Last Response",
   "show live model data while browsing templates": "show live model data while browsing templates",
