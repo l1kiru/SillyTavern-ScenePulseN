@@ -72,7 +72,6 @@ const state = {
     _streamHiderObserver: null,
 
     // ── Token tracking ──
-    _sessionTokensUsed: 0,
     _lastDeltaSavings: 0,
 };
 
@@ -219,10 +218,6 @@ export let _streamHiderObserver = state._streamHiderObserver;
 export function set_streamHiderObserver(v) { _streamHiderObserver = state._streamHiderObserver = v; }
 
 // ── Token tracking ──
-export let _sessionTokensUsed = state._sessionTokensUsed;
-export function addSessionTokens(n) { _sessionTokensUsed = state._sessionTokensUsed += n; }
-export function resetSessionTokens() { _sessionTokensUsed = state._sessionTokensUsed = 0; }
-
 export let _lastDeltaSavings = state._lastDeltaSavings;
 export function setLastDeltaSavings(v) { _lastDeltaSavings = state._lastDeltaSavings = v; }
 

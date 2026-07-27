@@ -7,7 +7,7 @@ import {
     setGenerationTargetMesIdx,
     setCurrentSnapshotMesIdx, setLastGenSource, setLastRawResponse, setLastDeltaPayload,
     setInlineGenStartMs, setInlineExtractionDone, setPendingInlineIdx, setInlineGenerationContext,
-    addSessionTokens, setLastDeltaSavings, setLastExtractionFailure
+    setLastDeltaSavings, setLastExtractionFailure
 } from '../state.js';
 // v6.15.6: also push the (prompt, response) pair into the ring buffer for the
 // Last Response tab + Diagnostics bundle (Panel B's critical-missing add).
@@ -31,7 +31,6 @@ import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
 import { validateExtraction } from './validation.js';
 import { buildRequestSchema, SECTION_FIELDS } from '../schema.js';
 import { buildRecentContext, classifyRequestError, computeResponseLength, correctiveInstruction, requestTracker } from './request.js';
-import { measureTextPrompt } from './request-token-ledger.js';
 import { spSetGenerating, spPostGenShow } from '../ui/mobile.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { cleanupGenUI } from '../ui/loading.js';
@@ -240,10 +239,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             let raw;let rawStr='';let finishReason='';let strategy='';
             const responseLength=computeResponseLength({mode:requestMode,previousSnapshot:lastSnap,attempt:a,lastErrorCode});
             const attemptPrompt=a?`${prompt}\n\nCORRECTION AFTER ATTEMPT ${a}: ${correctiveInstruction(lastErrorCode,validationErrors)}`:prompt;
-            {
-                const _pin=await measureTextPrompt(`${sysPr}\n\n${attemptPrompt}`);
-                totalPromptTokens+=_pin.tokens;
-            }
+            totalPromptTokens+=Math.round((sysPr.length+attemptPrompt.length)/4);
             // Nonce check at every opportunity — if cancelled, bail immediately
             if(myNonce!==genNonce){log('STALE nonce',myNonce,'(current',genNonce+') \u2014 discarding silently');return null}
             try{if(a>0){log(`Retry ${a}/${settings.maxRetries}`);await new Promise(r=>setTimeout(r,1000*a));if(myNonce!==genNonce){log('Retry cancelled during backoff');return null}}
@@ -278,10 +274,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 const responseTruncated=['length','max_tokens','max_output_tokens','token_limit'].includes(finishLow);
                 if(responseTruncated)lastErrorCode='TRUNCATED';
                 const rawLen=rawStr.length;
-                {
-                    const _cout=await measureTextPrompt(rawStr);
-                    totalCompletionTokens+=_cout.tokens;
-                }
+                totalCompletionTokens+=Math.round(rawLen/4);
                 setLastRawResponse(rawStr); // store for debug copy
                 // v6.15.6: also capture the pair for the inspector's pair browser.
                 // v6.16.0: synthesize a network log entry linked to the pair via id.
@@ -331,7 +324,6 @@ export async function generateTracker(mesIdx,partKey,opts){
                     continue;
                 }
                 successfulValidationWarnings=validation.warnings;
-                addSessionTokens(meta.promptTokens+meta.completionTokens);
                 successfulRequestMeta={strategy,responseLength,attempt:a+1,promptMode:attemptPromptMode};
                 // Delta merge: combine delta response with previous snapshot.
                 // v6.8.50: use the shared shouldUseDelta() helper which

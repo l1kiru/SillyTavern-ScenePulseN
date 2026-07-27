@@ -23,8 +23,6 @@ import {
     inlineGenerationContext,
     inlineGenStartMs,
 } from '../state.js';
-import { beginLedgerRequest } from './request-token-ledger.js';
-
 export const MAIN_KEY_PREFIX = 'scenepulse-main-';
 export const TAIL_KEY_PREFIX = 'scenepulse-tail-';
 
@@ -361,14 +359,6 @@ export function beginRequest(apiKind = null, plan = getActivePromptInjectionRun(
     plan.materializedBlock = null;
     plan.materializeTransform = null;
     setActivePromptInjectionRun(plan);
-    try {
-        beginLedgerRequest({
-            runId: plan.runId,
-            requestSeq: plan.currentRequest.seq,
-            apiKind: kind,
-            chatKey: plan.owner?.chatKey ?? null,
-        });
-    } catch {}
     return plan.currentRequest;
 }
 

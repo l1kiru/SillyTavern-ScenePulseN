@@ -5,7 +5,6 @@ import { log } from '../logger.js';
 import { t } from '../i18n.js';
 import { esc } from '../utils.js';
 import { getTrackerData } from '../settings.js';
-import { _sessionTokensUsed } from '../state.js';
 
 /**
  * Open the analytics overlay showing per-snapshot and aggregate token stats.
@@ -77,10 +76,6 @@ export function openAnalytics() {
             <div class="sp-analytics-card">
                 <div class="sp-analytics-card-value">${totalElapsed.toFixed(0)}s</div>
                 <div class="sp-analytics-card-label">${t('Total Time')}</div>
-            </div>
-            <div class="sp-analytics-card">
-                <div class="sp-analytics-card-value">${_sessionTokensUsed.toLocaleString()}</div>
-                <div class="sp-analytics-card-label">${t('Session Tokens')}</div>
             </div>
             <div class="sp-analytics-card">
                 <div class="sp-analytics-card-value">${avgDeltaSavings > 0 ? '-' + Math.round(avgDeltaSavings) + '%' : 'N/A'}</div>

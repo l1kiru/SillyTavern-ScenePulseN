@@ -14,7 +14,6 @@ import {
     getActivePromptInjectionRun,
 } from '../state.js';
 import { clearPromptInjection } from './prompt-injection.js';
-import { finalizeTogetherRequestTokens } from './request-token-ledger.js';
 import { cancelSceneSourceTrace } from '../scene-source-trace.js';
 import { stopStreamingHider } from './streaming.js';
 import { cleanupGenUI } from '../ui/loading.js';
@@ -73,17 +72,6 @@ export function handleTogetherSwipeChange(messageId, newSwipeId) {
     log('Together: swipe browse cancelled scene build mes=', id, 'swipe', frozen, '→', next);
     discardTogetherSceneBuild(ctx, 'swipe-changed');
     try { cancelSceneSourceTrace(); } catch {}
-    // Charge verified request (input-only if no reply) before clearing the plan.
-    try {
-        const plan = getActivePromptInjectionRun();
-        if (plan?.runId && plan.currentRequest?.seq != null) {
-            void finalizeTogetherRequestTokens({
-                runId: plan.runId,
-                requestSeq: plan.currentRequest.seq,
-                rawMes: '',
-            });
-        }
-    } catch {}
     try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
     setInlineGenerationContext(null);
     setInlineGenStartMs(0);
