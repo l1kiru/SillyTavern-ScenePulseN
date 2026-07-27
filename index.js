@@ -709,4 +709,4 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-log('v' + VERSION + ' init');
+console.log('[ScenePulse]', 'v' + VERSION + ' init');

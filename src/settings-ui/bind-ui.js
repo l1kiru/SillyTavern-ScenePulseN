@@ -105,7 +105,7 @@ export function disposeGlobalBindings(){
 export function updateBadge(){const on=getSettings().enabled;const b=document.getElementById('sp-badge');if(b){b.className='sp-drawer-badge '+(on?'sp-on':'sp-off');b.innerHTML=`<span class="sp-drawer-badge-dot"></span>${on?t('Active'):t('Off')}`}}
 
 function _syncFeatBadge(){try{updateFeatBadge()}catch(_){}}
-export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s.enabled);$('#sp-auto-gen').prop('checked',s.autoGenerate);$('#sp-show-thoughts').prop('checked',s.showThoughts!==false);$('#sp-show-weather').prop('checked',s.weatherOverlay!==false);$('#sp-show-timetint').prop('checked',s.timeTint!==false);$('#sp-show-devbtns').prop('checked',s.devButtons===true);$('#sp-reduce-effects').prop('checked',s.reduceVisualEffects===true);if(s.reduceVisualEffects===true)document.body.classList.add('sp-reduce-effects');else document.body.classList.remove('sp-reduce-effects');$('#sp-font-scale').val(s.fontScale||1);$('#sp-font-scale-val').text((s.fontScale||1).toFixed(1)+'x');$('#sp-language').val(s.language||'');$('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);$('#sp-mode').val(s.promptMode||'json');$('#sp-embed-n').val(s.embedSnapshots);$('#sp-embed-role').val(s.embedRole);$('#sp-max-snapshots').val(s.maxSnapshots||0);
+export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s.enabled);$('#sp-auto-gen').prop('checked',s.autoGenerate);$('#sp-show-thoughts').prop('checked',s.showThoughts!==false);$('#sp-show-weather').prop('checked',s.weatherOverlay!==false);$('#sp-show-timetint').prop('checked',s.timeTint!==false);$('#sp-show-devbtns').prop('checked',s.devButtons===true);$('#sp-console-debug').prop('checked',s.consoleDebug===true);$('#sp-reduce-effects').prop('checked',s.reduceVisualEffects===true);if(s.reduceVisualEffects===true)document.body.classList.add('sp-reduce-effects');else document.body.classList.remove('sp-reduce-effects');$('#sp-font-scale').val(s.fontScale||1);$('#sp-font-scale-val').text((s.fontScale||1).toFixed(1)+'x');$('#sp-language').val(s.language||'');$('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);$('#sp-mode').val(s.promptMode||'json');$('#sp-embed-n').val(s.embedSnapshots);$('#sp-embed-role').val(s.embedRole);$('#sp-max-snapshots').val(s.maxSnapshots||0);
     $('#sp-story-ideas').prop('checked',buildProfileView(s,getActiveProfile(s)).panels?.storyIdeas!==false);
     // Rebuild profile/preset dropdowns from current DOM (ST may load them late)
     const profiles=getConnectionProfiles();const presets=getChatPresets();
@@ -321,6 +321,7 @@ export function bindUI(){const s=getSettings();
     $('#sp-show-weather').on('change',function(){s.weatherOverlay=this.checked;saveSettings();_spSaveLS();const cb=document.getElementById('sp-tb-weather');if(cb)cb.checked=this.checked;_syncFeatBadge();if(!this.checked)clearWeatherOverlay();else{const snap=getLatestSnapshot();if(snap){const n=normalizeTracker(snap);updateWeatherOverlay(n.weather)}}});
     $('#sp-show-timetint').on('change',function(){s.timeTint=this.checked;saveSettings();_spSaveLS();const cb=document.getElementById('sp-tb-timeTint');if(cb)cb.checked=this.checked;_syncFeatBadge();if(!this.checked)clearTimeTint();else{const snap=getLatestSnapshot();if(snap){const n=normalizeTracker(snap);updateTimeTint(n.time)}}});
     $('#sp-show-devbtns').on('change',function(){s.devButtons=this.checked;saveSettings();const dv=this.checked?'':'none';const dw=document.getElementById('sp-dev-wx-wrap');if(dw)dw.style.display=dv;const dt=document.getElementById('sp-dev-time-wrap');if(dt)dt.style.display=dv});
+    $('#sp-console-debug').on('change',function(){s.consoleDebug=this.checked;saveSettings()});
     $('#sp-reduce-effects').on('change',function(){
         s.reduceVisualEffects=this.checked;saveSettings();
         document.body.classList.toggle('sp-reduce-effects',this.checked);
@@ -482,6 +483,7 @@ export function bindUI(){const s=getSettings();
                 embedSnapshots:s.embedSnapshots,embedRole:s.embedRole,autoGenerate:s.autoGenerate,
                 showThoughts:s.showThoughts,showEmptyFields:s.showEmptyFields,sceneTransitions:s.sceneTransitions,
                 sceneSourceTrace:s.sceneSourceTrace===true,sceneSourceTraceDiagnostics:s.sceneSourceTraceDiagnostics===true,
+                consoleDebug:s.consoleDebug===true,
                 trackerPromptStyle:normalizeTrackerPromptStyle(getActiveProfile(s)?.trackerPromptStyle),
                 panels:{...DEFAULTS.panels,...sView.panels},dashCards:{...DEFAULTS.dashCards,...sView.dashCards},
                 fieldToggles:sView.fieldToggles,customPanels:sView.customPanels||[],

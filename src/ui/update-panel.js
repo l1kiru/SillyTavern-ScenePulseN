@@ -1,5 +1,5 @@
 // src/ui/update-panel.js — The massive updatePanel function (~960 lines)
-import { log } from '../logger.js';
+import { log, err } from '../logger.js';
 import { esc, clamp, str, spConfirm } from '../utils.js';
 import { relPhaseFamily } from '../rel-phase.js';
 // v6.17.0: instrument the main panel render so the perf-monitor's capture
@@ -1652,7 +1652,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     } catch(_renderErr) {
         // Error boundary: restore previous panel content on failure
         log('ERROR updatePanel render failed — restoring previous content:', _renderErr?.message||_renderErr);
-        console.error('[ScenePulse] updatePanel render error:', _renderErr);
+        err('updatePanel render error:', _renderErr);
         if(body&&_prevContent){body.innerHTML=_prevContent}
     }
 }
