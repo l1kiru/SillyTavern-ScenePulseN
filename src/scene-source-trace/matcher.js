@@ -85,9 +85,24 @@ export function matchOneKey(haystack, needle, entry = {}, settings = {}) {
     if (whole) {
         const words = needleT.split(/\s+/).filter(Boolean);
         if (words.length > 1) {
-            const idx = hay.indexOf(needleT);
-            if (idx < 0) return null;
-            return { hit: _truncateMatch(text.slice(idx, idx + key.length) || key), index: idx, groups: null, originalKey: key };
+            let from = 0;
+            while (from <= hay.length - needleT.length) {
+                const idx = hay.indexOf(needleT, from);
+                if (idx < 0) return null;
+                const beforeOk = idx === 0 || !/\w/.test(hay[idx - 1]);
+                const afterIdx = idx + needleT.length;
+                const afterOk = afterIdx >= hay.length || !/\w/.test(hay[afterIdx]);
+                if (beforeOk && afterOk) {
+                    return {
+                        hit: _truncateMatch(text.slice(idx, idx + key.length) || key),
+                        index: idx,
+                        groups: null,
+                        originalKey: key,
+                    };
+                }
+                from = idx + 1;
+            }
+            return null;
         }
         const wrx = new RegExp(`(?:^|\\W)(${_escapeRegex(needleT)})(?:$|\\W)`, caseSensitive ? '' : 'i');
         const m = wrx.exec(text);

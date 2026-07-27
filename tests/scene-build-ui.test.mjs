@@ -34,6 +34,7 @@ globalThis.document = {
         return [];
     },
     getElementById(id) {
+        if (id === 'mes_stop') return this._mesStop || null;
         if (id === 'sp-scene-build-toast') return this._toast || null;
         if (String(id).startsWith('sp-scene-build-')) {
             return (this._stubs || []).find(s => s.id === id) || null;
@@ -74,11 +75,16 @@ globalThis.document = {
     },
     _stubs: [],
     _toast: null,
+    _mesStop: null,
 };
 globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1280, innerHeight: 720 };
+const chatMessages = [
+    { is_user: true, mes: 'hi' },
+    { is_user: false, mes: 'hello', swipe_id: 0 },
+];
 globalThis.SillyTavern = {
     getContext: () => ({
-        chat: [{ is_user: true, mes: 'hi' }, { is_user: false, mes: 'hello', swipe_id: 0 }],
+        chat: chatMessages,
         groupId: null, characterId: 1, chatId: 'ui-test',
         chatMetadata: { scenepulse: { snapshots: {} } },
         extensionSettings: { scenepulse: {} },
@@ -102,9 +108,13 @@ console.log('\n── SceneBuild UI reconcile ──');
 ctrl._resetSceneBuildRegistryForTests();
 ui.initSceneBuildUi();
 const together = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'auto:together', chatKey: currentChatKey() });
+document._mesStop = { offsetParent: {} }; // ST still streaming
 ctrl.updateSceneBuild(together.operationId, { status: 'generating' });
-assertTrue('together stub hidden while generating', !document.getElementById(`sp-scene-build-${together.operationId}`));
+assertTrue('together stub hidden while streaming', !document.getElementById(`sp-scene-build-${together.operationId}`));
 assertTrue('toast still mounts while generating', !!document.getElementById('sp-scene-build-toast'));
+document._mesStop = null; // stream finished, reply on screen
+ui.reconcileSceneBuildUi();
+assertTrue('together stub after stream ends (still generating)', !!document.getElementById(`sp-scene-build-${together.operationId}`));
 ctrl.updateSceneBuild(together.operationId, { status: 'parsing' });
 assertTrue('together stub after reply parsed', !!document.getElementById(`sp-scene-build-${together.operationId}`));
 ctrl.cancelSceneBuild(together.operationId, 'user');
@@ -146,6 +156,122 @@ assertTrue('error stub removed on retry', !document.getElementById(`sp-scene-bui
 assertTrue('retry stub only', !!document.getElementById(`sp-scene-build-${retry.operationId}`));
 eq('one stub in DOM', document.querySelectorAll('.sp-scene-build').length, 1);
 
+ctrl.cancelSceneBuild(retry.operationId, 'user');
+
+// ── Lifecycle regressions ──
+console.log('\n── SceneBuild UI lifecycle ──');
+
+const pendingTimers = [];
+const realSetTimeout = globalThis.setTimeout;
+const realClearTimeout = globalThis.clearTimeout;
+globalThis.setTimeout = (fn, ms) => {
+    const id = pendingTimers.length + 1;
+    pendingTimers.push({ id, fn, ms, cleared: false });
+    return id;
+};
+globalThis.clearTimeout = (id) => {
+    const tmr = pendingTimers.find(t => t.id === id);
+    if (tmr) tmr.cleared = true;
+};
+
+{
+    pendingTimers.length = 0;
+    const op = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:timer', chatKey: currentChatKey() });
+    ctrl.settleSceneBuild(op.operationId, 'ready');
+    const tmr = pendingTimers.find(t => !t.cleared && t.ms > 0 && t.ms <= ui.READY_DISMISS_MS);
+    assertTrue('ready schedules dismiss timer', !!tmr);
+    tmr.fn();
+    assertTrue('timer callback removes op from registry', !ctrl.getSceneBuild(op.operationId));
+    assertTrue('timer callback removes stub', !document.getElementById(`sp-scene-build-${op.operationId}`));
+}
+
+{
+    pendingTimers.length = 0;
+    const op = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:stale', chatKey: currentChatKey() });
+    ctrl.settleSceneBuild(op.operationId, 'ready');
+    const live = ctrl.getSceneBuild(op.operationId);
+    live.updatedAt = Date.now() - ui.READY_DISMISS_MS - 50;
+    document._stubs = [];
+    ui.reconcileSceneBuildUi();
+    assertTrue('expired deadline does not remount', !document.getElementById(`sp-scene-build-${op.operationId}`));
+    assertTrue('expired deadline dismisses op', !ctrl.getSceneBuild(op.operationId));
+}
+
+{
+    pendingTimers.length = 0;
+    const foreign = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:foreign', chatKey: 'other-chat' });
+    ctrl.settleSceneBuild(foreign.operationId, 'ready');
+    assertTrue('foreign chat not rendered on settle', !document.getElementById(`sp-scene-build-${foreign.operationId}`));
+    assertTrue('foreign ready still gets timer', ui._hasDismissTimerForTests(foreign.operationId));
+    const tmr = pendingTimers.find(t => !t.cleared && ui._hasDismissTimerForTests(foreign.operationId));
+    // fire whatever timer is pending for this op
+    const open = pendingTimers.filter(t => !t.cleared);
+    open[open.length - 1]?.fn();
+    assertTrue('foreign timer dismisses controller op', !ctrl.getSceneBuild(foreign.operationId));
+}
+
+{
+    pendingTimers.length = 0;
+    ctxSwipe(0);
+    const other = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:other-swipe', chatKey: currentChatKey() });
+    ctrl.settleSceneBuild(other.operationId, 'ready');
+    assertTrue('active swipe ready mounted', !!document.getElementById(`sp-scene-build-${other.operationId}`));
+    ctxSwipe(1);
+    // Late settle-style change: re-emit via update won't work on terminal; call reconcile + simulate _onChange via dismiss path.
+    // Owner gate on render: hide stub but keep timer.
+    ui.reconcileSceneBuildUi();
+    assertTrue('other swipe ready not in live DOM', !document.getElementById(`sp-scene-build-${other.operationId}`));
+    assertTrue('invisible other-swipe ready keeps timer', ui._hasDismissTimerForTests(other.operationId));
+    const open = pendingTimers.filter(t => !t.cleared);
+    open[open.length - 1]?.fn();
+    assertTrue('invisible other-swipe timer removes op', !ctrl.getSceneBuild(other.operationId));
+    ctxSwipe(0);
+}
+
+{
+    pendingTimers.length = 0;
+    ctxSwipe(0);
+    const sib = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:sib', chatKey: currentChatKey() });
+    ctrl.settleSceneBuild(sib.operationId, 'ready');
+    assertTrue('sibling ready has timer', ui._hasDismissTimerForTests(sib.operationId));
+    ctxSwipe(1);
+    const active = ctrl.startSceneBuild({ messageId: 1, swipeId: 1, source: 'manual:sib-active', chatKey: currentChatKey() });
+    ctrl.updateSceneBuild(active.operationId, { status: 'generating' });
+    assertTrue('sibling hide keeps dismiss timer', ui._hasDismissTimerForTests(sib.operationId));
+    assertTrue('sibling stub removed from DOM', !document.getElementById(`sp-scene-build-${sib.operationId}`));
+    const open = pendingTimers.filter(t => !t.cleared);
+    // Fire the sibling's timer (first ready timer still pending)
+    const sibTimer = open.find(t => t.ms <= ui.READY_DISMISS_MS);
+    sibTimer?.fn();
+    assertTrue('sibling timer still dismisses op', !ctrl.getSceneBuild(sib.operationId));
+    ctrl.cancelSceneBuild(active.operationId, 'user');
+    ctxSwipe(0);
+}
+
+{
+    const a = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:wipe', chatKey: currentChatKey() });
+    ctrl.settleSceneBuild(a.operationId, 'ready');
+    const b = ctrl.startSceneBuild({ messageId: 2, swipeId: 0, source: 'manual:wipe2', chatKey: currentChatKey() });
+    ctrl.failSceneBuild(b.operationId, new Error('x'));
+    ctrl.dismissSceneBuildsForChat(currentChatKey(), 'message-deleted');
+    eq('mid-chat delete wipe clears current chat ops', ctrl.getAllSceneBuilds().filter(o => o.chatKey === currentChatKey()).length, 0);
+    eq('mid-chat delete wipe clears current chat DOM', document.querySelectorAll('.sp-scene-build').length, 0);
+}
+
+{
+    const err = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:close', chatKey: currentChatKey() });
+    ctrl.failSceneBuild(err.operationId, new Error('x'));
+    assertTrue('error stub before close', !!document.getElementById(`sp-scene-build-${err.operationId}`));
+    ctrl.dismissSceneBuild(err.operationId, 'dismiss');
+    assertTrue('close dismisses op', !ctrl.getSceneBuild(err.operationId));
+    assertTrue('close removes stub', !document.getElementById(`sp-scene-build-${err.operationId}`));
+    ui.reconcileSceneBuildUi();
+    assertTrue('close stays gone after reconcile', !document.getElementById(`sp-scene-build-${err.operationId}`));
+}
+
+globalThis.setTimeout = realSetTimeout;
+globalThis.clearTimeout = realClearTimeout;
+
 ctrl.disposeSceneBuilds();
 ui.disposeSceneBuildUi();
 
@@ -156,4 +282,8 @@ function eq(name, actual, expected) {
     const a = JSON.stringify(actual), e = JSON.stringify(expected);
     if (a === e) { pass++; console.log('  OK   ' + name); }
     else { fail++; console.log('  FAIL ' + name + ' — expected ' + e + ', got ' + a); }
+}
+
+function ctxSwipe(swipeId) {
+    chatMessages[1].swipe_id = swipeId;
 }

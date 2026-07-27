@@ -28,9 +28,12 @@ i18n / utils ──► (leaves — imported widely, import nothing)
 - `src/profiles.js` — profile CRUD + cloning. `makeProfile` is the
   single constructor; never reach in and assemble a profile literal.
 - `src/generation/` — pipeline (extraction → normalize → save) plus the
-  interceptor that injects ScenePulse's tracker prompt into ST's
-  generation. Read [`interceptor.js`](src/generation/interceptor.js)
-  before touching anything in this directory.
+  interceptor that starts Together delivery. Together no longer mutates
+  `chat`; it builds a `PromptInjectionPlan` in
+  [`prompt-injection.js`](src/generation/prompt-injection.js) and
+  registers extension prompts (`IN_PROMPT` + `IN_CHAT` tail). Read
+  [`interceptor.js`](src/generation/interceptor.js) and
+  `prompt-injection.js` before touching this directory.
 - `src/builtins/` — `BUILTIN_SCHEMA` and `BUILTIN_PROMPT`. Edit these
   files to extend the bundled defaults, NOT `src/constants.js` (which
   re-exports them for backward compatibility).
@@ -81,6 +84,31 @@ Termination paths that clear the tuple:
 - `GENERATION_STOPPED` event (user clicked stop)
 - 180s watchdog (catches network drops)
 - Next interceptor call's stuck-detection (last-resort)
+
+## Together PromptInjectionPlan
+
+Together delivery is run-scoped (`activePromptInjectionRun`) with a
+per-request phase (`currentRequest.seq` / `phase`):
+
+1. `buildInlineTrackerPrompt()` produces the instruction text.
+2. `prompt-injection.js` wraps it with integrity markers, registers
+   `setExtensionPrompt` (main=`IN_PROMPT`, tail=`IN_CHAT` depth 0,
+   `scan=false`), and freezes schema/delta/snapshot for extraction.
+3. Intermediate hooks materialize only if the payload block matches
+   `sourceText` under an allowlisted ST transform (`identity`,
+   `collapse_newlines`, re-macro).
+4. Authoritative hooks (`GENERATE_AFTER_DATA` for Text,
+   `CHAT_COMPLETION_SETTINGS_READY` for Chat, via `makeLast`) verify
+   the materialized block, commit the verified context footprint, then
+   allow the request. Integrity failure calls `stopGeneration()` —
+   never `throw` from the listener, and never auto-Separate.
+5. Extension prompt keys are cleared owner-aware (by `runId`); foreign
+   quiet `GENERATION_ENDED` must not wipe an active Together run.
+   Nested quiet uses a suspend counter; tool recursion reuses the run
+   with a new `seq`.
+
+ScenePulse measures and shows footprint; it does not budget-limit,
+compact, or strip user panels.
 
 ## Dialog system
 

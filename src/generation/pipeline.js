@@ -4,7 +4,8 @@
 import { log, warn } from '../logger.js';
 import {
     setCurrentSnapshotMesIdx, setLastGenSource, setLastRawResponse, setLastDeltaPayload,
-    addSessionTokens, setLastDeltaSavings, _lastDeltaSavings, setLastExtractionFailure
+    setLastDeltaSavings, _lastDeltaSavings, setLastExtractionFailure,
+    getActivePromptInjectionRun, getLastPromptInjectionMetrics,
 } from '../state.js';
 import { getSettings, getActiveSchema, getPrevSnapshot, getActiveSwipeId, saveSnapshot, ensureChatSaved, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
@@ -20,6 +21,7 @@ import { classifyTimeChange } from '../temporal-check.js';
 import { currentChatFingerprint, currentChatKey, validateOperationOwner } from '../message-fingerprint.js';
 import { isOperationCurrent } from './scene-build-controller.js';
 import { finishSceneSourceTrace } from '../scene-source-trace.js';
+import { serializePromptInjectionMeta, promptInjectionOwnerMatches } from './prompt-injection.js';
 
 /**
  * Process extracted tracker data through the full pipeline:
@@ -38,7 +40,13 @@ import { finishSceneSourceTrace } from '../scene-source-trace.js';
  */
 export async function processExtraction(mesIdx, extracted, source, opts = {}) {
     const s = getSettings();
-    const { promptTokens = 0, completionTokens = 0, elapsed = 0 } = opts;
+    const {
+        promptTokens = 0,
+        completionTokens = 0,
+        elapsed = 0,
+        narrativeTokens = null,
+        trackerTokens = null,
+    } = opts;
     const sceneOpId = opts.sceneBuildOperationId || opts.operationId || null;
     if (sceneOpId && !isOperationCurrent(sceneOpId)) {
         warn('Pipeline: scene build not current; discarding result for', mesIdx, sceneOpId);
@@ -47,7 +55,7 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
 
     setLastGenSource(source);
     setLastRawResponse(JSON.stringify(extracted, null, 2));
-    addSessionTokens(promptTokens + completionTokens);
+    // ponytail: session Σ removed — extension cannot show accurate provider usage.
 
     // Delta merge — v6.8.50: use shouldUseDelta() which respects the
     // periodic full-state refresh counter.
@@ -70,9 +78,16 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         return null;
     }
     const prevSnap = Object.hasOwn(opts, 'baseSnapshot') ? opts.baseSnapshot : getPrevSnapshot(mesIdx);
-    const _useDelta = !hasStaleSnapshotBefore(mesIdx)&&shouldUseDelta(prevSnap);
+    const _together = String(source || '').startsWith('auto:together') || String(source || '').includes('together');
+    const _frozenDelta = opts.frozenDeltaMode;
+    const _useDelta = (_frozenDelta !== undefined && _together)
+        ? !!_frozenDelta
+        : (!hasStaleSnapshotBefore(mesIdx) && shouldUseDelta(prevSnap));
     clearForceFullState();
-    const requestSchema=buildRequestSchema(getActiveSchema(),{mode:_useDelta?'delta':'full'}).value;
+    const _frozenSchema = opts.frozenRequestSchema;
+    const requestSchema = (_frozenSchema?.value || _frozenSchema)
+        ? (_frozenSchema.value || _frozenSchema)
+        : buildRequestSchema(getActiveSchema(), { mode: _useDelta ? 'delta' : 'full' }).value;
     if(!Object.hasOwn(requestSchema.properties||{},'plotBranches'))delete extracted.plotBranches;
     const _validation=validateExtraction(extracted,{schema:requestSchema});
     if(!_validation.valid){
@@ -147,6 +162,39 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         deltaMode: _useDelta,
         deltaTurnsSinceFull: _useDelta ? _prevCounter + 1 : 0,
     };
+    if (narrativeTokens != null) norm._spMeta.narrativeTokens = narrativeTokens;
+    if (trackerTokens != null) norm._spMeta.trackerTokens = trackerTokens;
+    if (_together) {
+        const chatKey = currentChatKey();
+        const plan = getActivePromptInjectionRun();
+        const ownerTarget = { chatKey, messageId: mesIdx, swipeId: targetSwipeId };
+        const isRecover = String(source || '').includes('swipe-recover');
+        let meta = null;
+        const planVerified = plan
+            && plan.status === 'verified'
+            && plan.verification?.main === 'verified';
+        if (planVerified && promptInjectionOwnerMatches(plan, ownerTarget)) {
+            meta = serializePromptInjectionMeta(plan, 'verified');
+        } else if (!isRecover) {
+            const rt = getLastPromptInjectionMetrics();
+            // Runtime metrics are only written after a successful verify commit.
+            if (rt?.tokens?.totalInput > 0
+                && rt.integrity?.main === 'verified'
+                && promptInjectionOwnerMatches(rt, ownerTarget)) {
+                meta = {
+                    v: 1,
+                    status: 'verified',
+                    apiKind: rt.apiKind,
+                    registeredRole: rt.registeredRole,
+                    effectiveRole: rt.effectiveRole,
+                    tokens: rt.tokens,
+                    integrity: rt.integrity,
+                    output: { dedicatedReserve: 0, sharesMainResponse: true },
+                };
+            }
+        }
+        if (meta) norm._spMeta.promptInjection = meta;
+    }
     if (s.sceneSourceTrace === true && source.startsWith('auto:together')) {
         const trace = finishSceneSourceTrace(opts.owner, { forceEmpty: true });
         if (trace) norm._spMeta.sceneSourceTrace = trace;

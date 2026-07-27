@@ -19,6 +19,8 @@ const state = {
     generating: false,
     cancelRequested: false,
     genNonce: 0,
+    /** mesIdx of in-flight generateTracker / continuation; null when idle */
+    generationTargetMesIdx: null,
     genMeta: { promptTokens: 0, completionTokens: 0, elapsed: 0 },
     inlineGenStartMs: 0,
     currentSnapshotMesIdx: -1,
@@ -29,6 +31,12 @@ const state = {
     pendingInlineIdx: -1,
     inlineExtractionDone: false,
     inlineGenerationContext: null,
+
+    // ── Prompt injection (Together extension prompts) ──
+    activePromptInjectionRun: null,
+    lastPromptInjectionMetrics: null,
+    lastPromptInjectionFailure: null,
+    promptAbortReason: null,
 
     // ── Mobile ──
     _spMobileMinimized: false,
@@ -64,7 +72,6 @@ const state = {
     _streamHiderObserver: null,
 
     // ── Token tracking ──
-    _sessionTokensUsed: 0,
     _lastDeltaSavings: 0,
 };
 
@@ -93,6 +100,15 @@ export function shouldSkipAutoSceneRecovery() { return !!state.cancelRequested; 
 
 export let genNonce = state.genNonce;
 export function setGenNonce(v) { genNonce = state.genNonce = v; }
+
+export let generationTargetMesIdx = state.generationTargetMesIdx;
+export function setGenerationTargetMesIdx(v) {
+    generationTargetMesIdx = state.generationTargetMesIdx = (v == null || v === '' ? null : Number(v));
+    if (generationTargetMesIdx != null && !Number.isFinite(generationTargetMesIdx)) {
+        generationTargetMesIdx = state.generationTargetMesIdx = null;
+    }
+}
+export function getGenerationTargetMesIdx() { return state.generationTargetMesIdx; }
 
 export let genMeta = state.genMeta;
 export function setGenMeta(v) { genMeta = state.genMeta = v; }
@@ -129,6 +145,23 @@ export function setInlineExtractionDone(v) { inlineExtractionDone = state.inline
 
 export let inlineGenerationContext = state.inlineGenerationContext;
 export function setInlineGenerationContext(v) { inlineGenerationContext = state.inlineGenerationContext = v; }
+
+export let activePromptInjectionRun = state.activePromptInjectionRun;
+export function setActivePromptInjectionRun(v) { activePromptInjectionRun = state.activePromptInjectionRun = v; }
+export function getActivePromptInjectionRun() { return state.activePromptInjectionRun; }
+
+export let lastPromptInjectionMetrics = state.lastPromptInjectionMetrics;
+export function setLastPromptInjectionMetrics(v) { lastPromptInjectionMetrics = state.lastPromptInjectionMetrics = v; }
+export function getLastPromptInjectionMetrics() { return state.lastPromptInjectionMetrics; }
+
+export let lastPromptInjectionFailure = state.lastPromptInjectionFailure;
+export function setLastPromptInjectionFailure(v) { lastPromptInjectionFailure = state.lastPromptInjectionFailure = v; }
+export function getLastPromptInjectionFailure() { return state.lastPromptInjectionFailure; }
+
+export let promptAbortReason = state.promptAbortReason;
+export function setPromptAbortReason(v) { promptAbortReason = state.promptAbortReason = v; }
+export function getPromptAbortReason() { return state.promptAbortReason; }
+export function clearPromptAbortReason() { promptAbortReason = state.promptAbortReason = null; }
 
 // ── Mobile state ──
 export let _spMobileMinimized = state._spMobileMinimized;
@@ -185,10 +218,6 @@ export let _streamHiderObserver = state._streamHiderObserver;
 export function set_streamHiderObserver(v) { _streamHiderObserver = state._streamHiderObserver = v; }
 
 // ── Token tracking ──
-export let _sessionTokensUsed = state._sessionTokensUsed;
-export function addSessionTokens(n) { _sessionTokensUsed = state._sessionTokensUsed += n; }
-export function resetSessionTokens() { _sessionTokensUsed = state._sessionTokensUsed = 0; }
-
 export let _lastDeltaSavings = state._lastDeltaSavings;
 export function setLastDeltaSavings(v) { _lastDeltaSavings = state._lastDeltaSavings = v; }
 

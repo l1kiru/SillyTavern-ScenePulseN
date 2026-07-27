@@ -2,7 +2,7 @@
 import { log, warn, err } from '../logger.js';
 import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
-import { SP_MARKER_START, extractInlineTracker } from '../generation/extraction.js';
+import { SP_MARKER_START, extractInlineTracker, extractInlineTrackerWithReplySplit } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
 import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
@@ -14,18 +14,19 @@ import {
     inlineGenerationContext, setInlineGenerationContext,
     inlineGenStartMs, setInlineGenStartMs,
     pendingInlineIdx, setPendingInlineIdx,
-    _inlineWaitTimerId, set_inlineWaitTimerId,
-    getLastExtractionFailure, shouldSkipAutoSceneRecovery
+    getLastExtractionFailure, shouldSkipAutoSceneRecovery,
+    getActivePromptInjectionRun,
 } from '../state.js';
+import { clearPromptInjection } from '../generation/prompt-injection.js';
 import { continuationReprompt } from '../generation/engine.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
-import { processTogetherExtraction, discardTogetherSceneBuild } from '../generation/together-scene-build.js';
+import { processTogetherExtraction, discardTogetherSceneBuild, abortShortTogetherReply, isShortTogetherReply } from '../generation/together-scene-build.js';
 import { rebindInlineCtxForExpectedSwipe } from '../generation/inline-ctx.js';
 import { cancelSceneSourceTrace, finishSceneSourceTrace } from '../scene-source-trace.js';
 import { ensureChatSaved, anyPanelsActive } from '../settings.js';
 import { spAutoShow, spPostGenShow, spSetGenerating } from './mobile.js';
-import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, showChatBanner, clearThoughtLoading } from './loading.js';
+import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, showChatBanner, clearThoughtLoading, clearInlineWaitBanner } from './loading.js';
 import { updatePanel } from './update-panel.js';
 import { updateThoughts } from './thoughts.js';
 import { createPanel, hidePanel } from './panel.js';
@@ -33,10 +34,6 @@ import { renderTimeline } from './timeline.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
 import { renderEmptyState } from './empty-state.js';
 import { runManualSceneBuild, reconcileSceneBuildUi } from './scene-build-ui.js';
-import {
-    cancelSceneBuildsForMessage, supersedeSceneBuildsForMessageExceptSwipe,
-    getActiveSceneBuilds,
-} from '../generation/scene-build-controller.js';
 import { runSceneBuild } from '../generation/scene-build-runner.js';
 
 /** Prefer this message+swipe snapshot after manual gen fails — never a foreign latest. */
@@ -66,13 +63,7 @@ function _queueChatMutation(work){
 // SillyTavern passes the new chat length here, not the deleted message id.
 export function spOnMessageDeleted(){
     return _queueChatMutation(async()=>{
-        try{
-            const chat=SillyTavern.getContext().chat||[];
-            // Cancel ops whose message no longer exists
-            for(const op of getActiveSceneBuilds()){
-                if(!chat[op.messageId])cancelSceneBuildsForMessage(op.messageId,op.chatKey,'message-deleted');
-            }
-        }catch{}
+        // Scene-build wipe is sync in index.js MESSAGE_DELETED (before this queue).
         const summary=reconcileSnapshotsAfterChatMutation({type:'message-delete'});
         await _refreshAfterChatMutation(summary,'Message deletion');
         reconcileSceneBuildUi();
@@ -81,9 +72,7 @@ export function spOnMessageDeleted(){
 
 export function spOnSwipeDeleted(payload,activeChanged){
     return _queueChatMutation(async()=>{
-        if(Number.isFinite(Number(payload?.messageId))){
-            cancelSceneBuildsForMessage(Number(payload.messageId),undefined,'swipe-deleted');
-        }
+        // Scene-build wipe is sync in index.js MESSAGE_SWIPE_DELETED (before this queue).
         const summary=reconcileSnapshotsAfterChatMutation({
             type:'swipe-delete',messageId:payload?.messageId,swipeId:payload?.swipeId,activeChanged
         });
@@ -140,6 +129,7 @@ export async function onCharMsg(idx){
             warn('onCharMsg [inline]: target swipe changed; discarding tracker for',idx);
             discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
             cancelSceneSourceTrace();
+            try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
             setInlineGenerationContext(null);setInlineGenStartMs(0);spSetGenerating(false);
             return;
         }
@@ -154,44 +144,34 @@ export async function onCharMsg(idx){
             log('onCharMsg [inline]: skipping — ScenePulse did not inject into this generation cycle (inlineGenStartMs=0)');
             return;
         }
-        // FALLBACK: GENERATION_ENDED didn't extract (empty msg, timing issue)
+        // FALLBACK: GENERATION_ENDED didn't extract (timing / long reply without tracker).
         // Remove waiting indicators
-        try{if(_inlineWaitTimerId){clearInterval(_inlineWaitTimerId);set_inlineWaitTimerId(null)}const w=document.getElementById('sp-inline-wait');if(w)w.remove()}catch{}
+        clearInlineWaitBanner();
         clearThoughtLoading();
         setPendingInlineIdx(idx);
         log('onCharMsg [inline]: GENERATION_ENDED missed, retrying as fallback');
-        // Streaming may not have finished -- retry extraction with delay if message is empty
-        let extracted=extractInlineTracker(idx);
-        if(!extracted){
-            const msgLen=(chat[idx]?.mes||'').length;
-            if(msgLen<100){
-                log('onCharMsg [inline]: message too short ('+msgLen+' chars), waiting 2s for streaming...');
-                await new Promise(r=>setTimeout(r,2000));
-                // Re-read chat in case it updated
-                const{chat:freshChat}=SillyTavern.getContext();
-                if(freshChat[idx])extracted=extractInlineTracker(idx);
-                if(!extracted){
-                    log('onCharMsg [inline]: retry after 2s, still no tracker, waiting 4s more...');
-                    await new Promise(r=>setTimeout(r,4000));
-                    const{chat:freshChat2}=SillyTavern.getContext();
-                    if(freshChat2[idx])extracted=extractInlineTracker(idx);
-                }
-            }
+        // Always split BEFORE extract (extract strips tracker from mes).
+        let { extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(idx);
+        if (!extracted && isShortTogetherReply(rawMes)) {
+            log('onCharMsg [inline]: short/empty reply (' + rawMes.length + ' chars), aborting scene build');
+            abortShortTogetherReply(_inlineCtx, 'empty-reply');
+            spSetGenerating(false);
+            return;
         }
         if(extracted){
-            // Estimate tokens from together mode -- use full message length (narrative + tracker)
-            const fullMsgLen=(chat[idx]?.mes||'').length+JSON.stringify(extracted).length;
-            const _compTokens=Math.round(fullMsgLen/4);
+            const _compTokens=replySplit.totalTokens||Math.round(rawMes.length/4);
             const _elapsed=inlineGenStartMs>0?((Date.now()-inlineGenStartMs)/1000):0;
             setGenMeta({...genMeta, promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed});
             setInlineGenStartMs(0);
-            log('onCharMsg [inline]: extracted tracker from message',idx,'keys=',Object.keys(extracted).length,'~tokens:',_compTokens);
+            log('onCharMsg [inline]: extracted tracker from message',idx,'keys=',Object.keys(extracted).length,'~tokens:',_compTokens,'narrative=',replySplit.narrativeTokens,'tracker=',replySplit.trackerTokens);
             setInlineExtractionDone(true);setPendingInlineIdx(-1);
             stopStreamingHider();
             await processTogetherExtraction(idx, extracted, 'auto:together', _inlineCtx, {
                 promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed,
+                narrativeTokens:replySplit.narrativeTokens, trackerTokens:replySplit.trackerTokens,
                 stopHider:false, unlockGen:true,
             });
+            try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
             setInlineGenerationContext(null);
             log('onCharMsg [inline]: pipeline complete');
         } else {
@@ -204,7 +184,7 @@ export async function onCharMsg(idx){
             const _failureKind=_markersPresent?'markers found, JSON unparseable':'no SP markers';
             log('onCharMsg [inline]: no tracker found in message',idx,'('+msgLen+' chars,',_failureKind+')');
             // If the AI wrote content but omitted the tracker, recover.
-            if(msgLen>100&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!shouldSkipAutoSceneRecovery()){
+            if(!isShortTogetherReply(msgText)&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!shouldSkipAutoSceneRecovery()){
                 const fbProfile=s.fallbackProfile||s.connectionProfile||'';
                 const fbPreset=s.fallbackPreset||s.chatPreset||'';
                 // v6.23.9: removed the `if(!fbProfile && !fbPreset) showRecoveryCard`
@@ -277,6 +257,8 @@ export async function onCharMsg(idx){
                         result=null;
                     } else if(!result){
                         warn('Together mode: falling back to full separate generation ('+msgLen+' chars, '+_failureKind+')');
+                        // Clear Together extension prompts before Separate recovery.
+                        try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
                         // Lore belongs to the original visible generation, not the
                         // separate fallback request. Finish capture before generateTracker
                         // so Tier 2 cannot pollute or drop the active trace.
@@ -306,14 +288,17 @@ export async function onCharMsg(idx){
                     hideStopButton();stopElapsedTimer();
                     clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
                 }
-            } else if(msgLen>100&&shouldSkipAutoSceneRecovery()){
+            } else if(!isShortTogetherReply(msgText)&&shouldSkipAutoSceneRecovery()){
                 log('Together mode: recovery skipped — user stopped generation');
                 discardTogetherSceneBuild(_inlineCtx,'reply-stopped');
                 stopStreamingHider();
-            } else if(msgLen>100&&!s.fallbackEnabled){
+            } else if(!isShortTogetherReply(msgText)&&!s.fallbackEnabled){
                 log('Together mode: AI omitted tracker, fallback disabled by user');
                 discardTogetherSceneBuild(_inlineCtx,'no-fallback');
                 stopStreamingHider();
+            } else if(isShortTogetherReply(msgText)){
+                // Defensive: short path should have returned earlier; still abort if reached.
+                abortShortTogetherReply(_inlineCtx,'empty-reply');
             }
             // Always show existing data for this message+swipe if we didn't generate
             const prev=getTrustedSnapshotFor(idx);

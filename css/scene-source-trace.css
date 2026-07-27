@@ -18,7 +18,7 @@
 .sp-source-trace-drawer {
     margin: 0;
     padding: 8px;
-    max-height: 220px;
+    max-height: 253px;
     width: 100%;
     max-width: 100%;
     min-width: 0;
@@ -179,5 +179,5 @@
 }
 
 @media (max-width: 600px) {
-    .sp-source-trace-drawer { max-height: 180px; }
+    .sp-source-trace-drawer { max-height: 207px; }
 }

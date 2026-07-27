@@ -49,6 +49,8 @@ ok('delta output has markers', deltaOut.includes('<!--SP_TRACKER_START-->') && d
 ok('delta output uses deltaExample', deltaOut.includes('{"time":"14:30","date":"03/15/2025"}'));
 ok('delta output mentions always-include fields', deltaOut.includes('time, date, elapsed'));
 ok('delta output has no markdown fence rule', deltaOut.includes('Do not wrap the JSON in markdown code blocks'));
+ok('delta output reserves shared output budget', deltaOut.includes('shares the same response output limit'));
+ok('delta output does not claim tracker is free', !deltaOut.includes('does not count toward'));
 
 const fullOut = getTogetherOutputFormatBlock({
     isDelta: false,
@@ -58,6 +60,8 @@ const fullOut = getTogetherOutputFormatBlock({
 });
 ok('full output has Required keys', fullOut.includes('Required keys: time, date, location'));
 ok('full output has markers', fullOut.includes('<!--SP_TRACKER_START-->'));
+ok('full output reserves shared output budget', fullOut.includes('shares the same response output limit'));
+ok('full output does not claim tracker is free', !fullOut.includes('does not count toward'));
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

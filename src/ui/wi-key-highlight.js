@@ -106,6 +106,22 @@ function _scanMesNodes(depth) {
     }
 }
 
+function _scanMesNodesByIds(messageIds) {
+    const ids = (Array.isArray(messageIds) ? messageIds : [])
+        .map(id => Number(id))
+        .filter(id => Number.isFinite(id));
+    if (!ids.length) return [];
+    const out = [];
+    try {
+        for (const id of ids) {
+            const mes = document.querySelector(`#chat .mes[mesid="${id}"]`);
+            const mesText = mes?.querySelector?.('.mes_text');
+            if (mesText) out.push(mesText);
+        }
+    } catch { /* ignore */ }
+    return out;
+}
+
 function _wrapInRoot(root, keys) {
     if (!root || !keys.length) return;
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
@@ -125,18 +141,22 @@ function _wrapInRoot(root, keys) {
 }
 
 /**
- * Highlight all case-insensitive occurrences of keys in the last WI scan-depth
- * messages. Scrolls/focuses the first hit. Clears after WI_KEY_HIGHLIGHT_MS.
+ * Highlight all case-insensitive occurrences of keys in capture-time messageIds
+ * when provided; otherwise the last WI scan-depth messages (live tail fallback).
+ * Scrolls/focuses the first hit. Clears after WI_KEY_HIGHLIGHT_MS.
  */
-export function highlightMatchedKeysInChat(keys) {
+export function highlightMatchedKeysInChat(keys, { messageIds } = {}) {
     const list = (Array.isArray(keys) ? keys : [])
         .map(k => String(k || '').trim())
         .filter(Boolean);
     clearWiKeyHighlights();
     if (!list.length) return 0;
 
-    const depth = resolveScanDepth();
-    for (const mesText of _scanMesNodes(depth)) {
+    const byId = Array.isArray(messageIds) && messageIds.length
+        ? _scanMesNodesByIds(messageIds)
+        : [];
+    const roots = byId.length ? byId : _scanMesNodes(resolveScanDepth());
+    for (const mesText of roots) {
         _wrapInRoot(mesText, list);
     }
 
