@@ -10,6 +10,105 @@ export const SP_MARKER_START='<!--SP_TRACKER_START-->';
 export const SP_MARKER_END='<!--SP_TRACKER_END-->';
 export const KNOWN_KEYS=['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','characters','relationships','northStar','plotBranches','mainQuests','sideQuests'];
 const KNOWN_WRAPPER_KEYS=['environment','scene','sceneDetails','sceneInfo','sceneAnalysis','questJournal','quests'];
+const _ALT_TRACKER_MARKERS=[
+    [SP_MARKER_START,SP_MARKER_END],
+    ['{{//SP_TRACKER_START}}','{{//SP_TRACKER_END}}'],
+    ['{{SP_TRACKER_START}}','{{SP_TRACKER_END}}'],
+    ['[SP_TRACKER_START]','[SP_TRACKER_END]'],
+    ['**SP_TRACKER_START**','**SP_TRACKER_END**'],
+];
+
+/**
+ * Heuristic reply split (chars/4) for Together: narrative before tracker markers vs tracker block.
+ * @returns {{ narrativeTokens: number, trackerTokens: number, totalTokens: number, foundTracker: boolean }}
+ */
+export function estimateReplyTokenSplit(mesText){
+    const text=String(mesText??'');
+    const est=n=>Math.max(0,Math.round(String(n??'').length/4));
+    if(!text)return{narrativeTokens:0,trackerTokens:0,totalTokens:0,foundTracker:false};
+    for(const[startMark,endMark]of _ALT_TRACKER_MARKERS){
+        const startIdx=text.indexOf(startMark);
+        if(startIdx<0)continue;
+        const endIdx=text.indexOf(endMark,startIdx+startMark.length);
+        const narrative=text.slice(0,startIdx);
+        const tracker=endIdx>=startIdx
+            ?text.slice(startIdx,endIdx+endMark.length)
+            :text.slice(startIdx);
+        return{
+            narrativeTokens:est(narrative),
+            trackerTokens:est(tracker),
+            totalTokens:est(text),
+            foundTracker:true,
+        };
+    }
+    // Fence at end of message (same fallback family as extractInlineTracker)
+    const fence=text.match(/```json\s*\n?([\s\S]*?)```\s*$/);
+    if(fence){
+        const startIdx=fence.index??text.lastIndexOf('```json');
+        if(startIdx>=0){
+            return{
+                narrativeTokens:est(text.slice(0,startIdx)),
+                trackerTokens:est(text.slice(startIdx)),
+                totalTokens:est(text),
+                foundTracker:true,
+            };
+        }
+    }
+    return{narrativeTokens:est(text),trackerTokens:0,totalTokens:est(text),foundTracker:false};
+}
+
+/**
+ * Resolve narrative/tracker tip parts for the Reply badge.
+ * Rejects post-strip / inconsistent meta; live mes only when markers still present.
+ * @returns {{ narrativeTokens: number, trackerTokens: number }|null}
+ */
+export function resolveReplyTokenTipParts({
+    narrativeTokens = null,
+    trackerTokens = null,
+    completionTokens = 0,
+    liveMes = null,
+} = {}) {
+    const total = Math.max(0, Number(completionTokens) || 0);
+    // null/undefined must stay "missing" — Number(null)===0 would skip liveMes fallback.
+    let narr = narrativeTokens == null ? NaN : Number(narrativeTokens);
+    let track = trackerTokens == null ? NaN : Number(trackerTokens);
+    if ((!Number.isFinite(narr) || narr < 0 || !Number.isFinite(track) || track < 0) && liveMes) {
+        const split = estimateReplyTokenSplit(liveMes);
+        if (split.foundTracker) {
+            narr = split.narrativeTokens;
+            track = split.trackerTokens;
+        }
+    }
+    if (!Number.isFinite(narr) || narr < 0 || !Number.isFinite(track) || track < 0) return null;
+    if (narr <= 0 && track <= 0) return null;
+    const sum = narr + track;
+    const consistent = track > 0 || (total > 0 && sum >= total * 0.9);
+    if (!consistent) {
+        // Bad save after strip: narrative≈cleaned mes, tracker=0, completion=full reply.
+        if (narr > 0 && total > narr + 20) {
+            track = Math.max(0, total - narr);
+        } else {
+            return null;
+        }
+    }
+    return { narrativeTokens: narr, trackerTokens: track };
+}
+
+/**
+ * Split reply tokens from raw mes, then extract (which may strip the tracker).
+ * Callers must use replySplit — never re-split chat[i].mes after extract.
+ */
+export function extractInlineTrackerWithReplySplit(mesIdx) {
+    let rawMes = '';
+    try {
+        rawMes = String(SillyTavern.getContext()?.chat?.[mesIdx]?.mes || '');
+    } catch {
+        rawMes = '';
+    }
+    const replySplit = estimateReplyTokenSplit(rawMes);
+    const extracted = extractInlineTracker(mesIdx);
+    return { extracted, replySplit, rawMes };
+}
 
 function _codedError(code,message){const e=new Error(message);e.code=code;return e}
 

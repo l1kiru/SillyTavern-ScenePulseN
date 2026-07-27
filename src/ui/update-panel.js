@@ -1,5 +1,5 @@
 // src/ui/update-panel.js — The massive updatePanel function (~960 lines)
-import { log } from '../logger.js';
+import { log, err } from '../logger.js';
 import { esc, clamp, str, spConfirm } from '../utils.js';
 import { relPhaseFamily } from '../rel-phase.js';
 // v6.17.0: instrument the main panel render so the perf-monitor's capture
@@ -8,11 +8,14 @@ import { relPhaseFamily } from '../rel-phase.js';
 import { markStart as _spPmStart, markEnd as _spPmEnd } from '../perf-monitor.js';
 import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, buildProfileView, getActivePanels, canGenerateScene } from '../settings.js';
+import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId } from '../settings.js';
 import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
 import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
+import { currentChatKey } from '../message-fingerprint.js';
+import { promptInjectionOwnerMatches } from '../generation/prompt-injection.js';
+import { resolveReplyTokenTipParts } from '../generation/extraction.js';
 import {
     _lastPanelUpdate, set_lastPanelUpdate,
     set_cachedNormData,
@@ -21,7 +24,9 @@ import {
     currentSnapshotMesIdx,
     currentWeatherType,
     _isTimelineScrub,
-    _sessionTokensUsed, _lastDeltaSavings
+    _lastDeltaSavings,
+    getLastPromptInjectionMetrics,
+    inlineGenerationContext,
 } from '../state.js';
 import { updateWeatherOverlay } from './weather.js';
 import { updateTimeTint } from './time-tint.js';
@@ -44,6 +49,7 @@ let _wdmFrameId = null;
 let _wdmObserver = null;
 
 export function restoreGenerationMeta(d){
+
     if(!d?._spMeta)return;
     const m=d._spMeta;
     if(m.completionTokens>0||m.elapsed>0){
@@ -52,6 +58,96 @@ export function restoreGenerationMeta(d){
         genMeta.elapsed=m.elapsed||0;
     }
     if(m.source)setLastGenSource(m.source);
+}
+
+/** Resolve SP Context footprint tokens from snapshot meta and/or runtime metrics. */
+export function resolveSpContextFootprint(meta = null) {
+    const _piMeta = meta?.promptInjection || null;
+    // Historical Together badge from snapshot meta always wins when present.
+    if (_piMeta?.tokens?.totalInput > 0) return _piMeta.tokens;
+    // Separate snapshots must not inherit SP Context from a prior Together attempt.
+    if (meta?.injectionMethod === 'separate') return null;
+    const _rt = getLastPromptInjectionMetrics();
+    if (!(_rt?.tokens?.totalInput > 0)) return null;
+    const viewMesIdx = currentSnapshotMesIdx >= 0
+        ? currentSnapshotMesIdx
+        : inlineGenerationContext?.mesIdx;
+    if (viewMesIdx == null) return null;
+    let viewSwipeId;
+    if (currentSnapshotMesIdx >= 0) {
+        try { viewSwipeId = getActiveSwipeId(viewMesIdx); } catch { viewSwipeId = 0; }
+    } else {
+        viewSwipeId = inlineGenerationContext?.swipeId;
+    }
+    if (viewSwipeId == null) return null;
+    if (!promptInjectionOwnerMatches(_rt, {
+        chatKey: currentChatKey(),
+        messageId: viewMesIdx,
+        swipeId: viewSwipeId,
+    })) return null;
+    return _rt.tokens;
+}
+
+function _spContextBadgeHtml(fp) {
+    if (!(fp?.totalInput > 0)) return '';
+    const _approx = fp.totalInput >= 1000
+        ? `≈${(fp.totalInput / 1000).toFixed(1).replace(/\.0$/, '')}K`
+        : `≈${fp.totalInput}`;
+    const _instr = Number(fp.instructionsInput) || 0;
+    const _prev = Number(fp.previousStateInput) || 0;
+    const _tipLines = [
+        t('ScenePulse used ≈{n} input tokens:', { n: fp.totalInput.toLocaleString() }),
+    ];
+    if (_instr > 0 || _prev > 0) {
+        _tipLines.push(t('{n} — extension instructions (profile, rules, panels, schema),', { n: _instr.toLocaleString() }));
+        _tipLines.push(t('{n} — previous tracker state JSON,', { n: _prev.toLocaleString() }));
+        _tipLines.push(t('{n} — final anchor.', { n: (fp.tailInput || 0).toLocaleString() }));
+        // Markers / join overhead sit inside mainInput but outside the two parts.
+        const _partsSum = _instr + _prev;
+        const _overhead = Math.max(0, (Number(fp.mainInput) || 0) - _partsSum);
+        if (_overhead > 0) {
+            _tipLines.push(t('{n} — integrity markers / framing.', { n: _overhead.toLocaleString() }));
+        }
+    } else {
+        _tipLines.push(t('{n} — required IN_PROMPT,', { n: (fp.mainInput || 0).toLocaleString() }));
+        _tipLines.push(t('{n} — final anchor.', { n: (fp.tailInput || 0).toLocaleString() }));
+    }
+    _tipLines.push(
+        '',
+        t('Includes active custom panels and tracking options for this run.'),
+        t('Tracker JSON shares the main response limit; there is no separate output reserve.'),
+    );
+    const _tip = _tipLines.join('\n');
+    const _aria = t('ScenePulse context footprint ≈{n} tokens', { n: fp.totalInput.toLocaleString() });
+    return `<span class="sp-gen-badge-sp-context" title="${esc(_tip)}" aria-label="${esc(_aria)}">${t('SP Context')}: ${_approx}</span>`;
+}
+
+/**
+ * Patch or create the SP Context badge from latest runtime metrics without a full panel rebuild.
+ * Used after commitVerifiedFootprint so a failed first Together attempt still shows the badge.
+ */
+export function refreshSpContextFooter() {
+    const fp = resolveSpContextFootprint(null);
+    if (!(fp?.totalInput > 0)) return false;
+    const body = document.getElementById('sp-panel-body');
+    if (!body) return false;
+    let footer = body.querySelector('.sp-gen-footer');
+    if (!footer) {
+        footer = document.createElement('div');
+        footer.className = 'sp-gen-footer';
+        body.appendChild(footer);
+    }
+    const html = _spContextBadgeHtml(fp);
+    let badge = footer.querySelector('.sp-gen-badge-sp-context');
+    if (badge) {
+        const tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        const next = tmp.firstElementChild;
+        if (next) badge.replaceWith(next);
+    } else {
+        footer.insertAdjacentHTML('beforeend', html);
+    }
+    return true;
 }
 
 // ── Quest mutation index helper ──────────────────────────────────────────
@@ -1429,13 +1525,47 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             }
         } catch {}
         if(currentSnapshotMesIdx>=0)fhtml+=`<span title="${t('Message index')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 11V3a1 1 0 0 1 1-1h5l4 4v5a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1z" stroke="currentColor" stroke-width="1.1"/><path d="M7 2v4h4" stroke="currentColor" stroke-width="0.9" opacity="0.5"/></svg> #${currentSnapshotMesIdx}</span>`;
-        if(_mTokens>0)fhtml+=`<span title="${t('Estimated tokens')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><rect x="1" y="3" width="12" height="8" rx="1" stroke="currentColor" stroke-width="1.1"/><line x1="4" y1="6" x2="4" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.6"/><line x1="7" y1="5" x2="7" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.5"/><line x1="10" y1="7" x2="10" y2="9" stroke="currentColor" stroke-width="1.2" opacity="0.4"/></svg> ~${_mTokens.toLocaleString()}</span>`;
         if(_mElapsed>0)fhtml+=`<span class="sp-gen-summary" title="${t('Generation time')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.1"/><path d="M7 4v3.5l2.5 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg> ${_mElapsed.toFixed(1)}s</span>`;
         if(_mInject==='inline')fhtml+=`<span title="${t('Together')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M2 7h4l1.5-3 2 6 1.5-3h4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> ${t('Together')}</span>`;
         else fhtml+=`<span title="${t('Separate')}" class="sp-gen-badge-mode"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="4.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/><circle cx="9.5" cy="7" r="3" stroke="currentColor" stroke-width="1"/></svg> ${t('Separate')}</span>`;
         if(_mSource){const srcMap={'auto:together':t('Auto'),'auto:together:backup':t('Backup'),'auto:together:fallback':t('Fallback'),'auto:separate':t('Auto'),'manual:full':t('Full regen'),'manual:settings':t('Settings'),'manual:message':t('Msg regen'),'manual:thoughts':t('Thoughts')};let srcLabel=srcMap[_mSource]||'';if(!srcLabel&&_mSource.startsWith('manual:section:'))srcLabel=_mSource.replace('manual:section:','');const isFallback=_mSource.includes('fallback');const isBackup=_mSource.includes('backup');const cls=isFallback?'sp-gen-src sp-gen-src-warn':isBackup?'sp-gen-src sp-gen-src-warn':'sp-gen-src';if(srcLabel)fhtml+=`<span title="${esc(t('Source: {source}',{source:_mSource}))}" class="${cls}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><circle cx="7" cy="7" r="2" fill="currentColor" opacity="0.4"/><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1" opacity="0.4"/></svg> ${esc(srcLabel)}</span>`}
-        // Tracking-only token cost (just the tracker portion, not narrative)
-        if(_mTokens>0)fhtml+=`<span title="${t('Tracker data tokens only (excludes narrative)')}" class="sp-gen-badge-tracker">${t('Tracker')}: ~${_mTokens.toLocaleString()}</span>`;
+        // Output tokens: Together labels the full reply; Separate labels tracker-only.
+        if(_mTokens>0){
+            const _isTogetherReply = (_meta.injectionMethod === 'inline' || (_mInject === 'inline' && !_meta.injectionMethod));
+            const _outLabel = _isTogetherReply ? t('Reply') : t('Tracker');
+            let _outTitle;
+            if (_isTogetherReply) {
+                let _liveMes = null;
+                if (currentSnapshotMesIdx >= 0) {
+                    try { _liveMes = SillyTavern.getContext()?.chat?.[currentSnapshotMesIdx]?.mes || null; } catch {}
+                }
+                const _tipParts = resolveReplyTokenTipParts({
+                    narrativeTokens: _meta.narrativeTokens,
+                    trackerTokens: _meta.trackerTokens,
+                    completionTokens: _mTokens,
+                    liveMes: _liveMes,
+                });
+                if (_tipParts) {
+                    _outTitle = [
+                        t('Estimated reply tokens (narrative + tracker)'),
+                        t('{n} — narrative,', { n: _tipParts.narrativeTokens.toLocaleString() }),
+                        t('{n} — tracker JSON.', { n: _tipParts.trackerTokens.toLocaleString() }),
+                    ].join('\n');
+                } else {
+                    _outTitle = t('Estimated reply tokens (narrative + tracker)');
+                }
+            } else {
+                _outTitle = t('Tracker data tokens only (excludes narrative)');
+            }
+            fhtml+=`<span title="${esc(_outTitle)}" class="sp-gen-badge-tracker">${_outLabel}: ~${_mTokens.toLocaleString()}</span>`;
+        }
+        // ScenePulse Together context footprint — always visible (not under •••).
+        // Historical: from snapshot meta even if current UI mode is Separate.
+        // Runtime: only when chat/message/swipe match the metrics owner.
+        {
+            const _fp = resolveSpContextFootprint(_meta);
+            if (_fp?.totalInput > 0) fhtml += _spContextBadgeHtml(_fp);
+        }
         // Delta savings indicator (read from snapshot metadata for historical nodes, fallback to current session)
         const _deltaPct=_meta.deltaSavings||_lastDeltaSavings||0;
         if(_deltaPct>0&&(_meta.deltaMode||s.deltaMode)){
@@ -1444,8 +1574,6 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const _saved=_fullEst-_mTokens;
             fhtml+=`<span title="${t('Delta mode saved')} ~${_saved} ${t('tokens')} (${t('full output would be')} ~${_fullEst} ${t('tokens')})" class="sp-gen-badge-delta"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M7 2v10M4 5l3-3 3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> -${pct}%</span>`;
         }
-        // Session cumulative tokens
-        if(_sessionTokensUsed>0)fhtml+=`<span title="${t('Session total tokens')}" class="sp-gen-badge-session">\u03A3 ${_sessionTokensUsed>1000?(_sessionTokensUsed/1000).toFixed(1)+'k':_sessionTokensUsed}</span>`;
         // Inspect payload button
         if(currentSnapshotMesIdx>=0)fhtml+=`<span class="sp-gen-inspect" title="${t('Inspect')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M9.5 1.5h3v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 1.5L8 6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M7 2H2.5a1 1 0 0 0-1 1v8.5a1 1 0 0 0 1 1H11a1 1 0 0 0 1-1V7" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg> ${t('Inspect')}</span>`;
         // v6.16.1: Debug Inspector shortcut alongside Inspect/Analytics so users
@@ -1458,7 +1586,10 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         fhtml+=`<span class="sp-gen-analytics" title="${t('Token analytics')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><rect x="1.5" y="8" width="2" height="4.5" rx="0.4" fill="currentColor" opacity="0.4"/><rect x="4.5" y="5.5" width="2" height="7" rx="0.4" fill="currentColor" opacity="0.5"/><rect x="7.5" y="3" width="2" height="9.5" rx="0.4" fill="currentColor" opacity="0.6"/><rect x="10.5" y="1" width="2" height="11.5" rx="0.4" fill="currentColor" opacity="0.7"/></svg> ${t('Analytics')}</span>`;
         footer.innerHTML=fhtml;
         for(const item of footer.querySelectorAll(':scope > span')){
-            if(!item.classList.contains('sp-gen-badge-profile')&&!item.classList.contains('sp-gen-summary')&&!item.classList.contains('sp-gen-badge-mode'))item.classList.add('sp-gen-detail');
+            if(!item.classList.contains('sp-gen-badge-profile')
+                &&!item.classList.contains('sp-gen-summary')
+                &&!item.classList.contains('sp-gen-badge-mode')
+                &&!item.classList.contains('sp-gen-badge-sp-context'))item.classList.add('sp-gen-detail');
         }
         if(footer.querySelector('.sp-gen-detail')){
             const diagnostics=document.createElement('button');diagnostics.className='sp-gen-more';diagnostics.type='button';
@@ -1521,7 +1652,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     } catch(_renderErr) {
         // Error boundary: restore previous panel content on failure
         log('ERROR updatePanel render failed — restoring previous content:', _renderErr?.message||_renderErr);
-        console.error('[ScenePulse] updatePanel render error:', _renderErr);
+        err('updatePanel render error:', _renderErr);
         if(body&&_prevContent){body.innerHTML=_prevContent}
     }
 }

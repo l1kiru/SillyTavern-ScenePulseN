@@ -1,6 +1,8 @@
 // One bounded request path for separate tracker generation.
 
 import { applyPromptRole } from '../prompts/role.js';
+import { suspendPromptInjection, restorePromptInjection } from './prompt-injection.js';
+import { getActivePromptInjectionRun } from '../state.js';
 
 const MIN_OUTPUT={full:4096,delta:2048,section:2048};
 const MAX_OUTPUT=8192;
@@ -45,22 +47,36 @@ export function correctiveInstruction(code,errors=[]){
 export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true,stopStOnAbort=true}){
     const routed=applyPromptRole({systemPrompt,prompt});
     let stopped=false;
-    const stop=()=>{
+    let abortReject=null;
+    const abortError=()=>signal?.reason||new DOMException('Aborted','AbortError');
+    const abortPromise=signal
+        ? new Promise((_,rej)=>{abortReject=rej;})
+        : null;
+    const onAbort=()=>{
         if(stopped)return;stopped=true;
-        if(stopStOnAbort===false)return;
-        try{if(typeof stContext.stopGeneration==='function')stContext.stopGeneration()}catch{}
+        if(stopStOnAbort!==false){
+            try{if(typeof stContext.stopGeneration==='function')stContext.stopGeneration()}catch{}
+        }
+        try{abortReject?.(abortError())}catch{}
     };
-    const throwIfAborted=()=>{if(signal?.aborted)throw signal.reason||new DOMException('Aborted','AbortError')};
+    const throwIfAborted=()=>{if(signal?.aborted)throw abortError()};
     throwIfAborted();
-    signal?.addEventListener?.('abort',stop,{once:true});
-    try{
+    if(signal?.aborted)onAbort();
+    else signal?.addEventListener?.('abort',onAbort,{once:true});
+    const run=async()=>{
         if(typeof stContext.generateQuietPrompt==='function'){
-            const value=await stContext.generateQuietPrompt({
-                quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
-                skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
-            });
-            throwIfAborted();
-            return{value,strategy:'quiet'};
+            const hadInjection=!!getActivePromptInjectionRun();
+            if(hadInjection)suspendPromptInjection();
+            try{
+                const value=await stContext.generateQuietPrompt({
+                    quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
+                    skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
+                });
+                throwIfAborted();
+                return{value,strategy:'quiet'};
+            }finally{
+                if(hadInjection)restorePromptInjection();
+            }
         }
         if(typeof stContext.generateRawData==='function'){
             const value=await stContext.generateRawData({
@@ -79,7 +95,11 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
             return{value,strategy:'raw'};
         }
         throw new Error('SillyTavern exposes no supported generation API');
+    };
+    try{
+        if(abortPromise)return await Promise.race([run(),abortPromise]);
+        return await run();
     }finally{
-        signal?.removeEventListener?.('abort',stop);
+        signal?.removeEventListener?.('abort',onAbort);
     }
 }

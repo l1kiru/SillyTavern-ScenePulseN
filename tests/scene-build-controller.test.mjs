@@ -64,8 +64,9 @@ assertTrue('cancelled not current', !ctrl.isOperationCurrent(b.operationId));
 
 const s0 = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'together', chatKey });
 const s1 = ctrl.startSceneBuild({ messageId: 1, swipeId: 1, source: 'together', chatKey });
-ctrl.supersedeSceneBuildsForMessageExceptSwipe(1, 1, chatKey);
+const supersededN = ctrl.supersedeSceneBuildsForMessageExceptSwipe(1, 1, chatKey);
 eq('other swipe superseded', ctrl.getSceneBuild(s0.operationId)?.status, 'superseded');
+assertTrue('supersede returns count', supersededN >= 1);
 assertTrue('kept swipe still active', ctrl.isOperationCurrent(s1.operationId));
 
 const c1 = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual', chatKey: 'chat-old' });
@@ -106,6 +107,46 @@ fakeNow += ctrl.SCENE_BUILD_EXPIRED_MS + 5;
 busy.updatedAt = fakeNow - ctrl.SCENE_BUILD_EXPIRED_MS - 1;
 ctrl.tickSceneBuildWatchdog();
 eq('no expire while request in flight', ctrl.getSceneBuild(busy.operationId)?.status, 'generating');
+
+ctrl._resetSceneBuildRegistryForTests();
+fakeNow = 3_000_000;
+ctrl._setSceneBuildStGenerating(() => true);
+const hungSave = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual', chatKey });
+ctrl.updateSceneBuild(hungSave.operationId, { status: 'saving', requestInFlight: true });
+fakeNow += ctrl.SCENE_BUILD_EXPIRED_MS + 5;
+ctrl.tickSceneBuildWatchdog();
+eq('saving expires despite busy flags', ctrl.getSceneBuild(hungSave.operationId)?.status, 'expired');
+ctrl._setSceneBuildStGenerating(() => false);
+
+ctrl._resetSceneBuildRegistryForTests();
+const activeDismiss = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual', chatKey });
+const reasons = [];
+const unsub = ctrl.subscribeSceneBuild((op, reason) => reasons.push(reason));
+ctrl.dismissSceneBuild(activeDismiss.operationId, 'dismiss');
+unsub();
+assertTrue('dismiss removes active op', !ctrl.getSceneBuild(activeDismiss.operationId));
+assertTrue('dismiss does not emit cancelled', !reasons.includes('cancelled') && !reasons.includes('settle'));
+eq('dismiss emits once', reasons.filter(r => r === 'dismiss').length, 1);
+
+ctrl._resetSceneBuildRegistryForTests();
+const term = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual', chatKey: 'chat-wipe' });
+ctrl.settleSceneBuild(term.operationId, 'ready');
+const errOp = ctrl.startSceneBuild({ messageId: 2, swipeId: 0, source: 'manual', chatKey: 'chat-wipe' });
+ctrl.failSceneBuild(errOp.operationId, new Error('x'));
+ctrl.dismissSceneBuildsForChat('chat-wipe', 'message-deleted');
+eq('chat wipe clears terminals', ctrl.getAllSceneBuilds().filter(o => o.chatKey === 'chat-wipe').length, 0);
+
+ctrl._resetSceneBuildRegistryForTests();
+const pruneMe = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual', chatKey });
+ctrl.settleSceneBuild(pruneMe.operationId, 'ready');
+const pruneOp = ctrl.getSceneBuild(pruneMe.operationId);
+pruneOp.updatedAt = fakeNow - 200000;
+const pruneReasons = [];
+const unsubPrune = ctrl.subscribeSceneBuild((_, reason) => pruneReasons.push(reason));
+ctrl.pruneTerminalSceneBuilds(120000);
+unsubPrune();
+assertTrue('prune removes aged terminal', !ctrl.getSceneBuild(pruneMe.operationId));
+assertTrue('prune emits prune', pruneReasons.includes('prune'));
 
 ctrl._resetSceneBuildRegistryForTests();
 const tog = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'auto:together', chatKey });

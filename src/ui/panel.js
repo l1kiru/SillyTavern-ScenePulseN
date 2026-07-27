@@ -1,5 +1,5 @@
 // src/ui/panel.js — Side Panel Creation, Show/Hide, Toolbar Event Handling
-import { log, warn } from '../logger.js';
+import { log, warn, err } from '../logger.js';
 import { esc, str } from '../utils.js';
 import { t } from '../i18n.js';
 import { MASCOT_SVG, DEFAULTS, VERSION, BUILTIN_PANELS } from '../constants.js';
@@ -815,7 +815,7 @@ export function createPanel(){
         mgr.appendChild(cpActions);
 
         body.insertBefore(mgr,body.firstChild);
-        } catch(e) { console.error('[ScenePulse] Panel Manager failed to open:', e); btn.classList.remove('sp-tb-active'); return; }
+        } catch(e) { err('Panel Manager failed to open:', e); btn.classList.remove('sp-tb-active'); return; }
         // Sync feature dropdown with current dashCard/thoughts state
         const _dc2={...DEFAULTS.dashCards,...profileSettings.dashCards};const _ft2=profileSettings.fieldToggles||{};
         const wxItem=document.getElementById('sp-feat-weather');

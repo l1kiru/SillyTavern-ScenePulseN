@@ -342,15 +342,17 @@ You can also take a **Guided Tour** to explore every feature with example data.
 
 ScenePulse operates in **Together mode** by default:
 
-1. A tracker prompt is injected into the AI's context via SillyTavern's interceptor
-2. The AI writes its normal narrative response, then appends a JSON block wrapped in `<!--SP_TRACKER_START-->` / `<!--SP_TRACKER_END-->` markers
-3. ScenePulse extracts the JSON, strips it from the visible message, and updates the dashboard
-4. A **regex filter** (`markdownOnly: true`) strips tracker JSON from the DOM during markdown rendering — preventing the payload from ever being visible during streaming
-5. A **streaming hider** (MutationObserver + 20ms polling) provides a CSS fallback layer
-6. Malformed JSON is automatically repaired by the vendored [`jsonrepair`](src/vendor/) library (handles trailing commas, unquoted keys, unescaped quotes inside strings, single-quoted values, Python literals, comments, markdown fences, and ~20 other common LLM JSON errors via a tokenizer-based parser)
-7. Post-extraction **schema validation** warns about missing fields or invalid enum values
+1. A tracker prompt is registered as SillyTavern extension prompts (`IN_PROMPT` main + short `IN_CHAT` tail) via `PromptInjectionPlan` — not by splicing messages into `chat`
+2. Before the request is sent, ScenePulse verifies the instruction is still intact in the last frontend payload (Text: `GENERATE_AFTER_DATA`, Chat: `CHAT_COMPLETION_SETTINGS_READY`)
+3. The AI writes its normal narrative response, then appends a JSON block wrapped in `<!--SP_TRACKER_START-->` / `<!--SP_TRACKER_END-->` markers
+4. ScenePulse extracts the JSON, strips it from the visible message, and updates the dashboard
+5. The footer shows a verified **SP Context** input footprint for that Together run (historical snapshots keep their own value)
+6. A **regex filter** (`markdownOnly: true`) strips tracker JSON from the DOM during markdown rendering — preventing the payload from ever being visible during streaming
+7. A **streaming hider** (MutationObserver + 20ms polling) provides a CSS fallback layer
+8. Malformed JSON is automatically repaired by the vendored [`jsonrepair`](src/vendor/) library (handles trailing commas, unquoted keys, unescaped quotes inside strings, single-quoted values, Python literals, comments, markdown fences, and ~20 other common LLM JSON errors via a tokenizer-based parser)
+9. Post-extraction **schema validation** warns about missing fields or invalid enum values
 
-If the AI omits the tracker, ScenePulse can **automatically fall back** to a separate API call using a dedicated connection profile.
+If the AI omits the tracker, ScenePulse can **automatically fall back** to a separate API call using a dedicated connection profile. Prompt size / integrity failures do **not** trigger that fallback — they stop before the network request.
 
 ### Separate Mode
 Alternatively, ScenePulse can run a completely separate quiet API call after each message — useful for models that struggle with inline instructions.
@@ -395,7 +397,8 @@ src/
     engine.js               ← Generation engine with retry/fallback
     request.js              ← Tracker request transport
     delta-merge.js          ← Delta response merging
-    interceptor.js          ← SillyTavern generate interceptor
+    interceptor.js          ← SillyTavern generate interceptor (starts PromptInjectionPlan)
+    prompt-injection.js     ← Together extension-prompt plan, integrity, footprint
     pipeline.js             ← Shared extraction→normalize→save→update pipeline
     validation.js           ← Post-extraction schema validation
     st-watchdog.js          ← ST generation-stopped / stall recovery
@@ -470,7 +473,7 @@ Access settings via **Extensions** → **ScenePulse** in SillyTavern's settings 
 | **Language** | UI + LLM output language (29 options, auto-detect). Russian UI is complete; other locales are partial with English fallback |
 | **Theme** | Visual theme preset (6 options: Default, SillyTavern, Midnight, Fantasy, Cyberpunk, Minimal) |
 | **Font scale** | Adjust text size (0.7x–1.5x) |
-| **Experimental** *(Advanced tab)* | NPC relationship graph, weather overlay effects, time-of-day ambience. Scene Source Trace lives on the `experemental` branch only — not on `main` |
+| **Experimental** *(Advanced tab)* | NPC relationship graph, weather overlay effects, time-of-day ambience. Scene Source Trace lives on the `experimental` branch only — not on `main` |
 
 Delta mode is always on by default (since v6.9.0) and is **not** a General-tab checkbox. Use `/sp-refresh` if snapshot data looks stale.
 
@@ -525,7 +528,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.9** - Scene Source Trace footer `Lore N` chip with matched-key drawer (Together mode).
+**Latest: v7.1.13** - Scene-build badge lifecycle: dismiss removes controller state, absolute deadlines, chat/swipe wipe, hung saving expire.
 
 ## Contributing
 

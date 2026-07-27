@@ -40,7 +40,8 @@ const CONFIG_SCALAR_KEYS = new Set([
     'injectionMethod', 'deltaMode', 'language', 'theme', 'fontScale',
     'contextMessages', 'maxRetries', 'promptMode', 'embedSnapshots',
     'embedRole', 'autoGenerate', 'showThoughts', 'showEmptyFields',
-    'sceneTransitions', 'openSections',
+    'sceneTransitions', 'sceneSourceTrace', 'sceneSourceTraceDiagnostics',
+    'consoleDebug', 'openSections',
 ]);
 const PROFILE_CONFIG_KEYS = new Set(['panels', 'fieldToggles', 'dashCards', 'customPanels']);
 
@@ -294,6 +295,9 @@ export function validateImportedConfigSettings(raw) {
     }
     if (Object.hasOwn(raw, 'fieldToggles')) {
         profilePatch.fieldToggles = _cleanFieldToggleMap(raw.fieldToggles, errors);
+    }
+    if (Object.hasOwn(raw, 'trackerPromptStyle')) {
+        profilePatch.trackerPromptStyle = normalizeTrackerPromptStyle(raw.trackerPromptStyle);
     }
 
     for (const [key, value] of Object.entries(raw)) {

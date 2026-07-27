@@ -4,6 +4,7 @@
 import { getTrackerData } from '../settings.js';
 import { t } from '../i18n.js';
 import { esc } from '../utils.js';
+import { log, warn, err } from '../logger.js';
 
 /**
  * Highlight a message element with glow, pulse, and graceful fade — driven by JS to bypass CSS overrides.
@@ -59,46 +60,46 @@ export function _highlightMessage(el) {
  */
 export async function _scrollToMessage(mesIdx) {
     try {
-        console.log('[ScenePulse] scrollToMessage: target mesIdx=', mesIdx);
+        log('scrollToMessage: target mesIdx=', mesIdx);
 
         // Step 1: Check if element already in DOM
         let mesEl = document.querySelector(`.mes[mesid="${mesIdx}"]`);
-        console.log('[ScenePulse] scrollToMessage: element in DOM?', !!mesEl);
+        log('scrollToMessage: element in DOM?', !!mesEl);
 
         // Step 2: If not in DOM, load via showMoreMessages
         if (!mesEl) {
             const allMes = document.querySelectorAll('#chat .mes');
             const firstId = allMes.length ? Number(allMes[0].getAttribute('mesid')) : -1;
-            console.log('[ScenePulse] scrollToMessage: firstDisplayedId=', firstId, 'total in DOM=', allMes.length);
+            log('scrollToMessage: firstDisplayedId=', firstId, 'total in DOM=', allMes.length);
 
             if (firstId > mesIdx) {
                 const needed = firstId - mesIdx + 5;
-                console.log('[ScenePulse] scrollToMessage: need to load', needed, 'more messages');
+                log('scrollToMessage: need to load', needed, 'more messages');
                 try {
                     const stScript = await import('/script.js');
-                    console.log('[ScenePulse] scrollToMessage: showMoreMessages available?', !!stScript.showMoreMessages);
+                    log('scrollToMessage: showMoreMessages available?', !!stScript.showMoreMessages);
                     await stScript.showMoreMessages(needed);
                     await new Promise(r => setTimeout(r, 500));
                 } catch (e) {
-                    console.warn('[ScenePulse] scrollToMessage: showMoreMessages failed:', e);
+                    warn('scrollToMessage: showMoreMessages failed:', e);
                     // Fallback: click button
                     for (let i = 0; i < 20; i++) {
                         const btn = document.getElementById('show_more_messages');
-                        if (!btn) { console.log('[ScenePulse] scrollToMessage: no more button, stopping at attempt', i); break; }
+                        if (!btn) { log('scrollToMessage: no more button, stopping at attempt', i); break; }
                         btn.click();
                         await new Promise(r => setTimeout(r, 500));
                         if (document.querySelector(`.mes[mesid="${mesIdx}"]`)) break;
                     }
                 }
                 mesEl = document.querySelector(`.mes[mesid="${mesIdx}"]`);
-                console.log('[ScenePulse] scrollToMessage: after loading, element in DOM?', !!mesEl);
+                log('scrollToMessage: after loading, element in DOM?', !!mesEl);
             }
         }
 
         if (!mesEl) {
             // Check total chat length
             const ctx = SillyTavern.getContext();
-            console.warn('[ScenePulse] scrollToMessage: FAILED. mesIdx=', mesIdx, 'chat.length=', ctx.chat?.length, 'chat[mesIdx] exists?', !!ctx.chat?.[mesIdx]);
+            warn('scrollToMessage: FAILED. mesIdx=', mesIdx, 'chat.length=', ctx.chat?.length, 'chat[mesIdx] exists?', !!ctx.chat?.[mesIdx]);
             toastr.warning(`Message #${mesIdx} could not be found`, 'ScenePulse', { timeOut: 4000 });
             return;
         }
@@ -109,14 +110,14 @@ export async function _scrollToMessage(mesIdx) {
             const elRect = mesEl.getBoundingClientRect();
             const containerRect = chatContainer.getBoundingClientRect();
             const scrollTarget = elRect.top - containerRect.top + chatContainer.scrollTop - 60;
-            console.log('[ScenePulse] scrollToMessage: scrolling chat container to', scrollTarget);
+            log('scrollToMessage: scrolling chat container to', scrollTarget);
             chatContainer.scrollTo({ top: scrollTarget, behavior: 'smooth' });
         }
 
         _highlightMessage(mesEl);
-        console.log('[ScenePulse] scrollToMessage: SUCCESS for mesIdx=', mesIdx);
+        log('scrollToMessage: SUCCESS for mesIdx=', mesIdx);
     } catch (e) {
-        console.error('[ScenePulse] scrollToMessage error:', e);
+        err('scrollToMessage error:', e);
     }
 }
 

@@ -51,6 +51,57 @@ export function promptRoleFlags(role) {
 }
 
 /**
+ * Map a ScenePulse role string to SillyTavern extension_prompt_roles.
+ * Prefer live ST enums from context; fall back to numeric 0/1/2.
+ *
+ * @param {'system'|'user'|'assistant'} role
+ * @returns {number}
+ */
+export function toExtensionPromptRole(role) {
+    let roles = null;
+    try {
+        roles = SillyTavern.getContext()?.extension_prompt_roles
+            || SillyTavern.getContext()?.extensionPromptRoles
+            || null;
+    } catch {}
+    if (roles && typeof roles === 'object') {
+        if (role === 'user' && roles.USER != null) return Number(roles.USER);
+        if (role === 'assistant' && roles.ASSISTANT != null) return Number(roles.ASSISTANT);
+        if (roles.SYSTEM != null) return Number(roles.SYSTEM);
+    }
+    if (role === 'user') return 1;
+    if (role === 'assistant') return 2;
+    return 0;
+}
+
+/** Normalize ST message role (string or extension_prompt_roles number) → name. */
+export function normalizePromptRoleName(role) {
+    if (role === 0 || role === '0' || role === 'system' || role === 'SYSTEM') return 'system';
+    if (role === 1 || role === '1' || role === 'user' || role === 'USER') return 'user';
+    if (role === 2 || role === '2' || role === 'assistant' || role === 'ASSISTANT') return 'assistant';
+    if (typeof role === 'string') {
+        const r = role.toLowerCase();
+        if (r === 'system' || r === 'user' || r === 'assistant') return r;
+    }
+    return null;
+}
+
+/**
+ * Allowlisted ST role rewrites (e.g. o1 system→user). Anything else is SP_PROMPT_ROLE_MISMATCH.
+ * @param {string|null} registered
+ * @param {string|null} effective
+ */
+export function isAllowedRoleTransition(registered, effective) {
+    const from = normalizePromptRoleName(registered);
+    const to = normalizePromptRoleName(effective);
+    if (!from || !to) return false;
+    if (from === to) return true;
+    // Known SillyTavern / provider rewrite for reasoning models.
+    if (from === 'system' && to === 'user') return true;
+    return false;
+}
+
+/**
  * Apply the active profile's role to a {systemPrompt, prompt} pair before
  * sending to generateRaw.
  *

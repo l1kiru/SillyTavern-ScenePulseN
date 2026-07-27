@@ -2,6 +2,46 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.13] — 2026-07-27
+
+#### Fixed — Scene-build badge lifecycle
+
+- Ready/cancelled dismiss now removes the controller op (not only DOM), using an absolute deadline so background-tab timer delay cannot remount a stale “Scene ready” badge.
+- Owner (chat + active swipe) is gated on every UI path; sibling stubs hide DOM only and keep their dismiss timers.
+- `MESSAGE_DELETED` / `MESSAGE_SWIPE_DELETED` / `CHAT_CHANGED` wipe ephemeral scene-build ops synchronously in `index.js` before queued snapshot work.
+- Watchdog expires hung `saving` even with stuck busy flags; Together pipeline failures fail the op and rethrow.
+
+### [7.1.12] — 2026-07-27
+
+#### Fixed — Together / Scene Source Trace / config round-trip
+
+- Together framing no longer claims the tracker is free of response length limits; it tells the model to reserve shared output budget for the tracker JSON.
+- Expected swipe rebind also retargets the active `PromptInjectionPlan` and last runtime metrics, so historical SP Context metadata survives swipe N→N+1.
+- Diagnostic console uninstall restores `console.log`/`debug` only when ScenePulse still owns the slot, so later extension wrappers are not wiped.
+- Lore key highlight prefers capture-time `scanContext.messageIds` (now persisted on finish); live chat-tail scan remains fallback for older traces.
+- Multi-word whole-word inferred matching requires phrase boundaries (e.g. `red dragon` no longer matches inside `bred dragons`).
+- General Export/Import Config round-trips `sceneSourceTrace`, `sceneSourceTraceDiagnostics`, and active-profile `trackerPromptStyle`.
+- Docs: correct branch name `experimental` (was misspelled `experemental`).
+
+### [7.1.11] — 2026-07-26
+
+#### Fixed — PromptInjectionPlan Chat Completion + lifecycle
+
+- Read SillyTavern `CHAT_COMPLETION_PROMPT_READY` payloads from `{ chat: [...] }` so Chat Completion materialize/verify no longer aborts as unreadable.
+- Authority handlers are apiKind-gated and awaitable; dry-run (event flag or second listener arg) never commits metrics; Text/Chat authorities are mutually exclusive and verify once per request.
+- Foreign quiet/raw prompts without SP markers return `SP_PROMPT_NOT_OURS` (ignore) instead of aborting an active Together run.
+- Footprint token count includes integrity markers; footer can refresh the SP Context badge from runtime metrics after verify even when no snapshot exists yet.
+- Snapshot `_spMeta.promptInjection` only attaches when plan/runtime metrics owner-match the saved message; swipe-recover no longer inherits stale runtime metrics.
+
+### [7.1.10] — 2026-07-26
+
+#### Added — PromptInjectionPlan (Together delivery)
+
+- Together mode registers the tracker instruction via SillyTavern `setExtensionPrompt` (`IN_PROMPT` main + `IN_CHAT` depth-0 tail) instead of mutating `chat` with `unshift`/`splice`/`push`.
+- Run + request scoped integrity: trust-then-materialize digests, authoritative checks on `GENERATE_AFTER_DATA` (Text) and `CHAT_COMPLETION_SETTINGS_READY` (Chat) with `makeLast` reposition per run.
+- Verified ScenePulse context footprint in the generation footer (`SP Context` badge, always visible) and Debug Inspector; historical snapshots keep their own metadata even when the UI mode is Separate.
+- Frozen `requestSchema` / `deltaMode` / `baseSnapshot` for Together extraction; owner-aware cleanup; quiet suspend/restore; no token budget abort or Separate fallback for size/integrity failures (Tier-2 after broken tracker output is unchanged).
+
 ### [7.1.9] — 2026-07-25
 
 #### Changed — Scene Source Trace UX
@@ -71,7 +111,7 @@ All notable changes to ScenePulse are documented in this file.
 
 #### Changed — Mainline rollback
 
-- Move Scene Source Trace work to the `experemental` branch.
+- Move Scene Source Trace work to the `experimental` branch.
 - Remove Scene Source Trace capture, settings, UI, CSS, and tests from `main` while keeping the other 7.1 mobile, settings, and greeting-only generation changes.
 
 ### [7.1.1] — 2026-07-23

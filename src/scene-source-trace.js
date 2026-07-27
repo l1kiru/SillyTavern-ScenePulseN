@@ -487,6 +487,7 @@ function _emptyTrace(owner = null) {
         startedAt: '',
         settings: {},
         owner: owner || { chatKey: '', messageId: null, swipeId: null },
+        scanContext: { messageIds: [] },
         lorebooks: [],
         loadedEntryKeys: [],
         candidates: [],
@@ -736,6 +737,12 @@ export function finishSceneSourceTrace(owner, { forceEmpty = false } = {}) {
         startedAt: trace.startedAt || '',
         settings,
         owner: trace.owner || { chatKey: '', messageId: null, swipeId: null },
+        // Slim capture window for historical key highlight (no frozen texts/buffer).
+        scanContext: {
+            messageIds: Array.isArray(trace.scanContext?.messageIds)
+                ? trace.scanContext.messageIds.slice()
+                : [],
+        },
         lorebooks: Array.isArray(trace.lorebooks) ? trace.lorebooks : [],
         loadedEntryKeys: Array.isArray(trace.loadedEntryKeys) ? trace.loadedEntryKeys.slice() : [],
         candidates: candidatesOut,
