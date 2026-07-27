@@ -26,6 +26,7 @@ import {
     const calls = [];
     const orig = console.debug;
     console.debug = (...args) => { calls.push(args); };
+    const base = console.debug;
     const uninstall = installConsoleIntercept({
         onDebug: (args) => { seen.push(args); throw new Error('listener boom'); },
     });
@@ -33,6 +34,29 @@ import {
     assert.equal(calls.length, 1);
     assert.equal(seen.length, 1);
     uninstall();
+    assert.equal(console.debug, base);
+    console.debug = orig;
+}
+
+{
+    // Later extension wraps after ScenePulse — uninstall must not clobber it.
+    const chain = [];
+    const orig = console.debug;
+    console.debug = (...args) => { chain.push('base'); };
+    const uninstall = installConsoleIntercept({
+        onDebug: () => { chain.push('sp'); },
+    });
+    const spWrapper = console.debug;
+    const foreignWrapper = (...args) => {
+        chain.push('foreign');
+        return spWrapper.apply(console, args);
+    };
+    console.debug = foreignWrapper;
+    uninstall();
+    assert.equal(console.debug, foreignWrapper);
+    chain.length = 0;
+    console.debug('[WI] after');
+    assert.deepEqual(chain, ['foreign', 'sp', 'base']);
     console.debug = orig;
 }
 

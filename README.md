@@ -473,7 +473,7 @@ Access settings via **Extensions** → **ScenePulse** in SillyTavern's settings 
 | **Language** | UI + LLM output language (29 options, auto-detect). Russian UI is complete; other locales are partial with English fallback |
 | **Theme** | Visual theme preset (6 options: Default, SillyTavern, Midnight, Fantasy, Cyberpunk, Minimal) |
 | **Font scale** | Adjust text size (0.7x–1.5x) |
-| **Experimental** *(Advanced tab)* | NPC relationship graph, weather overlay effects, time-of-day ambience. Scene Source Trace lives on the `experemental` branch only — not on `main` |
+| **Experimental** *(Advanced tab)* | NPC relationship graph, weather overlay effects, time-of-day ambience. Scene Source Trace lives on the `experimental` branch only — not on `main` |
 
 Delta mode is always on by default (since v6.9.0) and is **not** a General-tab checkbox. Use `/sp-refresh` if snapshot data looks stale.
 
@@ -528,7 +528,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.11** - PromptInjectionPlan Chat Completion fix, foreign-request ignore, marker-aware footprint, owner-safe snapshot meta.
+**Latest: v7.1.12** - Together swipe SP Context rebind, capture-time lore highlight, config export of new settings, prompt/budget and matcher fixes.
 
 ## Contributing
 

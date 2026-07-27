@@ -2,6 +2,18 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.12] — 2026-07-27
+
+#### Fixed — Together / Scene Source Trace / config round-trip
+
+- Together framing no longer claims the tracker is free of response length limits; it tells the model to reserve shared output budget for the tracker JSON.
+- Expected swipe rebind also retargets the active `PromptInjectionPlan` and last runtime metrics, so historical SP Context metadata survives swipe N→N+1.
+- Diagnostic console uninstall restores `console.log`/`debug` only when ScenePulse still owns the slot, so later extension wrappers are not wiped.
+- Lore key highlight prefers capture-time `scanContext.messageIds` (now persisted on finish); live chat-tail scan remains fallback for older traces.
+- Multi-word whole-word inferred matching requires phrase boundaries (e.g. `red dragon` no longer matches inside `bred dragons`).
+- General Export/Import Config round-trips `sceneSourceTrace`, `sceneSourceTraceDiagnostics`, and active-profile `trackerPromptStyle`.
+- Docs: correct branch name `experimental` (was misspelled `experemental`).
+
 ### [7.1.11] — 2026-07-26
 
 #### Fixed — PromptInjectionPlan Chat Completion + lifecycle
@@ -90,7 +102,7 @@ All notable changes to ScenePulse are documented in this file.
 
 #### Changed — Mainline rollback
 
-- Move Scene Source Trace work to the `experemental` branch.
+- Move Scene Source Trace work to the `experimental` branch.
 - Remove Scene Source Trace capture, settings, UI, CSS, and tests from `main` while keeping the other 7.1 mobile, settings, and greeting-only generation changes.
 
 ### [7.1.1] — 2026-07-23

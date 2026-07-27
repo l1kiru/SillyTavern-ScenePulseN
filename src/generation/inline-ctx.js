@@ -9,6 +9,7 @@ import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '.
 import { setInlineGenerationContext } from '../state.js';
 import { rebindSceneBuildSwipe } from './scene-build-controller.js';
 import { rebindSceneSourceTraceOwner } from '../scene-source-trace.js';
+import { rebindPromptInjectionOwner } from './prompt-injection.js';
 
 /**
  * @param {object|null|undefined} ctx - inlineGenerationContext
@@ -40,6 +41,7 @@ export function rebindInlineCtxForExpectedSwipe(ctx, targetIdx) {
     if (next.sceneBuildOperationId) {
         rebindSceneBuildSwipe(next.sceneBuildOperationId, active);
     }
+    try { rebindPromptInjectionOwner(next.owner); } catch {}
     try { rebindSceneSourceTraceOwner(next.owner); } catch {}
     log('InlineCtx: rebound swipe', frozen, '→', active, 'type=', type || '(none)', 'mesIdx=', targetIdx);
     return next;

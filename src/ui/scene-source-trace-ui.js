@@ -96,8 +96,14 @@ function _attachmentLabel(sources) {
     return sources.map(s => map[s] || s).join(', ');
 }
 
+function _scanMessageIds(view, trace) {
+    const raw = view?.scanContext?.messageIds ?? trace?.scanContext?.messageIds;
+    if (!Array.isArray(raw)) return [];
+    return raw.map(id => Number(id)).filter(id => Number.isFinite(id));
+}
+
 /**
- * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array, omitted: number, timeline: Array, budgetOverflowed: boolean }}
+ * @returns {{ chip: string|null, capturedAt: string, emptyKey: string|null, groups: Array, omitted: number, timeline: Array, budgetOverflowed: boolean, scanMessageIds: number[] }}
  */
 export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null, groupBy = 'world' } = {}) {
     const chip = formatLoreChipLabel({ settings, meta, trace });
@@ -114,21 +120,22 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null, 
     const lorebookByName = new Map(
         (Array.isArray(view?.lorebooks) ? view.lorebooks : []).map(b => [b.name || b.id, b]),
     );
+    const scanMessageIds = _scanMessageIds(view, trace);
 
     const capsEmpty = _defaultCapabilities(view);
     if (chip == null) {
-        return { chip: null, capturedAt: '', emptyKey: null, groups: [], omitted: 0, timeline: [], budgetOverflowed: false, capabilities: capsEmpty };
+        return { chip: null, capturedAt: '', emptyKey: null, groups: [], omitted: 0, timeline: [], budgetOverflowed: false, capabilities: capsEmpty, scanMessageIds: [] };
     }
     const mode = _mode(meta, settings);
     if (mode !== 'inline') {
-        return { chip, capturedAt, emptyKey: 'together_only', groups: [], omitted: 0, timeline: [], budgetOverflowed, capabilities: capsEmpty };
+        return { chip, capturedAt, emptyKey: 'together_only', groups: [], omitted: 0, timeline: [], budgetOverflowed, capabilities: capsEmpty, scanMessageIds };
     }
     if (!trace) {
-        return { chip, capturedAt: '', emptyKey: 'no_capture', groups: [], omitted: 0, timeline: [], budgetOverflowed, capabilities: capsEmpty };
+        return { chip, capturedAt: '', emptyKey: 'no_capture', groups: [], omitted: 0, timeline: [], budgetOverflowed, capabilities: capsEmpty, scanMessageIds: [] };
     }
     const entries = Array.isArray(view?.lorebook?.entries) ? view.lorebook.entries : [];
     if (!entries.length) {
-        return { chip, capturedAt, emptyKey: 'no_activations', groups: [], omitted, timeline, budgetOverflowed, capabilities: capsEmpty };
+        return { chip, capturedAt, emptyKey: 'no_activations', groups: [], omitted, timeline, budgetOverflowed, capabilities: capsEmpty, scanMessageIds };
     }
     const items = entries.map(entry => {
         const matchKind = String(entry.matchKind || (entry.constant ? 'constant' : 'none'));
@@ -178,6 +185,7 @@ export function buildTraceDrawerModel({ settings = {}, meta = {}, trace = null, 
         budgetOverflowed,
         groupBy,
         capabilities,
+        scanMessageIds,
     };
 }
 
@@ -217,6 +225,7 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
     drawer.className = 'sp-source-trace-drawer';
     drawer.hidden = true;
     drawer.setAttribute('aria-label', t('Scene source trace'));
+    drawer.setAttribute('data-scan-message-ids', JSON.stringify(model.scanMessageIds || []));
 
     let html = '';
     if (model.capturedAt) {
@@ -272,7 +281,9 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
         let keys = [];
         try { keys = JSON.parse(entry.getAttribute('data-matched-keys') || '[]'); } catch { keys = []; }
         if (!Array.isArray(keys) || !keys.length) return;
-        try { highlightMatchedKeysInChat(keys); } catch { /* ignore */ }
+        let messageIds = [];
+        try { messageIds = JSON.parse(drawer.getAttribute('data-scan-message-ids') || '[]'); } catch { messageIds = []; }
+        try { highlightMatchedKeysInChat(keys, { messageIds }); } catch { /* ignore */ }
     };
     if (typeof drawer.addEventListener === 'function') drawer.addEventListener('click', onEntryClick);
     else drawer.onclick = onEntryClick;
