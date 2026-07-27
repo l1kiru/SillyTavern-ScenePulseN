@@ -1,12 +1,28 @@
 // ScenePulse — Custom Panels Module
 // Extracted from index.js lines 4969-5130
 
-import { ensureChatPanels, saveChatPanels } from '../settings.js';
-import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
+import {
+    buildProfileView,
+    captureTrackerStructure,
+    ensureChatPanels,
+    getLatestSnapshot,
+    reconcileTrackerStructureChange,
+    saveChatPanels,
+} from '../settings.js';
+import {
+    customPanelScope,
+    customPanelSectionKey,
+    getActiveProfile,
+    isBuiltInCharacterFieldKey,
+    isValidCustomFieldKey,
+    validateActiveCustomPanelFields,
+} from '../profiles.js';
 import { esc, str, clamp, spConfirm } from '../utils.js';
 import { _cachedNormData } from '../state.js';
 import { buildDynamicSchema, buildDynamicPrompt } from '../schema.js';
 import { t } from '../i18n.js';
+import { updatePanel } from '../ui/update-panel.js';
+import { normalizeTracker } from '../normalize.js';
 
 function _findSection(panelBody,key){
     if(!panelBody)return null;
@@ -23,11 +39,26 @@ function _appendWarning(body,className,color,message){
     body.appendChild(warn);
 }
 
+function _commitPanelEdit(panels,edit){
+    const previous=captureTrackerStructure();
+    const candidate=structuredClone(panels);
+    edit(candidate);
+    const validation=validateActiveCustomPanelFields(candidate);
+    if(!validation.ok){
+        toastr.error(t('Panel change rejected: {error}',{error:validation.errors[0]}));
+        return false;
+    }
+    panels.splice(0,panels.length,...candidate);
+    reconcileTrackerStructureChange(previous);
+    saveChatPanels();
+    return true;
+}
+
 // v6.9.12: refreshCustomSection mirrors the upgraded rendering from
 // update-panel.js so live-refresh during panel editing shows the same
 // visual treatment (threshold meters, enum pills, list chips, etc.)
 export function refreshCustomSection(cp,panelBody){
-    if(!panelBody||!cp?.name)return;
+    if(!panelBody||!cp?.name||customPanelScope(cp)!=='global')return;
     const cpKey=customPanelSectionKey(cp.name);
     const existing=_findSection(panelBody,cpKey);
     if(!existing)return;
@@ -85,7 +116,7 @@ export function renderCustomPanelsMgr(s,container,panelBody){
     const infoRow=document.createElement('div');infoRow.style.cssText='display:flex;align-items:center;gap:6px;margin-bottom:6px';
     const infoBtn=document.createElement('button');infoBtn.className='sp-cp-info-btn';infoBtn.textContent='?';infoBtn.title=t('How custom panels work');
     const infoPopup=document.createElement('div');infoPopup.className='sp-cp-info-popup';
-    infoPopup.innerHTML=t('<b>Custom Panels</b> track any state the AI should monitor. Keys use <code>lowercase_snake_case</code>. The LLM hint describes the expected value. Fields support text, number, meter, list, and enum types. Drag the handle to reorder fields.');
+    infoPopup.innerHTML=t('<b>Custom Panels</b> track any state the AI should monitor. Choose Global to create a standalone panel, or Each Character to add the fields to every character card. Keys use <code>lowercase_snake_case</code>. The LLM hint describes the expected value. Fields support text, number, meter, list, and enum types. Drag the handle to reorder fields.');
     infoBtn.addEventListener('click',()=>infoPopup.classList.toggle('sp-visible'));
     infoRow.appendChild(infoBtn);
     const infoLabel=document.createElement('span');infoLabel.style.cssText='font-size:9px;color:var(--sp-text-dim);opacity:0.6';infoLabel.textContent=t('How custom panels work');
@@ -104,13 +135,19 @@ export function renderCustomPanelsMgr(s,container,panelBody){
         if(!cp||typeof cp!=='object')return;
         if(!Array.isArray(cp.fields))cp.fields=[];
         const card=document.createElement('div');card.className='sp-custom-panel-card';if(_openState[cpIdx]!==undefined?_openState[cpIdx]:true)card.classList.add('sp-cp-open');
-        const liveRefresh=()=>{refreshCustomSection(cp,panelBody);
+        const liveRefresh=(forceFull=false)=>{
+            if((forceFull||customPanelScope(cp)==='character')&&_cachedNormData){
+                const snapshot=getLatestSnapshot();
+                updatePanel(snapshot?normalizeTracker(snapshot):_cachedNormData,true);
+            }
+            else refreshCustomSection(cp,panelBody);
             // Auto-refresh schema/prompt when custom panel changes
             const schemaEl=document.getElementById('sp-schema');
             const promptEl=document.getElementById('sp-sysprompt');
             const _ap=getActiveProfile(s);
-            if(schemaEl&&!_ap.schema)schemaEl.value=JSON.stringify(buildDynamicSchema(s),null,2);
-            if(promptEl&&!_ap.systemPrompt)promptEl.value=buildDynamicPrompt(s);
+            const view=buildProfileView(s,_ap);
+            if(schemaEl&&!_ap.schema)schemaEl.value=JSON.stringify(buildDynamicSchema(view),null,2);
+            if(promptEl&&!_ap.systemPrompt)promptEl.value=buildDynamicPrompt(view);
         };
         // Header: chevron + toggle + name + duplicate + delete
         const header=document.createElement('div');header.className='sp-cp-header';
@@ -122,41 +159,57 @@ export function renderCustomPanelsMgr(s,container,panelBody){
         toggle.title = t('Enable/disable this panel for this chat');
         toggle.addEventListener('click', e => e.stopPropagation());
         toggle.addEventListener('change', () => {
-            cp.enabled = toggle.checked;
-            saveChatPanels();
-            liveRefresh();
-            const cpKey = customPanelSectionKey(cp.name);
-            const sec = _findSection(panelBody,cpKey);
-            if (sec) sec.classList.toggle('sp-panel-hidden', !toggle.checked);
-            card.classList.toggle('sp-cp-disabled', !toggle.checked);
+            const enabled=toggle.checked;
+            if(!_commitPanelEdit(panels,next=>{next[cpIdx].enabled=enabled})){
+                toggle.checked=!enabled;
+                return;
+            }
+            liveRefresh(true);
+            renderCustomPanelsMgr(s,container,panelBody);
         });
         const nameInput=document.createElement('input');nameInput.className='sp-cp-name';nameInput.type='text';nameInput.value=cp.name||'';nameInput.placeholder=t('Panel name');nameInput.spellcheck=false;
         nameInput.addEventListener('click',e=>e.stopPropagation());
         nameInput.addEventListener('change',()=>{
             const oldKey=customPanelSectionKey(cp.name);
-            cp.name=nameInput.value.trim()||'Untitled';saveChatPanels();
+            const nextName=nameInput.value.trim()||'Untitled';
+            if(!_commitPanelEdit(panels,next=>{next[cpIdx].name=nextName})){
+                nameInput.value=cp.name||'';
+                return;
+            }
+            const savedPanel=panels[cpIdx];
             const sec=_findSection(panelBody,oldKey);
             if(sec){
-                const newKey=customPanelSectionKey(cp.name);
+                const newKey=customPanelSectionKey(savedPanel.name);
                 sec.dataset.key=newKey;
-                const titleEl=sec.querySelector('.sp-section-title');if(titleEl)titleEl.textContent=cp.name;
+                const titleEl=sec.querySelector('.sp-section-title');if(titleEl)titleEl.textContent=savedPanel.name;
             }
+            liveRefresh();
+            renderCustomPanelsMgr(s,container,panelBody);
         });
         // v6.9.11: duplicate panel button
         const dupBtn=document.createElement('button');dupBtn.className='sp-btn sp-btn-sm sp-cp-dup';dupBtn.textContent='\u2398';dupBtn.title=t('Duplicate panel');
         dupBtn.addEventListener('click',(e)=>{
             e.stopPropagation();
-            const clone=structuredClone(cp);
-            clone.name=(cp.name||'Untitled')+' (copy)';
-            panels.splice(cpIdx+1,0,clone);
-            saveChatPanels();renderCustomPanelsMgr(s,container,panelBody);liveRefresh();
+            const base=(cp.name||'Untitled')+' (copy)';
+            const used=new Set(panels.map(panel=>String(panel?.name||'').trim().toLowerCase()));
+            let name=base,suffix=2;
+            while(used.has(name.toLowerCase()))name=`${base} ${suffix++}`;
+            if(!_commitPanelEdit(panels,next=>{
+                const clone=structuredClone(next[cpIdx]);
+                clone.id='cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6);
+                clone.name=name;
+                clone.fields=(clone.fields||[]).map(field=>({...field,key:''}));
+                next.splice(cpIdx+1,0,clone);
+            }))return;
+            renderCustomPanelsMgr(s,container,panelBody);liveRefresh();
             toastr.info(t('Panel duplicated'));
         });
         const delBtn=document.createElement('button');delBtn.className='sp-btn sp-btn-sm sp-cp-del';delBtn.textContent='\u2715';delBtn.title=t('Delete panel');
         delBtn.addEventListener('click',async(e)=>{
             e.stopPropagation();
             if(!await spConfirm(t('Delete Panel'),t('Remove "{panel}" and all its fields? This cannot be undone.',{panel:cp.name||t('Untitled')})))return;
-            panels.splice(cpIdx,1);saveChatPanels();
+            if(!_commitPanelEdit(panels,next=>{next.splice(cpIdx,1)}))return;
+            liveRefresh(true);
             renderCustomPanelsMgr(s,container,panelBody);
             const cpKey=customPanelSectionKey(cp.name);
             const sec=_findSection(panelBody,cpKey);
@@ -169,6 +222,32 @@ export function renderCustomPanelsMgr(s,container,panelBody){
         card.appendChild(header);
         // Collapsible body
         const body=document.createElement('div');body.className='sp-cp-body';
+        // Scope: standalone top-level panel or fields repeated inside each
+        // character card. Legacy panels default to global.
+        const targetRow=document.createElement('label');targetRow.className='sp-cp-target-row';
+        const targetLabel=document.createElement('span');targetLabel.className='sp-cp-target-label';targetLabel.textContent=t('Target');
+        const targetSelect=document.createElement('select');targetSelect.className='sp-cp-target-select';
+        for(const[value,label]of[['global',t('Global panel')],['character',t('Each character')]]){
+            const option=document.createElement('option');option.value=value;option.textContent=label;option.selected=customPanelScope(cp)===value;targetSelect.appendChild(option);
+        }
+        targetSelect.addEventListener('change',()=>{
+            const scope=targetSelect.value;
+            if(!_commitPanelEdit(panels,next=>{next[cpIdx].scope=scope})){
+                targetSelect.value=customPanelScope(cp);
+                return;
+            }
+            liveRefresh(true);
+            renderCustomPanelsMgr(s,container,panelBody);
+        });
+        targetRow.appendChild(targetLabel);targetRow.appendChild(targetSelect);body.appendChild(targetRow);
+        const _activeProfile=getActiveProfile(s);
+        const _panelView=buildProfileView(s,_activeProfile);
+        if(customPanelScope(cp)==='character'&&_panelView.panels?.characters===false){
+            _appendWarning(body,'sp-cp-warn','#f59e0b',t('Character-scoped fields are inactive while the Characters panel is disabled.'));
+        }
+        if(customPanelScope(cp)==='character'&&(_activeProfile?.schema||_activeProfile?.systemPrompt)){
+            _appendWarning(body,'sp-cp-warn','#f59e0b',t('Custom schema or full prompt overrides must declare character-scoped fields manually.'));
+        }
         // Column headers
         if(cp.fields?.length){
             const labels=document.createElement('div');labels.className='sp-cp-field-labels';
@@ -196,24 +275,36 @@ export function renderCustomPanelsMgr(s,container,panelBody){
                 if(srcCp===dstCp&&srcF===dstF)return;
                 const srcPanel=panels[srcCp];const dstPanel=panels[dstCp];
                 if(!srcPanel||!dstPanel)return;
-                const [moved]=srcPanel.fields.splice(srcF,1);
-                dstPanel.fields.splice(dstF,0,moved);
-                saveChatPanels();renderCustomPanelsMgr(s,container,panelBody);liveRefresh();
+                if(!_commitPanelEdit(panels,next=>{
+                    const [moved]=next[srcCp].fields.splice(srcF,1);
+                    next[dstCp].fields.splice(dstF,0,moved);
+                }))return;
+                liveRefresh(true);
+                renderCustomPanelsMgr(s,container,panelBody);
             });
             // Key: enforce lowercase_snake_case
             // v6.9.13: per-field enable/disable toggle
             const fToggle=document.createElement('input');fToggle.type='checkbox';fToggle.className='sp-cp-field-toggle';
             fToggle.checked=f.enabled!==false;fToggle.title=t('Enable/disable this field');
-            fToggle.addEventListener('change',()=>{f.enabled=fToggle.checked;saveChatPanels();liveRefresh();
-                row.classList.toggle('sp-cp-field-disabled',!fToggle.checked)});
+            fToggle.addEventListener('change',()=>{
+                const enabled=fToggle.checked;
+                if(!_commitPanelEdit(panels,next=>{next[cpIdx].fields[fIdx].enabled=enabled})){
+                    fToggle.checked=!enabled;
+                    return;
+                }
+                liveRefresh(true);
+                renderCustomPanelsMgr(s,container,panelBody);
+            });
             if(f.enabled===false)row.classList.add('sp-cp-field-disabled');
             const keyIn=document.createElement('input');keyIn.className='sp-cp-field-key';keyIn.placeholder=t('key');keyIn.value=f.key||'';keyIn.spellcheck=false;keyIn.maxLength=64;keyIn.title=t('JSON key — lowercase_snake_case only. Examples: health, mana_pool, reputation');
             keyIn.addEventListener('change',()=>{
                 const normalized=keyIn.value.toLowerCase().replace(/\s+/g,'_').replace(/[^a-z0-9_]/g,'').replace(/^[0-9]/,'_$&').replace(/_+/g,'_');
-                if(normalized&&!isValidCustomFieldKey(normalized)){
-                    f.key='';keyIn.value='';toastr.error(t('This field key is reserved or invalid.'));
-                }else{f.key=normalized;keyIn.value=f.key}
-                saveChatPanels();liveRefresh();
+                if(!_commitPanelEdit(panels,next=>{next[cpIdx].fields[fIdx].key=normalized})){
+                    keyIn.value=f.key||'';
+                    return;
+                }
+                liveRefresh(true);
+                renderCustomPanelsMgr(s,container,panelBody);
             });
             const labelIn=document.createElement('input');labelIn.className='sp-cp-field-label';labelIn.placeholder=t('Label');labelIn.value=f.label||'';
             labelIn.title=t('Display name shown in the panel. Examples: Health, Mana Pool, Street Rep');
@@ -221,18 +312,38 @@ export function renderCustomPanelsMgr(s,container,panelBody){
             const typeSel=document.createElement('select');typeSel.className='sp-cp-field-type';
             typeSel.title=t('Field type: text, number, meter (0–100), list, or enum');
             for(const ft of['text','number','meter','list','enum']){const o=document.createElement('option');o.value=ft;o.textContent=ft;o.selected=f.type===ft;typeSel.appendChild(o)}
-            typeSel.addEventListener('change',()=>{f.type=typeSel.value;saveChatPanels();renderCustomPanelsMgr(s,container,panelBody);liveRefresh()});
+            typeSel.addEventListener('change',()=>{
+                const type=typeSel.value;
+                if(!_commitPanelEdit(panels,next=>{next[cpIdx].fields[fIdx].type=type})){
+                    typeSel.value=f.type;
+                    return;
+                }
+                liveRefresh(true);
+                renderCustomPanelsMgr(s,container,panelBody);
+            });
             const descIn=document.createElement('input');descIn.className='sp-cp-field-desc';descIn.placeholder=t('Describe for AI...');descIn.value=f.desc||'';
             descIn.title=t('Instructions for the LLM describing exactly what value to return');
-            descIn.addEventListener('change',()=>{f.desc=descIn.value;saveChatPanels()});
+            descIn.addEventListener('change',()=>{f.desc=descIn.value;saveChatPanels();liveRefresh()});
             const rmBtn=document.createElement('button');rmBtn.className='sp-btn sp-btn-sm sp-cp-field-rm';rmBtn.textContent='\u2212';rmBtn.title=t('Remove this field');
-            rmBtn.addEventListener('click',()=>{cp.fields.splice(fIdx,1);saveChatPanels();renderCustomPanelsMgr(s,container,panelBody);liveRefresh()});
+            rmBtn.addEventListener('click',()=>{
+                if(!_commitPanelEdit(panels,next=>{next[cpIdx].fields.splice(fIdx,1)}))return;
+                liveRefresh(true);
+                renderCustomPanelsMgr(s,container,panelBody);
+            });
             row.appendChild(handle);row.appendChild(fToggle);row.appendChild(keyIn);row.appendChild(labelIn);row.appendChild(typeSel);row.appendChild(descIn);row.appendChild(rmBtn);
             if(f.type==='enum'){
                 const optRow=document.createElement('div');optRow.className='sp-cp-field-opt-row';
                 const optIn=document.createElement('input');optIn.placeholder=t('Enum options (comma-separated)');optIn.value=(Array.isArray(f.options)?f.options:[]).join(', ');optIn.spellcheck=false;
                 optIn.title=t('Comma-separated list of allowed values. Example: low, medium, high, critical');
-                optIn.addEventListener('change',()=>{f.options=optIn.value.split(',').map(s=>s.trim()).filter(Boolean);saveChatPanels()});
+                optIn.addEventListener('change',()=>{
+                    const options=optIn.value.split(',').map(value=>value.trim()).filter(Boolean);
+                    if(!_commitPanelEdit(panels,next=>{next[cpIdx].fields[fIdx].options=options})){
+                        optIn.value=(Array.isArray(f.options)?f.options:[]).join(', ');
+                        return;
+                    }
+                    liveRefresh(true);
+                    renderCustomPanelsMgr(s,container,panelBody);
+                });
                 optRow.appendChild(optIn);
                 const wrapper=document.createElement('div');wrapper.appendChild(row);wrapper.appendChild(optRow);
                 fieldsList.appendChild(wrapper);
@@ -248,16 +359,25 @@ export function renderCustomPanelsMgr(s,container,panelBody){
         // in this panel duplicates a key in another panel
         const _allKeys=new Map();
         for(let pi=0;pi<panels.length;pi++){
+            const panelScope=customPanelScope(panels[pi]);
             for(const pf of(panels[pi].fields||[])){
                 const k=String(pf?.key||'').toLowerCase().trim();
                 if(!k)continue;
-                if(!_allKeys.has(k))_allKeys.set(k,[]);
-                _allKeys.get(k).push(panels[pi].name||'Untitled');
+                const scopedKey=panelScope+':'+k;
+                if(!_allKeys.has(scopedKey))_allKeys.set(scopedKey,[]);
+                _allKeys.get(scopedKey).push(panels[pi].name||'Untitled');
             }
         }
-        const _dupeKeys=(cp.fields||[]).filter(f=>{const k=String(f?.key||'').toLowerCase().trim();return k&&(_allKeys.get(k)||[]).length>1}).map(f=>String(f?.key||''));
+        const _scope=customPanelScope(cp);
+        const _dupeKeys=(cp.fields||[]).filter(f=>{const k=String(f?.key||'').toLowerCase().trim();return k&&(_allKeys.get(_scope+':'+k)||[]).length>1}).map(f=>String(f?.key||''));
         if(_dupeKeys.length){
             _appendWarning(body,'sp-cp-warn sp-cp-warn-collision','#ef4444',t('Key collision: {keys}. Values in different panels will overwrite each other.',{keys:_dupeKeys.join(', ')}));
+        }
+        if(customPanelScope(cp)==='character'){
+            const _builtinCollisions=(cp.fields||[]).map(f=>String(f?.key||'')).filter(isBuiltInCharacterFieldKey);
+            if(_builtinCollisions.length){
+                _appendWarning(body,'sp-cp-warn sp-cp-warn-collision','#ef4444',t('Built-in character field collision: {keys}. Choose different keys.',{keys:_builtinCollisions.join(', ')}));
+            }
         }
         const addFieldBtn=document.createElement('button');addFieldBtn.className='sp-btn sp-btn-sm sp-cp-add-field';addFieldBtn.textContent='+ '+t('Add Field');
         addFieldBtn.addEventListener('click',()=>{

@@ -2,6 +2,14 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.14] — 2026-07-27
+
+#### Added — Character-scoped custom panels
+
+- Custom panels can target the tracker root or add typed fields to every character card.
+- Full requests require active character fields while delta requests keep them optional.
+- Reserved normalizer aliases, invalid structural edits, stale live values, and Characters-disabled prompt/schema mismatches are rejected or reconciled before the next generation.
+
 ### [7.1.13] — 2026-07-27
 
 #### Fixed — Scene-build badge lifecycle

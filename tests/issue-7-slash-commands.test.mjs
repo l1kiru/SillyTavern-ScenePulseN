@@ -91,7 +91,9 @@ function assertContains(name, haystack, needle) {
 function resetSettings() {
     _stCtx.extensionSettings.scenepulse = {};
     _stCtx.chatMetadata.scenepulse = { snapshots: {}, chatPanels: [] };
+    _stCtx.chat = [];
     settings.invalidateSettingsCache?.();
+    settings.clearForceFullState?.();
 }
 
 console.log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
@@ -303,6 +305,35 @@ console.log('\n── Scenario 13: /sp-toggle uses active profile (issue #17) �
     const customSchema=settings.getActiveSchema().value;
     assertEq('disabled story ideas are also removed from a custom schema',!!customSchema.properties?.plotBranches,false);
     assertEq('custom schema no longer requires plotBranches',customSchema.required.includes('plotBranches'),false);
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 14. /sp toggle — structural lifecycle for character custom fields
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\n── Scenario 14: /sp-toggle reconciles character custom fields ──');
+{
+    resetSettings();
+    _stCtx.chat=[{is_user:false,is_system:false,mes:'Hello',swipe_id:0}];
+    _stCtx.chatMetadata.scenepulse={
+        snapshots:{
+            0:{characters:[{name:'Jenna',disposition:'Wary'}],_spMeta:{deltaTurnsSinceFull:0}},
+        },
+        chatPanels:[{
+            id:'cp_character',
+            name:'Character State',
+            scope:'character',
+            enabled:true,
+            fields:[{key:'disposition',label:'Disposition',type:'text',desc:'Current state.'}],
+        }],
+    };
+    const s=settings.getSettings();
+    s.deltaMode=true;
+    assertTrue('delta available before slash structural toggle',settings.shouldUseDelta(settings.getLatestSnapshot()));
+
+    await captured['sp-toggle']({},'character state');
+    const current=settings.getLatestSnapshot().characters[0];
+    assertEq('slash toggle clears disabled live value',Object.hasOwn(current,'disposition'),false);
+    assertEq('slash toggle forces next generation full',settings.shouldUseDelta(settings.getLatestSnapshot()),false);
 }
 
 // ─── Summary ──────────────────────────────────────────────────────────

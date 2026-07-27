@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 import {
+    validateActiveCustomPanelFields,
     validateCustomPanels,
     validateImportedConfigSettings,
     validateImportedProfile,
@@ -24,11 +25,12 @@ function eq(name, actual, expected) {
 const validPanels = [{
     id: 'cp_source',
     name: '  Status "quoted"  ',
+    scope: 'CHARACTER',
     enabled: false,
     ignored: '<img src=x onerror=alert(1)>',
     fields: [
         { key: 'HEALTH', label: ' Health ', type: 'METER', desc: ' HP ', invert: true, ignored: true },
-        { key: 'condition', label: 'Condition', type: 'enum', desc: 'State', options: [' Good ', 'Bad'] },
+        { key: 'mood_state', label: 'Condition', type: 'enum', desc: 'State', options: [' Good ', 'Bad'] },
     ],
 }];
 const original = structuredClone(validPanels);
@@ -42,7 +44,16 @@ eq('enum options are trimmed', valid.panels[0].fields[1].options, ['Good', 'Bad'
 ok('unknown panel properties are dropped', !Object.hasOwn(valid.panels[0], 'ignored'));
 ok('unknown field properties are dropped', !Object.hasOwn(valid.panels[0].fields[0], 'ignored'));
 eq('explicit false panel state survives', valid.panels[0].enabled, false);
+eq('panel scope is normalized', valid.panels[0].scope, 'character');
 eq('meter inversion survives', valid.panels[0].fields[0].invert, true);
+
+const legacyScope = validateCustomPanels([{ name: 'Legacy', fields: [{ key: 'legacy_value', label: '', type: 'text', desc: '' }] }]);
+eq('legacy panels default to global scope', legacyScope.panels[0].scope, 'global');
+ok('invalid panel scope is rejected', !validateCustomPanels([{ name: 'Bad scope', scope: 'relationship', fields: [{ key: 'value', label: '', type: 'text', desc: '' }] }]).ok);
+for (const alias of ['inner_thought', 'status', 'notes', 'items', 'thought', 'condition', 'position', 'fertility']) {
+    ok(`built-in character alias is rejected: ${alias}`, !validateCustomPanels([{ name: 'Conflict', scope: 'character', fields: [{ key: alias, label: '', type: 'text', desc: '' }] }]).ok);
+    ok(`same alias remains valid globally: ${alias}`, validateCustomPanels([{ name: 'Global', scope: 'global', fields: [{ key: alias, label: '', type: 'text', desc: '' }] }]).ok);
+}
 
 for (const reserved of ['__proto__', 'prototype', 'constructor']) {
     const result = validateCustomPanels([{ name: 'Unsafe', fields: [{ key: reserved, label: '', type: 'text', desc: '' }] }]);
@@ -57,6 +68,26 @@ const duplicateKeys = validateCustomPanels([
     { name: 'Two', fields: [{ key: 'health', label: '', type: 'number', desc: '' }] },
 ]);
 ok('duplicate keys across panels rejected', !duplicateKeys.ok && duplicateKeys.errors.some(e => e.includes('duplicates')));
+
+const sameKeyDifferentScope = validateCustomPanels([
+    { name: 'Global', scope: 'global', fields: [{ key: 'disposition', label: '', type: 'text', desc: '' }] },
+    { name: 'Character', scope: 'character', fields: [{ key: 'disposition', label: '', type: 'text', desc: '' }] },
+]);
+ok('same key is allowed in different scopes', sameKeyDifferentScope.ok);
+
+const transitionPanels = [
+    { name: 'Global', scope: 'global', fields: [{ key: 'status', label: '', type: 'text', desc: '' }] },
+    { name: 'Character', scope: 'character', fields: [{ key: 'disposition', label: '', type: 'text', desc: '' }] },
+];
+const reservedTransition = structuredClone(transitionPanels);
+reservedTransition[0].scope = 'character';
+ok('global alias cannot transition into character scope', !validateActiveCustomPanelFields(reservedTransition).ok);
+const duplicateTransition = structuredClone(transitionPanels);
+duplicateTransition[0].fields[0].key = 'disposition';
+duplicateTransition[0].scope = 'character';
+ok('scope transition cannot activate a duplicate key', !validateActiveCustomPanelFields(duplicateTransition).ok);
+reservedTransition[0].enabled = false;
+ok('disabling an invalid draft remains possible', validateActiveCustomPanelFields(reservedTransition).ok);
 
 const duplicateNames = validateCustomPanels([
     { name: 'Same Name', fields: [{ key: 'one', label: '', type: 'text', desc: '' }] },

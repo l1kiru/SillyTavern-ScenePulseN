@@ -4,7 +4,7 @@
 import { log, warn } from './logger.js';
 import { t } from './i18n.js';
 import { spConfirm } from './utils.js';
-import { getSettings, saveSettings, getLatestSnapshot, getTrackerData, clearAllSnapshots, anyPanelsActive, forceFullStateRefresh, clearForceFullState, buildProfileView, canGenerateScene, getLastAssistantMessageIndex } from './settings.js';
+import { captureTrackerStructure, getSettings, saveSettings, getLatestSnapshot, getTrackerData, clearAllSnapshots, anyPanelsActive, forceFullStateRefresh, clearForceFullState, reconcileTrackerStructureChange, buildProfileView, canGenerateScene, getLastAssistantMessageIndex } from './settings.js';
 import { getActiveProfile, setActiveProfile } from './profiles.js';
 import { normalizeTracker, clearNormCache } from './normalize.js';
 import { generating } from './state.js';
@@ -277,43 +277,39 @@ async function _spRefresh() {
 
     log('Slash command: /sp refresh — forcing full-state regeneration');
     forceFullStateRefresh();
-    try {
-        // Reuse the regen path — the forceFullState flag makes
-        // shouldUseDelta() return false for this one generation
-        // cycle, so the interceptor sends a full-state prompt
-        // and the engine/pipeline skips the delta merge.
-        const { generateTracker } = await import('./generation/engine.js');
-        const { addMesButton } = await import('./ui/message.js');
-        const { updatePanel } = await import('./ui/update-panel.js');
-        const { showPanel } = await import('./ui/panel.js');
-        const { setLastGenSource } = await import('./state.js');
-        const { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, clearThoughtLoading } = await import('./ui/loading.js');
-        const { spAutoShow } = await import('./ui/mobile.js');
-        setLastGenSource('slash:refresh');
+    // Reuse the regen path — the forceFullState flag makes
+    // shouldUseDelta() return false for this one generation
+    // cycle, so the interceptor sends a full-state prompt
+    // and the engine/pipeline skips the delta merge.
+    const { generateTracker } = await import('./generation/engine.js');
+    const { addMesButton } = await import('./ui/message.js');
+    const { updatePanel } = await import('./ui/update-panel.js');
+    const { showPanel } = await import('./ui/panel.js');
+    const { setLastGenSource } = await import('./state.js');
+    const { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, clearThoughtLoading } = await import('./ui/loading.js');
+    const { spAutoShow } = await import('./ui/mobile.js');
+    setLastGenSource('slash:refresh');
 
-        const ctx = SillyTavern.getContext();
-        const mesIdx = getLastAssistantMessageIndex(ctx);
-        if (!canGenerateScene(ctx, mesIdx)) { clearForceFullState(); return 'Open a chat with an assistant message before generating ScenePulse.'; }
+    const ctx = SillyTavern.getContext();
+    const mesIdx = getLastAssistantMessageIndex(ctx);
+    if (!canGenerateScene(ctx, mesIdx)) { clearForceFullState(); return 'Open a chat with an assistant message before generating ScenePulse.'; }
 
-        const panel = document.getElementById('sp-panel');
-        if (panel) { spAutoShow(); showLoadingOverlay(document.getElementById('sp-panel-body'), t('Full Refresh'), t('Re-establishing ground truth')); showStopButton(); startElapsedTimer(); }
-        showThoughtLoading(t('Full Refresh'), t('Re-establishing ground truth'));
+    const panel = document.getElementById('sp-panel');
+    if (panel) { spAutoShow(); showLoadingOverlay(document.getElementById('sp-panel-body'), t('Full Refresh'), t('Re-establishing ground truth')); showStopButton(); startElapsedTimer(); }
+    showThoughtLoading(t('Full Refresh'), t('Re-establishing ground truth'));
 
-        const result = await generateTracker(mesIdx, null, {});
+    const result = await generateTracker(mesIdx, null, {});
 
-        hideStopButton(); stopElapsedTimer();
-        clearLoadingOverlay(document.getElementById('sp-panel-body')); clearThoughtLoading();
+    hideStopButton(); stopElapsedTimer();
+    clearLoadingOverlay(document.getElementById('sp-panel-body')); clearThoughtLoading();
 
-        if (result) {
-            showPanel();
-            const el = document.querySelector(`.mes[mesid="${mesIdx}"]`);
-            if (el) addMesButton(el);
-            return `Full-state refresh complete for message #${mesIdx}. Delta counter reset to 0.`;
-        }
-        return 'Full-state refresh failed — check SP debug log.';
-    } finally {
-        clearForceFullState();
+    if (result) {
+        showPanel();
+        const el = document.querySelector(`.mes[mesid="${mesIdx}"]`);
+        if (el) addMesButton(el);
+        return `Full-state refresh complete for message #${mesIdx}. Delta counter reset to 0.`;
     }
+    return 'Full-state refresh failed — check SP debug log.';
 }
 
 // ── /sp clear ──
@@ -377,9 +373,11 @@ function _spToggle(args, value) {
     const validPanels = Object.keys(BUILTIN_PANELS);
     const panel = validPanels.find(k => k.toLowerCase() === panelLow);
     if (panel) {
+        const previous=captureTrackerStructure();
         profileSettings.panels = { ...DEFAULTS.panels, ...sView.panels };
         profileSettings.panels[panel] = profileSettings.panels[panel] === false;
         if (profileSettings !== s) profileSettings.updatedAt = new Date().toISOString();
+        reconcileTrackerStructureChange(previous);
         saveSettings();
         try {
             const snap = getLatestSnapshot();
@@ -398,7 +396,9 @@ function _spToggle(args, value) {
         const cp = cm?.scenepulse?.chatPanels || [];
         const target = cp.find(p => (p.name || '').toLowerCase() === panelLow);
         if (target) {
+            const previous=captureTrackerStructure();
             target.enabled = target.enabled === false ? true : false;
+            reconcileTrackerStructureChange(previous);
             try { SillyTavern.getContext().saveMetadata(); } catch {}
             try {
                 const snap = getLatestSnapshot();
@@ -503,11 +503,10 @@ function _spProfile(args, value) {
     }
     if (ap && found.id === ap.id) return `Already on profile: ${found.name}`;
 
+    const previous=captureTrackerStructure();
     if (!setActiveProfile(s, found.id)) return `Failed to switch to ${found.name}.`;
+    reconcileTrackerStructureChange(previous);
     saveSettings();
-    // Force-full regen on next turn — delta against a different schema
-    // would be nonsensical. Mirrors the dropdown switcher in bind-ui.js.
-    try { forceFullStateRefresh(); } catch {}
     log('Slash command: /sp profile →', found.name);
     return `Switched to profile: ${found.name}. Next generation will be a full refresh.`;
 }

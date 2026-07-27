@@ -8,7 +8,17 @@ import { buildDynamicSchema, buildDynamicPrompt } from './schema.js';
 import { assemblePrompt } from './prompts/assembler.js';
 import { t } from './i18n.js';
 import { consolidateQuests } from './generation/delta-merge.js';
-import { getActiveProfile, migrateLegacySettingsToProfile, migrateOrphanRootData } from './profiles.js';
+import {
+    customPanelScope,
+    getActiveCustomFieldSpecs,
+    getActiveProfile,
+    isBuiltInCharacterFieldKey,
+    isCanonicalCharacterFieldKey,
+    isValidCustomFieldKey,
+    migrateLegacySettingsToProfile,
+    migrateOrphanRootData,
+    normalizeCustomFieldValue,
+} from './profiles.js';
 import { currentChatFingerprint, buildActiveFingerprintIndex, FINGERPRINT_VERSION } from './message-fingerprint.js';
 
 // Minimal inline user-name check for the one-shot migration below.
@@ -160,6 +170,134 @@ export function saveChatPanels() {
     } catch {}
 }
 
+/**
+ * Remove selected custom-field paths from the current live snapshot only.
+ * Historical snapshots are intentionally left untouched.
+ */
+export function clearLatestCustomPanelValues(specs) {
+    const snapshot = getLatestSnapshot();
+    if (!snapshot) return false;
+    let changed = false;
+    const seen = new Set();
+    for (const spec of Array.isArray(specs) ? specs : []) {
+        const scope = spec?.scope === 'character' ? 'character' : 'global';
+        const key = typeof spec?.key === 'string' ? spec.key : '';
+        const path = `${scope}:${key}`;
+        if (!key || seen.has(path)) continue;
+        seen.add(path);
+        if (scope === 'character') {
+            for (const character of Array.isArray(snapshot.characters) ? snapshot.characters : []) {
+                if (character && typeof character === 'object' && Object.hasOwn(character, key)) {
+                    delete character[key];
+                    changed = true;
+                }
+            }
+        } else if (Object.hasOwn(snapshot, key)) {
+            delete snapshot[key];
+            changed = true;
+        }
+    }
+    if (changed) {
+        try { SillyTavern.getContext().saveMetadata(); } catch {}
+    }
+    return changed;
+}
+
+function _customFieldStorageSignature(spec) {
+    const field = spec?.field || {};
+    return JSON.stringify([
+        field.type || '',
+        field.type === 'enum' && Array.isArray(field.options) ? field.options : [],
+    ]);
+}
+
+function _configuredCustomFieldSpecs(panels, { charactersEnabled = true } = {}) {
+    const specs=[];
+    for(const panel of Array.isArray(panels)?panels:[]){
+        if(!panel||panel.enabled===false||!Array.isArray(panel.fields))continue;
+        const scope=customPanelScope(panel);
+        if(scope==='character'&&!charactersEnabled)continue;
+        for(const field of panel.fields){
+            const key=typeof field?.key==='string'?field.key:'';
+            if(!isValidCustomFieldKey(key)||field.enabled===false)continue;
+            // Never treat a built-in property or legacy alias as removable
+            // custom data.
+            if(scope==='character'&&isBuiltInCharacterFieldKey(key))continue;
+            specs.push({scope,key,field});
+        }
+    }
+    return specs;
+}
+
+/**
+ * Clear values whose active storage path or value contract changed.
+ */
+export function reconcileLatestCustomPanelValues(previousPanels, nextPanels, {
+    previousCharactersEnabled = true,
+    nextCharactersEnabled = true,
+} = {}) {
+    const next = new Map(
+        _configuredCustomFieldSpecs(nextPanels, { charactersEnabled: nextCharactersEnabled })
+            .map(spec => [`${spec.scope}:${spec.key}`, _customFieldStorageSignature(spec)]),
+    );
+    const stale = _configuredCustomFieldSpecs(previousPanels, {
+        charactersEnabled: previousCharactersEnabled,
+    }).filter(spec =>
+        next.get(`${spec.scope}:${spec.key}`) !== _customFieldStorageSignature(spec),
+    );
+    return clearLatestCustomPanelValues(stale);
+}
+
+function _sortedEntries(value) {
+    return Object.entries(value && typeof value === 'object' ? value : {})
+        .sort(([a], [b]) => a.localeCompare(b));
+}
+
+function _trackerStructureSignature(structure) {
+    const charactersEnabled=structure?.panels?.characters!==false;
+    const customFields=_configuredCustomFieldSpecs(structure?.customPanels,{
+        charactersEnabled,
+    }).map(spec=>[
+        `${spec.scope}:${spec.key}`,
+        _customFieldStorageSignature(spec),
+    ]).sort(([a],[b])=>a.localeCompare(b));
+    return JSON.stringify({
+        profileId:structure?.profileId||null,
+        panels:_sortedEntries(structure?.panels),
+        fieldToggles:_sortedEntries(structure?.fieldToggles),
+        dashCards:_sortedEntries(structure?.dashCards),
+        customFields,
+    });
+}
+
+/** Capture the effective request-shaping configuration for the current chat. */
+export function captureTrackerStructure() {
+    const settings=getSettings();
+    const profile=getActiveProfile(settings);
+    const view=buildProfileView(settings,profile);
+    return {
+        profileId:profile?.id||null,
+        panels:structuredClone({...DEFAULTS.panels,...(view.panels||{})}),
+        fieldToggles:structuredClone(view.fieldToggles||{}),
+        dashCards:structuredClone({...DEFAULTS.dashCards,...(view.dashCards||{})}),
+        customPanels:structuredClone(getActivePanels(view)),
+    };
+}
+
+/**
+ * Reconcile one completed structural edit and force the next request to full
+ * state. Callers mutate settings first, then pass the pre-edit capture.
+ */
+export function reconcileTrackerStructureChange(previous, next = captureTrackerStructure()) {
+    if(!previous||!next||_trackerStructureSignature(previous)===_trackerStructureSignature(next))return false;
+    reconcileLatestCustomPanelValues(previous.customPanels,next.customPanels,{
+        previousCharactersEnabled:previous.panels?.characters!==false,
+        nextCharactersEnabled:next.panels?.characters!==false,
+    });
+    forceFullStateRefresh();
+    return true;
+}
+
 // v6.23.4 BUGFIX: was reading `s.panels` (root) which the v6.16.2+ orphan
 // migration drains — so post-migration this returned false even when the
 // active profile had panels. v6.22.1's one-shot guard then PERSISTED the
@@ -180,7 +318,13 @@ export function anyPanelsActive(){
         p = s.panels || DEFAULTS.panels;
         panels = getActivePanels(s);
     }
-    return Object.values(p).some(v=>v!==false) || panels.some(cp=>cp.enabled!==false && cp.fields?.length>0);
+    const hasBuiltInPanel=Object.values(p).some(v=>v!==false);
+    const hasCustomPanel=panels.some(cp=>
+        cp?.enabled!==false &&
+        cp.fields?.length>0 &&
+        (customPanelScope(cp)!=='character'||p.characters!==false)
+    );
+    return hasBuiltInPanel||hasCustomPanel;
 }
 
 export function getTrackerData(){
@@ -831,8 +975,8 @@ export function forceFullStateRefresh() {
 }
 
 /**
- * Clear the force-full flag. Called after the generation completes
- * (success or failure) so the flag doesn't persist across user actions.
+ * Consume the force-full flag after a concrete request has captured its
+ * delta/full decision.
  */
 export function clearForceFullState() {
     _forceFullNextTurn = false;
@@ -929,8 +1073,46 @@ export function getWikiArchive(){
     return _ensureArchive(data);
 }
 
+/** Freeze the active character custom-field contracts for one request. */
+export function captureCharacterCustomFieldSpecs() {
+    const settings=getSettings();
+    const view=buildProfileView(settings,getActiveProfile(settings));
+    if(view.panels?.characters===false)return[];
+    return getActiveCustomFieldSpecs(getActivePanels(view),'character')
+        .map(spec=>({key:spec.key,field:structuredClone(spec.field)}));
+}
+
+export function sanitizeCharacterCustomFields(snapshot, {
+    customFieldSpecs = null,
+    preserveAliases = false,
+} = {}) {
+    if (!snapshot || !Array.isArray(snapshot.characters)) return;
+    const specs = new Map(
+        (customFieldSpecs??captureCharacterCustomFieldSpecs())
+            .map(spec=>[spec.key,spec.field]),
+    );
+    for (const character of snapshot.characters) {
+        if (!character || typeof character !== 'object') continue;
+        for (const key of Object.keys(character)) {
+            if (
+                isCanonicalCharacterFieldKey(key)
+                || (preserveAliases&&isBuiltInCharacterFieldKey(key))
+                || (preserveAliases&&key==='_spKey')
+                || key === '_isPrimary'
+            ) continue;
+            const field = specs.get(key);
+            const normalized = field ? normalizeCustomFieldValue(field, character[key]) : { ok: false };
+            if (!normalized.ok) delete character[key];
+            else character[key] = normalized.value;
+        }
+    }
+}
+
 export function saveSnapshot(id,j,swipeId=getActiveSwipeId(id)){
     const data=getTrackerData();
+    // Persist only configured character custom fields whose values satisfy the
+    // same type/range/enum contract used by the dynamic schema and inline UI.
+    sanitizeCharacterCustomFields(j);
     // v6.16.2: stamp savedAt on every snapshot at write time so the inspector's
     // sparkline can correlate crash-log timestamps to turn IDs (Panel B
     // backfill). Live under _spMeta to avoid colliding with model-emitted

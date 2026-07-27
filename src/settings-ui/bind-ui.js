@@ -7,10 +7,10 @@ import { esc, clamp, spConfirm } from '../utils.js';
 import { buildDynamicSchema } from '../schema.js';
 import { normalizeTracker } from '../normalize.js';
 import {
-    getSettings, saveSettings,
+    captureTrackerStructure, getSettings, saveSettings,
     getConnectionProfiles, getChatPresets,
     getLatestSnapshot, clearAllSnapshots, buildProfileView,
-    canGenerateScene, getLastAssistantMessageIndex
+    canGenerateScene, getLastAssistantMessageIndex, reconcileTrackerStructureChange
 } from '../settings.js';
 import { genNonce, genMeta, setLastGenSource } from '../state.js';
 import { customPanelSectionKey, getActiveProfile, updateActiveProfile, createProfile, duplicateProfile, renameProfile, deleteProfile, setActiveProfile, validateImportedProfile, validateImportedConfigSettings, importProfile, exportProfile, migrateLegacySettingsToProfile } from '../profiles.js';
@@ -263,9 +263,11 @@ export function bindUI(){const s=getSettings();
     });
     $('#sp-auto-gen').on('change',function(){s.autoGenerate=this.checked;saveSettings()});
     $('#sp-story-ideas').on('change',function(){
+        const previous=captureTrackerStructure();
         const view=buildProfileView(s,getActiveProfile(s));
         const panels={...DEFAULTS.panels,...view.panels,storyIdeas:this.checked};
         if(!updateActiveProfile(s,{panels}))s.panels=panels;
+        reconcileTrackerStructureChange(previous);
         saveSettings();
         const snap=getLatestSnapshot();if(snap)updatePanel(normalizeTracker(snap),true);
         const schemaEl=document.getElementById('sp-schema');if(schemaEl)schemaEl.value=JSON.stringify(buildDynamicSchema(buildProfileView(s,getActiveProfile(s))),null,2);
@@ -505,8 +507,10 @@ export function bindUI(){const s=getSettings();
             if(!validation.ok){toastr.error(t('Failed to import: {error}',{error:validation.errors.join('; ')}));return}
             if(!await spConfirm('Import Config','Apply settings from this file? Your current settings will be overwritten.')){return}
             const s=getSettings();const imported=data.settings;
+            const previous=captureTrackerStructure();
             Object.assign(s,validation.settingsPatch);
             if(Object.keys(validation.profilePatch).length&&!updateActiveProfile(s,validation.profilePatch))Object.assign(s,validation.profilePatch);
+            reconcileTrackerStructureChange(previous);
             saveSettings();loadUI();
             // Apply theme if changed
             if(validation.settingsPatch.theme)import('../themes.js').then(m=>m.applyTheme(validation.settingsPatch.theme)).catch(()=>{});
@@ -641,12 +645,10 @@ function renderProfileUI(){
 function bindProfileUI(s){
     renderProfileUI();
     $('#sp-profile-active').on('change',function(){
+        const previous=captureTrackerStructure();
         const id=this.value;if(!setActiveProfile(s,id))return;
+        reconcileTrackerStructureChange(previous);
         saveSettings();
-        // Force-full regen on next turn — delta against a different schema
-        // would be nonsensical. The user can immediately re-generate to
-        // see the new profile's output.
-        try { import('../settings.js').then(m => m.forceFullStateRefresh && m.forceFullStateRefresh()); } catch {}
         // Re-render the schema/prompt textareas to reflect the new active profile
         loadUI();
         try { toastr.success(t('Switched to profile') + ': ' + (getActiveProfile(s).name || '')); } catch {}
@@ -660,15 +662,17 @@ function bindProfileUI(s){
               validate: v => v ? null : t('Name cannot be empty.') }
         );
         if (!name) return;
+        const previous=captureTrackerStructure();
         const p=createProfile(s,{name});
-        setActiveProfile(s,p.id);saveSettings();renderProfileUI();loadUI();
+        setActiveProfile(s,p.id);reconcileTrackerStructureChange(previous);saveSettings();renderProfileUI();loadUI();
         try { toastr.success(t('Profile created') + ': ' + p.name); } catch {}
     });
     $('#sp-profile-duplicate').on('click',()=>{
         const active=getActiveProfile(s);if(!active)return;
+        const previous=captureTrackerStructure();
         const dup=duplicateProfile(s,active.id);
         if(!dup)return;
-        setActiveProfile(s,dup.id);saveSettings();renderProfileUI();loadUI();
+        setActiveProfile(s,dup.id);reconcileTrackerStructureChange(previous);saveSettings();renderProfileUI();loadUI();
         try { toastr.success(t('Profile duplicated') + ': ' + dup.name); } catch {}
     });
     $('#sp-profile-rename').on('click',async()=>{
@@ -698,8 +702,9 @@ function bindProfileUI(s){
             `"${active.name}" ` + t('will be permanently removed. This cannot be undone.'),
             { okLabel: t('Delete'), danger: true }
         ))return;
+        const previous=captureTrackerStructure();
         const newActive=deleteProfile(s,active.id);
-        if(newActive){saveSettings();renderProfileUI();loadUI();
+        if(newActive){reconcileTrackerStructureChange(previous);saveSettings();renderProfileUI();loadUI();
             try { toastr.success(t('Profile deleted')); } catch {}
         }
     });

@@ -22,7 +22,10 @@ export function mkEditable(el,getValue,setValue){
         el.classList.remove('sp-editing');
         const newVal=el.textContent.trim();
         if(newVal!==getValue()){
-            setValue(newVal);
+            if(setValue(newVal)===false){
+                el.textContent=String(getValue()??'');
+                return;
+            }
             const snap=getLatestSnapshot();
             if(snap){
                 // v6.24.0: stamp the snapshot as user-edited so the temporal

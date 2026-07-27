@@ -19,7 +19,7 @@
 
 import { log, warn } from '../logger.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, getActiveSchema, getActivePrompt, getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, getLanguage, shouldUseDelta, hasStaleSnapshotBefore, getActivePanels } from '../settings.js';
+import { captureCharacterCustomFieldSpecs, clearForceFullState, getSettings, getActiveSchema, getActivePrompt, getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, getLanguage, shouldUseDelta, hasStaleSnapshotBefore, getActivePanels } from '../settings.js';
 import { anyPanelsActive } from '../settings.js';
 import { getGroupMemberNames } from '../normalize.js';
 import {
@@ -32,7 +32,7 @@ import { spSetGenerating } from '../ui/mobile.js';
 import { startStreamingHider, stopStreamingHider } from './streaming.js';
 import { showChatBanner, cleanupGenUI } from '../ui/loading.js';
 import { startStWatchdog } from './st-watchdog.js';
-import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
+import { customPanelScope, getActiveProfile, isBuiltInCharacterFieldKey, isValidCustomFieldKey } from '../profiles.js';
 import { getActivePromptRole } from '../prompts/role.js';
 import {
     normalizeTrackerPromptStyle,
@@ -237,8 +237,18 @@ QUEST STATE RULES (all REQUIRED):
     for(const cp of customPanels){
         if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
         // v6.9.13: filter out disabled fields from hints
-        const _activeFields=cp.fields.filter(f=>f?.enabled!==false&&isValidCustomFieldKey(f?.key));
-        if(_activeFields.length)mandatoryHints+=`\n- ${_activeFields.map(f=>f.key).join(', ')}: ${String(cp.name||'Untitled')} fields \u2014 populate from story context.`;
+        const _scope=customPanelScope(cp);
+        if(_scope==='character'&&panels.characters===false)continue;
+        const _activeFields=cp.fields.filter(f=>
+            f?.enabled!==false&&isValidCustomFieldKey(f?.key)&&
+            (_scope!=='character'||!isBuiltInCharacterFieldKey(f.key))
+        );
+        if(!_activeFields.length)continue;
+        if(_scope==='character'){
+            mandatoryHints+=`\n- characters[].${_activeFields.map(f=>f.key).join(', characters[].')}: ${String(cp.name||'Untitled')} fields \u2014 populate separately for each emitted character.`;
+        }else{
+            mandatoryHints+=`\n- ${_activeFields.map(f=>f.key).join(', ')}: ${String(cp.name||'Untitled')} fields \u2014 populate from story context.`;
+        }
     }
     // v6.8.50: use the shared shouldUseDelta() helper instead of
     // checking deltaMode directly. This respects the periodic full-
@@ -434,6 +444,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             beginRequest(null, plan);
         } else {
             purgeStalePromptKeys();
+            const _frozenCharacterCustomFieldSpecs=captureCharacterCustomFieldSpecs();
             plan = buildPromptInjectionPlan({
                 text: prompt,
                 role: _spRole,
@@ -444,12 +455,16 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
                 },
                 frozenRequestSchema: _frozenSchema,
                 frozenDeltaMode: _isDelta,
+                frozenCharacterCustomFieldSpecs:_frozenCharacterCustomFieldSpecs,
                 baseSnapshot: _baseSnapshot,
                 chatKey: currentChatKey(),
                 messageId: _targetMesIdx,
                 swipeId: _targetSwipeId,
                 promptParts,
             });
+            // Consume only the decision captured by this new request. A later
+            // structural edit sets the flag again for the following turn.
+            clearForceFullState();
             registerPromptInjection(plan);
             repositionAuthorityHandlers();
             beginRequest(null, plan);
@@ -457,6 +472,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         }
         _inlineCtx.frozenRequestSchema = plan.frozenRequestSchema;
         _inlineCtx.frozenDeltaMode = plan.frozenDeltaMode;
+        _inlineCtx.frozenCharacterCustomFieldSpecs = plan.frozenCharacterCustomFieldSpecs;
         _inlineCtx.promptInjection = {
             runId: plan.runId,
             registeredRole: plan.registeredRole,

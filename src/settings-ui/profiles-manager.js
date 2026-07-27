@@ -9,7 +9,12 @@
 
 import { t } from '../i18n.js';
 import { esc, spConfirm, spPrompt } from '../utils.js';
-import { getSettings, saveSettings } from '../settings.js';
+import {
+    captureTrackerStructure,
+    getSettings,
+    reconcileTrackerStructureChange,
+    saveSettings,
+} from '../settings.js';
 import {
     getActiveProfile, createProfile, duplicateProfile, renameProfile,
     deleteProfile, setActiveProfile, exportProfile, validateImportedProfile,
@@ -115,9 +120,10 @@ export function openProfilesManager(onChange) {
 
     function _activate(id) {
         const s = getSettings();
+        const previous=captureTrackerStructure();
         if (!setActiveProfile(s, id)) return;
+        reconcileTrackerStructureChange(previous);
         saveSettings();
-        try { import('../settings.js').then(m => m.forceFullStateRefresh && m.forceFullStateRefresh()); } catch {}
         try { toastr.success(t('Switched profile')); } catch {}
         _notify(); render();
     }
@@ -156,6 +162,7 @@ export function openProfilesManager(onChange) {
             t('Existing chats keep their per-chat panels untouched, but new chats started under this profile will no longer seed those panels. This cannot be undone.'),
             { okLabel: t('Clear Panels'), danger: true }
         )) return;
+        const previous=captureTrackerStructure();
         p.customPanels = [];
         p.updatedAt = new Date().toISOString();
         // v6.22.1: also drain the legacy root-level mirror so the orphan
@@ -164,6 +171,7 @@ export function openProfilesManager(onChange) {
         if (Array.isArray(s.customPanels) && s.customPanels.length) {
             s.customPanels = [];
         }
+        reconcileTrackerStructureChange(previous);
         saveSettings(); _notify(); render();
         try { toastr.success(t('Cleared') + ' ' + n + ' ' + t('panel(s) from profile')); } catch {}
     }
@@ -189,7 +197,9 @@ export function openProfilesManager(onChange) {
             `"${name}" ` + t('will be permanently removed. This cannot be undone.'),
             { okLabel: t('Delete'), danger: true }
         )) return;
+        const previous=captureTrackerStructure();
         if (deleteProfile(s, id)) {
+            reconcileTrackerStructureChange(previous);
             saveSettings(); _notify(); render();
             try { toastr.success(t('Profile deleted')); } catch {}
         }
@@ -204,8 +214,9 @@ export function openProfilesManager(onChange) {
         );
         if (!name) return;
         const s = getSettings();
+        const previous=captureTrackerStructure();
         const p = createProfile(s, { name });
-        setActiveProfile(s, p.id); saveSettings();
+        setActiveProfile(s, p.id); reconcileTrackerStructureChange(previous); saveSettings();
         try { toastr.success(t('Profile created') + ': ' + p.name); } catch {}
         _notify(); render();
     });
