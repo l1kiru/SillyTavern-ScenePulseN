@@ -550,3 +550,32 @@
 /* ── Custom field type tooltips ── */
 .sp-cp-field-key[title], .sp-cp-field-label[title],
 .sp-cp-field-type[title], .sp-cp-field-desc[title] { position: relative; }
+
+/* ── Custom panel target scope ── */
+.sp-cp-target-row {
+    display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+    align-items: center; gap: 8px; margin: 0 0 8px;
+    padding: 6px 8px; border: 1px solid rgba(77,184,164,0.14);
+    border-radius: 4px; background: rgba(77,184,164,0.035);
+}
+.sp-cp-target-label {
+    font-size: var(--sp-fs-xs); font-weight: 700; color: var(--sp-text-dim);
+    text-transform: uppercase; letter-spacing: 0.05em;
+}
+.sp-cp-target-select {
+    width: 100%; min-width: 0; padding: 4px 6px;
+    border: 1px solid var(--sp-border); border-radius: 4px;
+    background: var(--sp-surface); color: var(--sp-text);
+    font: inherit; font-size: var(--sp-fs-xs);
+}
+.sp-cp-target-select:focus { outline: 1px solid var(--sp-accent); border-color: var(--sp-accent); }
+
+.sp-mgr-add-character-field {
+    width: 100%; margin-top: 3px; padding: 4px 7px;
+    border: 1px dashed rgba(77,184,164,0.28); border-radius: 4px;
+    background: rgba(77,184,164,0.04); color: var(--sp-accent);
+    font: inherit; font-size: var(--sp-fs-xs); text-align: left; cursor: pointer;
+}
+.sp-mgr-add-character-field:hover {
+    background: rgba(77,184,164,0.1); border-color: rgba(77,184,164,0.48);
+}

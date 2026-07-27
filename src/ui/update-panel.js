@@ -10,7 +10,14 @@ import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
 import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId } from '../settings.js';
 import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
-import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
+import {
+    customPanelScope,
+    customPanelSectionKey,
+    getActiveProfile,
+    isBuiltInCharacterFieldKey,
+    isValidCustomFieldKey,
+    normalizeCustomFieldValue,
+} from '../profiles.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
 import { currentChatKey } from '../message-fingerprint.js';
@@ -389,6 +396,8 @@ function _updatePanelInner(d,_force=false){
     const rootSettings=getSettings();
     const s=buildProfileView(rootSettings,getActiveProfile(rootSettings));
     const ft=s.fieldToggles||{};
+    const customPanels=getActivePanels(s);
+    const characterCustomPanels=s.panels?.characters===false?[]:customPanels.filter(cp=>cp&&cp.enabled!==false&&customPanelScope(cp)==='character'&&Array.isArray(cp.fields)&&cp.fields.some(f=>f?.enabled!==false&&isValidCustomFieldKey(f?.key)&&!isBuiltInCharacterFieldKey(f.key)));
 
     // Environment -- always visible, NOT collapsible
     const envDiv=document.createElement('div');envDiv.className='sp-env-permanent';
@@ -1029,6 +1038,14 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const invA = Array.isArray(cur.inventory) ? [...cur.inventory].map(String).sort().join('|') : '';
             const invB = Array.isArray(prv.inventory) ? [...prv.inventory].map(String).sort().join('|') : '';
             if (invA !== invB) changed.add('inventory');
+            for(const cp of characterCustomPanels){
+                for(const field of cp.fields||[]){
+                    if(!field||field.enabled===false||!isValidCustomFieldKey(field.key)||isBuiltInCharacterFieldKey(field.key))continue;
+                    const a=Array.isArray(cur[field.key])?cur[field.key].map(String).join('|'):String(cur[field.key]??'');
+                    const b=Array.isArray(prv[field.key])?prv[field.key].map(String).join('|'):String(prv[field.key]??'');
+                    if(a!==b)changed.add(field.key);
+                }
+            }
             return changed;
         };
         for(let _ci2=0;_ci2<sortedChars.length;_ci2++){
@@ -1117,6 +1134,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const _ICON_BAG='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><path d="M2.5 4.5 h7 v6.5 h-7 z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M4 4.5 Q4 1.5 6 1.5 Q8 1.5 8 4.5" stroke="currentColor" stroke-width="1.1" fill="none"/><line x1="4" y1="7" x2="8" y2="7" stroke="currentColor" stroke-width="0.8" opacity="0.5"/></svg>';
             const _ICON_TARGET='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.1"/><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="0.9" opacity="0.7"/><circle cx="6" cy="6" r="0.9" fill="currentColor"/></svg>';
             const _ICON_LEAF='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><path d="M6 1.5 C3 3 2 6 3.5 9 C6 10 9 9 10 6 C9.5 3 8 1.5 6 1.5 Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M4 8.5 Q6 5.5 9 4" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" opacity="0.65"/></svg>';
+            const _ICON_CUSTOM='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/></svg>';
 
             // Helper: build a labeled subsection header (uppercase, bold,
             // with an SVG icon tinted in the character's accent color and
@@ -1316,6 +1334,74 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                 }
             }
 
+            // ── CHARACTER-SCOPED CUSTOM PANELS ─────────────────────────
+            // These definitions share the existing Custom Panel field
+            // types, but their values live on each characters[] item and
+            // render inside every character card instead of as standalone
+            // top-level sections.
+            for(const cp of characterCustomPanels){
+                const activeFields=(cp.fields||[]).filter(field=>
+                    field&&field.enabled!==false&&isValidCustomFieldKey(field.key)&&!isBuiltInCharacterFieldKey(field.key)
+                );
+                if(!activeFields.length)continue;
+                _mkSub(String(cp.name||t('Custom')), _ICON_CUSTOM);
+                const customWrap=document.createElement('div');customWrap.className='sp-char-custom-fields';
+                for(const field of activeFields){
+                    const key=field.key;
+                    const row=document.createElement('div');row.className='sp-row sp-char-custom-row';
+                    const label=document.createElement('div');label.className='sp-row-label';label.textContent=field.label||key;
+                    row.appendChild(label);
+                    const markChanged=(el)=>{
+                        if(!_changedFields.has(key))return;
+                        el.classList.add('sp-char-val-changed');
+                        const previous=_prevCh?.[key];
+                        const oldText=Array.isArray(previous)?previous.join(', '):String(previous??t('(empty)'));
+                        el.title=t('Previous')+': '+(oldText.length>160?oldText.substring(0,157)+'\u2026':oldText);
+                    };
+                    if(field.type==='meter'){
+                        const num=clamp(parseInt(ch[key])||0,0,100);
+                        const invert=!!field.invert;
+                        const effective=invert?(100-num):num;
+                        const danger=effective<25?'low':effective<50?'mid':'ok';
+                        const wrap=document.createElement('div');wrap.className='sp-row-value sp-cp-meter-wrap';
+                        wrap.innerHTML=`<div class="sp-cp-meter"><div class="sp-cp-meter-fill" data-danger="${danger}" style="width:${Math.max(num,3)}%"></div></div><span class="sp-cp-meter-val">${num}</span>`;
+                        markChanged(wrap);row.appendChild(wrap);
+                    }else if(field.type==='enum'){
+                        const val=str(ch[key])||'';
+                        const opts=Array.isArray(field.options)?field.options:[];
+                        const idx=opts.findIndex(option=>String(option).toLowerCase()===val.toLowerCase());
+                        const severity=opts.length>1&&idx>=0?Math.min(3,Math.floor((idx/(opts.length-1))*4)):0;
+                        const value=document.createElement('div');value.className='sp-row-value';
+                        const chip=document.createElement('span');chip.className='sp-cp-enum-chip';chip.dataset.severity=severity;chip.textContent=val||'\u2014';
+                        value.appendChild(chip);markChanged(value);row.appendChild(value);
+                    }else if(field.type==='list'){
+                        const arr=Array.isArray(ch[key])?ch[key]:[];
+                        const value=document.createElement('div');value.className='sp-row-value sp-cp-list-chips';
+                        if(!arr.length)value.textContent='\u2014';
+                        else for(const item of arr){const chip=document.createElement('span');chip.className='sp-cp-list-chip';chip.textContent=String(item);value.appendChild(chip)}
+                        markChanged(value);row.appendChild(value);
+                    }else{
+                        const value=document.createElement('div');value.className='sp-row-value';
+                        const current=ch[key];
+                        value.textContent=current===undefined||current===null||current===''?'\u2014':String(current);
+                        markChanged(value);
+                        mkEditable(value,()=>String(ch[key]??''),next=>{
+                            const candidate=field.type==='number'&&next.trim()!==''?Number(next):next;
+                            const normalized=normalizeCustomFieldValue(field,candidate);
+                            if(!normalized.ok){
+                                toastr.error(t('Enter a whole number.'));
+                                return false;
+                            }
+                            _saveCharField(key,normalized.value);
+                            return true;
+                        });
+                        row.appendChild(value);
+                    }
+                    customWrap.appendChild(row);
+                }
+                _cbody.appendChild(customWrap);
+            }
+
             cd.appendChild(_cbody);f.appendChild(cd);
         }
 
@@ -1438,9 +1524,8 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     },s);if(s.panels?.storyIdeas===false)_sec.classList.add('sp-panel-hidden');body.appendChild(_sec)}
 
     // Custom Panels (v6.9.14: per-chat definitions)
-    const customPanels=getActivePanels(s);
     for(const cp of customPanels){
-        if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
+        if(!cp||customPanelScope(cp)!=='global'||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
         const cpName=typeof cp.name==='string'&&cp.name.trim()?cp.name:'Untitled';
         const cpKey=customPanelSectionKey(cpName);
         const _cpSec=mkSection(cpKey,cpName,null,()=>{
@@ -1482,7 +1567,16 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     const numSpan=document.createElement('span');numSpan.className='sp-cp-number-val';
                     numSpan.textContent=str(d[f.key])||'0';
                     val.appendChild(numSpan);
-                    mkEditable(numSpan,()=>str(d[f.key])||'',v=>{d[f.key]=v;const snap=getLatestSnapshot();if(snap)snap[f.key]=v});
+                    mkEditable(numSpan,()=>str(d[f.key])||'',v=>{
+                        const normalized=normalizeCustomFieldValue(f,v.trim()===''?NaN:Number(v));
+                        if(!normalized.ok){
+                            toastr.error(t('Enter a whole number.'));
+                            return false;
+                        }
+                        d[f.key]=normalized.value;
+                        const snap=getLatestSnapshot();if(snap)snap[f.key]=normalized.value;
+                        return true;
+                    });
                     r.appendChild(val);
                 } else {
                     // text: plain editable

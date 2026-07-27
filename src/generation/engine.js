@@ -21,10 +21,10 @@ import {
     getSettings, getActiveSchema, getActivePrompt, getTrackerData,
     getLatestSnapshot, getLatestSnapshotEntry, getPrevSnapshot, getActiveSwipeId, saveSnapshot, getTrustedSnapshotFor, ensureChatSaved,
     getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore, buildProfileView,
-    canGenerateScene
+    canGenerateScene, captureCharacterCustomFieldSpecs, getActivePanels, sanitizeCharacterCustomFields
 } from '../settings.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
-import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
+import { customPanelScope, customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker } from '../normalize.js';
 import { parseTrackerCandidate, normalizeProviderResponse, recordExtractionFailure } from './extraction.js';
 import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
@@ -168,11 +168,14 @@ export async function generateTracker(mesIdx,partKey,opts){
     const baseSnapshot=partKey?(getTrustedSnapshotFor(mesIdx,targetSwipeId)||getPrevSnapshot(mesIdx)):getPrevSnapshot(mesIdx);
     const rootSettings=getSettings();
     const settings=buildProfileView(rootSettings,getActiveProfile(rootSettings));
+    const characterCustomFieldSpecs=captureCharacterCustomFieldSpecs();
     const useDelta=!hasStaleSnapshotBefore(mesIdx)&&shouldUseDelta(baseSnapshot);
     clearForceFullState();
     let requestFields=partKey?(SECTION_FIELDS[partKey]||[]):[];
     if(partKey?.startsWith('custom_')){
-        const panel=(settings.customPanels||[]).find(item=>customPanelSectionKey(item?.name)===partKey);
+        const panel=getActivePanels(settings).find(item=>
+            customPanelScope(item)==='global'&&customPanelSectionKey(item?.name)===partKey
+        );
         requestFields=(Array.isArray(panel?.fields)?panel.fields:[])
             .filter(field=>field?.enabled!==false&&isValidCustomFieldKey(field?.key))
             .map(field=>field.key);
@@ -412,6 +415,10 @@ export async function generateTracker(mesIdx,partKey,opts){
         log('Raw output keys:',Object.keys(result).join(', '));
         log('Raw characters?',Array.isArray(result.characters)?'array('+result.characters.length+')':typeof result.characters);
         log('Raw relationships?',Array.isArray(result.relationships)?'array('+result.relationships.length+')':typeof result.relationships);
+        sanitizeCharacterCustomFields(result,{
+            customFieldSpecs:characterCustomFieldSpecs,
+            preserveAliases:true,
+        });
         result=normalizeTracker(result);
         // ── SECTION MERGE: Only accept fields belonging to the requested section ──
         if(partKey){
@@ -443,8 +450,11 @@ export async function generateTracker(mesIdx,partKey,opts){
                         log('Section merge: partKey=',partKey,'accepted fields:',allowedFields.join(','));
                     } else {
                         // Custom panel — accept only its field keys
-                        const s=getSettings();
-                        const cp=(s.customPanels||[]).find(c=>customPanelSectionKey(c?.name)===partKey);
+                        const root=getSettings();
+                        const s=buildProfileView(root,getActiveProfile(root));
+                        const cp=getActivePanels(s).find(c=>
+                            customPanelScope(c)==='global'&&customPanelSectionKey(c?.name)===partKey
+                        );
                         if(Array.isArray(cp?.fields)){
                             const cpFields=cp.fields.filter(f=>isValidCustomFieldKey(f?.key)).map(f=>f.key);
                             for(const f of cpFields){if(result[f]!==undefined)merged[f]=result[f]}

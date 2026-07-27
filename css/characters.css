@@ -215,3 +215,19 @@
    subsection label above it already supplies the visual divider. */
 .sp-fert-section { padding-top: 2px; }
 .sp-fert-na { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); font-style: italic; }
+
+/* ── Character-scoped custom panel fields ── */
+.sp-char-custom-fields {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 2px 2px 0;
+}
+.sp-char-custom-row {
+    display: grid; grid-template-columns: minmax(88px, auto) minmax(0, 1fr);
+    gap: 6px; align-items: start;
+}
+.sp-char-custom-row .sp-row-label {
+    min-width: 0; text-align: right; overflow-wrap: anywhere;
+}
+.sp-char-custom-row .sp-row-value { min-width: 0; overflow-wrap: anywhere; }
+.sp-char-custom-row .sp-cp-meter-wrap { width: 100%; }
+.sp-char-custom-row .sp-cp-list-chips { justify-content: flex-start; }

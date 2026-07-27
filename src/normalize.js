@@ -6,6 +6,7 @@ import { auditFields } from './utils.js';
 import { _isTimelineScrub } from './state.js';
 import { coerceRelPhase } from './rel-phase.js';
 import { buildCharacterNameMap } from './character-identity.js';
+import { isBuiltInCharacterFieldKey, isValidCustomFieldKey } from './profiles.js';
 
 // Normalization intentionally has no object-identity cache. Stored snapshots
 // are edited in place by the UI, so a WeakMap would return stale values.
@@ -386,7 +387,7 @@ export function normalizeTracker(d){
                     const fold=legacyBits.join(', ');
                     fertNotes=fertNotes?`${fertNotes}; ${fold}`:fold;
                 }
-                return{
+                const fallback={
                     name:ch.name||'?',role:ch.role||'',innerThought:ch.innerThought||ch.inner_thought||'',
                     immediateNeed:ch.immediateNeed||'',shortTermGoal:ch.shortTermGoal||'',longTermGoal:ch.longTermGoal||'',
                     hair:ch.hair||'',face:ch.face||'',outfit,posture,
@@ -394,6 +395,7 @@ export function normalizeTracker(d){
                     inventory:Array.isArray(ch.inventory)?ch.inventory:[],
                     fertStatus:ch.fertStatus||'',fertNotes
                 };
+                return preserveCustomCharacterFields(ch,fallback);
             });
         }
     }else{
@@ -682,6 +684,20 @@ export function normalizeTracker(d){
     return o;
 }
 
+function preserveCustomCharacterFields(source,target){
+    let copied=0;
+    for(const[key,value]of Object.entries(source||{})){
+        if(copied>=64)break;
+        if(Object.hasOwn(target,key)||!isValidCustomFieldKey(key)||isBuiltInCharacterFieldKey(key))continue;
+        if(typeof value==='string'||typeof value==='number'){
+            target[key]=value;copied++;
+        }else if(Array.isArray(value)&&value.every(item=>typeof item==='string')){
+            target[key]=value.slice(0,100);copied++;
+        }
+    }
+    return target;
+}
+
 export function normalizeChar(ch){
     if(!ch||typeof ch!=='object'){warn('normalizeChar: invalid input',typeof ch);return ch}
     const flat={};
@@ -888,7 +904,14 @@ export function normalizeChar(ch){
             o.fertNotes=o.fertNotes?`${o.fertNotes}; ${fold}`:fold;
         }
     }
-    return o;
+    // Preserve schema-compatible character-scoped custom fields. normalizeChar
+    // deliberately rebuilds a clean object from known aliases, so without
+    // this pass any additional property accepted by the dynamic character
+    // schema would be discarded before the snapshot reaches the UI.
+    //
+    // Only the value shapes supported by Custom Panels are retained. This
+    // keeps the normalizer from copying arbitrary nested model output.
+    return preserveCustomCharacterFields(ch,o);
 }
 
 // ── Quest view caps ──────────────────────────────────────────────────────

@@ -44,6 +44,8 @@ export async function processTogetherExtraction(mesIdx, extracted, source, inlin
             sceneBuildOperationId: opId,
             frozenRequestSchema: baseOpts.frozenRequestSchema ?? inlineCtx?.frozenRequestSchema,
             frozenDeltaMode: baseOpts.frozenDeltaMode ?? inlineCtx?.frozenDeltaMode,
+            frozenCharacterCustomFieldSpecs: baseOpts.frozenCharacterCustomFieldSpecs
+                ?? inlineCtx?.frozenCharacterCustomFieldSpecs,
         });
         if (opId && isOperationCurrent(opId)) {
             if (result) settleSceneBuild(opId, 'ready');

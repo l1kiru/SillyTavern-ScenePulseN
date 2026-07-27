@@ -7,7 +7,7 @@ import {
     setLastDeltaSavings, _lastDeltaSavings, setLastExtractionFailure,
     getActivePromptInjectionRun, getLastPromptInjectionMetrics,
 } from '../state.js';
-import { getSettings, getActiveSchema, getPrevSnapshot, getActiveSwipeId, saveSnapshot, ensureChatSaved, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore } from '../settings.js';
+import { getSettings, getActiveSchema, getPrevSnapshot, getActiveSwipeId, saveSnapshot, ensureChatSaved, shouldUseDelta, hasStaleSnapshotBefore, sanitizeCharacterCustomFields } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
 import { updatePanel } from '../ui/update-panel.js';
@@ -83,7 +83,6 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
     const _useDelta = (_frozenDelta !== undefined && _together)
         ? !!_frozenDelta
         : (!hasStaleSnapshotBefore(mesIdx) && shouldUseDelta(prevSnap));
-    clearForceFullState();
     const _frozenSchema = opts.frozenRequestSchema;
     const requestSchema = (_frozenSchema?.value || _frozenSchema)
         ? (_frozenSchema.value || _frozenSchema)
@@ -115,7 +114,12 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         preserveOffSceneEntities(extracted, prevSnap);
     }
 
-    // Normalize
+    // Drop unknown/type-invalid character custom values before normalization
+    // so arbitrary properties cannot crowd configured fields out of its cap.
+    sanitizeCharacterCustomFields(extracted,{
+        customFieldSpecs:opts.frozenCharacterCustomFieldSpecs,
+        preserveAliases:true,
+    });
     const norm = normalizeTracker(extracted);
     setCurrentSnapshotMesIdx(mesIdx);
 

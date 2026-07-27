@@ -22,10 +22,27 @@
 
 import { DEFAULTS } from '../constants.js';
 import { getLanguage, getActivePanels } from '../settings.js';
-import { isValidCustomFieldKey } from '../profiles.js';
+import { customPanelScope, isBuiltInCharacterFieldKey, isValidCustomFieldKey } from '../profiles.js';
 import { getSlotText } from './slots.js';
 
 const BRANCH_TYPES = ['dramatic', 'intense', 'comedic', 'twist', 'exploratory'];
+function _customTypeHint(field) {
+    return field.type === 'meter' ? '(integer 0-100)' :
+        field.type === 'number' ? '(integer)' :
+        field.type === 'list' ? '(array of strings)' :
+        field.type === 'enum' ? `(one of: ${(Array.isArray(field.options) ? field.options : []).map(String).join(', ')})` :
+        '(string)';
+}
+
+function _customPanelsByScope(s, scope) {
+    return getActivePanels(s).filter(cp =>
+        cp &&
+        cp.enabled !== false &&
+        customPanelScope(cp) === scope &&
+        Array.isArray(cp.fields) &&
+        cp.fields.length
+    );
+}
 
 // ── Per-section field-spec builders ────────────────────────────────────
 //
@@ -82,6 +99,12 @@ function _characterFields(s) {
         fields.push('- fertStatus: "active" ONLY when pregnancy/cycle is narratively relevant. "N/A" for children, men, non-humans, and any scenario where fertility isn\'t part of the story.');
         fields.push('- fertNotes: Free-text details (cycle day, pregnancy week, etc) when fertStatus is "active". Empty or "N/A" otherwise.');
     }
+    for (const cp of _customPanelsByScope(s, 'character')) {
+        for (const f of cp.fields) {
+            if (!f || f.enabled === false || !isValidCustomFieldKey(f.key) || isBuiltInCharacterFieldKey(f.key)) continue;
+            fields.push(`- ${f.key}: ${f.desc || f.label || f.key} ${_customTypeHint(f)} [custom panel: ${String(cp.name || 'Untitled')}]`);
+        }
+    }
     return '\n### Characters (all EXCEPT {{user}}) — MAX 5 entries, named NPCs only\n' + fields.join('\n') + '\n';
 }
 
@@ -126,20 +149,14 @@ function _storyIdeaFields(s) {
 }
 
 function _customPanelFields(s) {
-    const customPanels = getActivePanels(s).filter(cp => cp && cp.enabled !== false && Array.isArray(cp.fields) && cp.fields.length);
+    const customPanels = _customPanelsByScope(s, 'global');
     if (!customPanels.length) return '';
     let block = '\n### Custom Tracked Fields\n';
     for (const cp of customPanels) {
         block += `\n#### ${String(cp.name || 'Untitled')}\n`;
         for (const f of cp.fields) {
             if (!f || f.enabled === false || !isValidCustomFieldKey(f.key)) continue;
-            const typeHint =
-                f.type === 'meter' ? '(integer 0-100)' :
-                f.type === 'number' ? '(integer)' :
-                f.type === 'list' ? '(array of strings)' :
-                f.type === 'enum' ? `(one of: ${(Array.isArray(f.options) ? f.options : []).map(String).join(', ')})` :
-                '(string)';
-            block += `- ${f.key}: ${f.desc || f.label} ${typeHint}\n`;
+            block += `- ${f.key}: ${f.desc || f.label} ${_customTypeHint(f)}\n`;
         }
     }
     return block;

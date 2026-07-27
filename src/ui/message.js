@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
 import { SP_MARKER_START, extractInlineTracker, extractInlineTrackerWithReplySplit } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
-import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
+import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, sanitizeCharacterCustomFields, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
@@ -469,6 +469,7 @@ export async function renderExisting(targetMessageId){
                 // across the recovered timeline. Idempotent: identical
                 // raw payloads always produce identical merged output.
                 const merged=mergedSoFar?_md(mergedSoFar,extracted):extracted;
+                sanitizeCharacterCustomFields(merged,{preserveAliases:true});
                 const norm=normalizeTracker(merged);
                 setCurrentSnapshotMesIdx(i);
                 saveSnapshot(i,norm);

@@ -51,6 +51,14 @@ settings.deltaMode=true;
 const withoutIdeas=buildInlineTrackerPrompt();
 ok('disabled story ideas are absent from Together prompt', !withoutIdeas.includes('plotBranches'));
 
+ctx.chatMetadata.scenepulse.chatPanels=[{
+    id:'cp_character',name:'Character State',scope:'character',enabled:true,
+    fields:[{key:'mood_state',label:'Mood',type:'text',desc:'Current mood.'}],
+}];
+if(active)active.panels={...active.panels,characters:false};
+const withoutCharacters=buildInlineTrackerPrompt();
+ok('disabled Characters removes character custom hints from Together prompt',!withoutCharacters.includes('characters[].mood_state'));
+
 console.log('\n── Tracker prompt style framing ──');
 if (!active) {
     fail++;

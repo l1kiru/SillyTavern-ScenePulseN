@@ -3,9 +3,9 @@ import { log, warn, err } from '../logger.js';
 import { esc, str } from '../utils.js';
 import { t } from '../i18n.js';
 import { MASCOT_SVG, DEFAULTS, VERSION, BUILTIN_PANELS } from '../constants.js';
-import { getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView, canGenerateScene, getLastAssistantMessageIndex, getLatestSnapshot, getTrustedSnapshotFor } from '../settings.js';
+import { captureTrackerStructure, getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView, canGenerateScene, getLastAssistantMessageIndex, getLatestSnapshot, getTrustedSnapshotFor, reconcileTrackerStructureChange } from '../settings.js';
 import { buildDynamicSchema } from '../schema.js';
-import { customPanelSectionKey, getActiveProfile, validateCustomPanels } from '../profiles.js';
+import { customPanelScope, customPanelSectionKey, getActiveProfile, validateCustomPanels } from '../profiles.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
@@ -368,6 +368,7 @@ export function createPanel(){
             row.innerHTML=`<input type="checkbox" data-panel="${esc(id)}" ${panels[id]!==false?'checked':''}><span class="sp-mgr-toggle-name">${esc(def.name)}</span>`;
             const cb=row.querySelector('input');
             cb.addEventListener('change',()=>{
+                const previous=captureTrackerStructure();
                 profileSettings.panels={...DEFAULTS.panels,...profileSettings.panels,[cb.dataset.panel]:cb.checked};
                 savePanelSettings();
                 if(cb.dataset.panel==='storyIdeas'){const setting=document.getElementById('sp-story-ideas');if(setting)setting.checked=cb.checked}
@@ -404,6 +405,7 @@ export function createPanel(){
                     }
                 }
                 refreshSchemaPreview();
+                reconcileTrackerStructureChange(previous);
                 // Sync toolbar icons: hide/dim when panel disabled
                 if(cb.dataset.panel==='dashboard'){
                     const wxItem=document.getElementById('sp-feat-weather');
@@ -427,6 +429,7 @@ export function createPanel(){
                     sub.innerHTML=`<input type="checkbox" ${isOn?'checked':''}><span>${esc(fLabel)}</span>`;
                     const scb=sub.querySelector('input');
                     scb.addEventListener('change',()=>{
+                        const previous=captureTrackerStructure();
                         if(f.isDashCard){
                             profileSettings.dashCards={...DEFAULTS.dashCards,...profileSettings.dashCards,[f.dashCard]:scb.checked};
                             const card=body.querySelector(`[data-card="${f.dashCard}"]`);
@@ -480,6 +483,7 @@ export function createPanel(){
                                 if(settingsCb)settingsCb.checked=scb.checked;
                             }
                         }
+                        reconcileTrackerStructureChange(previous);
                         savePanelSettings();
                         refreshSchemaPreview();
                         log((f.isDashCard?'DashCard':f.isSub?'SubField':'Field')+' toggled:',fKey,'\u2192',scb.checked);
@@ -497,6 +501,34 @@ export function createPanel(){
                         // Update hint on toggle
                         scb.addEventListener('change',()=>{wxHint.style.display=wxOn()?'':'none'});
                     }
+                }
+                if(id==='characters'){
+                    const addCharacterField=document.createElement('button');
+                    addCharacterField.type='button';
+                    addCharacterField.className='sp-mgr-add-character-field';
+                    addCharacterField.textContent='+ '+t('Add custom character field');
+                    addCharacterField.addEventListener('click',()=>{
+                        const chatPanels=ensureChatPanels();
+                        let target=chatPanels.find(panel=>customPanelScope(panel)==='character'&&panel.enabled!==false);
+                        if(!target){
+                            const base=t('Character Custom Fields');
+                            const used=new Set(chatPanels.map(panel=>String(panel?.name||'').trim().toLowerCase()));
+                            let name=base,suffix=2;
+                            while(used.has(name.toLowerCase()))name=`${base} ${suffix++}`;
+                            target={
+                                id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
+                                name,scope:'character',enabled:true,fields:[],
+                            };
+                            chatPanels.push(target);
+                        }
+                        if(!Array.isArray(target.fields))target.fields=[];
+                        target.fields.push({key:'',label:'',type:'text',desc:''});
+                        saveChatPanels();
+                        renderCustomPanelsMgr(s,cpList,body);
+                        if(_cachedNormData)updatePanel(_cachedNormData,true);
+                        cpList.scrollIntoView?.({block:'nearest',behavior:'smooth'});
+                    });
+                    subWrap.appendChild(addCharacterField);
                 }
                 togglesDiv.appendChild(subWrap);
                 if(panels[id]===false){
@@ -525,6 +557,7 @@ export function createPanel(){
             disableAllBtn.disabled=allOff;disableAllBtn.classList.toggle('sp-mgr-btn-dimmed',allOff);
         };
         enableAllBtn.addEventListener('click',()=>{
+            const previous=captureTrackerStructure();
             profileSettings.panels={...DEFAULTS.panels,...profileSettings.panels};
             for(const pid of Object.keys(BUILTIN_PANELS))profileSettings.panels[pid]=true;
             if(!profileSettings.fieldToggles)profileSettings.fieldToggles={};
@@ -536,6 +569,7 @@ export function createPanel(){
             for(const k of Object.keys(DEFAULTS.dashCards))profileSettings.dashCards[k]=true;
             s.showThoughts=true;
             savePanelSettings();
+            reconcileTrackerStructureChange(previous);
             const storySetting=document.getElementById('sp-story-ideas');if(storySetting)storySetting.checked=true;
             togglesDiv.querySelectorAll('input[data-panel]').forEach(cb=>{cb.checked=true});
             togglesDiv.querySelectorAll('.sp-mgr-sub-toggle input').forEach(cb=>{cb.checked=true;cb.disabled=false});
@@ -559,6 +593,7 @@ export function createPanel(){
             log('Enable All: all panels + fields activated');
         });
         disableAllBtn.addEventListener('click',()=>{
+            const previous=captureTrackerStructure();
             profileSettings.panels={...DEFAULTS.panels,...profileSettings.panels};
             for(const pid of Object.keys(BUILTIN_PANELS))profileSettings.panels[pid]=false;
             if(!profileSettings.fieldToggles)profileSettings.fieldToggles={};
@@ -570,6 +605,7 @@ export function createPanel(){
             for(const k of Object.keys(DEFAULTS.dashCards))profileSettings.dashCards[k]=false;
             s.showThoughts=false;s.weatherOverlay=false;s.timeTint=false;
             savePanelSettings();
+            reconcileTrackerStructureChange(previous);
             const storySetting=document.getElementById('sp-story-ideas');if(storySetting)storySetting.checked=false;
             togglesDiv.querySelectorAll('input[data-panel]').forEach(cb=>{cb.checked=false});
             togglesDiv.querySelectorAll('.sp-mgr-sub-toggle input').forEach(cb=>{cb.checked=false;cb.disabled=true});
@@ -614,7 +650,7 @@ export function createPanel(){
         const addBtn=document.createElement('button');addBtn.className='sp-btn sp-mgr-add-panel';addBtn.textContent=t('+ Add Custom Panel');
         addBtn.addEventListener('click',()=>{
             const _chatPanels=ensureChatPanels();
-            const newPanel={id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:'',fields:[{key:'',label:'',type:'text',desc:''}]};
+            const newPanel={id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:'',scope:'global',fields:[{key:'',label:'',type:'text',desc:''}]};
             _chatPanels.push(newPanel);
             saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
             // Insert just the new section -- no full rebuild
@@ -669,13 +705,15 @@ export function createPanel(){
                         return;
                     }
                     const _chatPanels=ensureChatPanels();
-                    const existingKeys=new Set(_chatPanels.flatMap(p=>(Array.isArray(p?.fields)?p.fields:[]).map(f=>String(f?.key||'').toLowerCase()).filter(Boolean)));
-                    const importedKeys=validation.panels.flatMap(p=>p.fields.map(f=>f.key));
-                    const collisions=importedKeys.filter(k=>existingKeys.has(k));
+                    const existingKeys=new Set(_chatPanels.flatMap(p=>(Array.isArray(p?.fields)?p.fields:[])
+                        .map(f=>customPanelScope(p)+':'+String(f?.key||'').toLowerCase()).filter(k=>!k.endsWith(':'))));
+                    const importedKeys=validation.panels.flatMap(p=>p.fields.map(f=>customPanelScope(p)+':'+f.key));
+                    const collisions=importedKeys.filter(k=>existingKeys.has(k)).map(k=>k.split(':').slice(1).join(':'));
                     if(collisions.length){
                         toastr.error(t('Import failed: {error}',{error:`Custom field keys already exist: ${[...new Set(collisions)].join(', ')}`}));
                         return;
                     }
+                    const previous=captureTrackerStructure();
                     const usedNames=new Set(_chatPanels.map(p=>String(p?.name||'').trim().toLowerCase()).filter(Boolean));
                     for(const p of validation.panels){
                         const base=p.name;
@@ -687,6 +725,7 @@ export function createPanel(){
                         p.id='cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
                         _chatPanels.push(p);
                     }
+                    reconcileTrackerStructureChange(previous);
                     saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
                     toastr.success(t('Imported panels: {count}',{count:validation.panels.length}));
                 }catch(e){toastr.error(t('Import failed: {error}',{error:e.message}))}
@@ -787,9 +826,11 @@ export function createPanel(){
                 const localizedName=t(name);
                 const item=document.createElement('div');item.className='sp-cp-tmpl-item';item.textContent=localizedName;
                 item.addEventListener('click',()=>{
+                    const previous=captureTrackerStructure();
                     const _chatPanels=ensureChatPanels();
                     const localizedFields=structuredClone(fields).map(field=>({...field,label:t(field.label)}));
-                    _chatPanels.push({id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:localizedName,enabled:true,fields:localizedFields});
+                    _chatPanels.push({id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:localizedName,scope:'global',enabled:true,fields:localizedFields});
+                    reconcileTrackerStructureChange(previous);
                     saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
                     menu.remove();toastr.success(t('Template added: {template}',{template:localizedName}));
                 });

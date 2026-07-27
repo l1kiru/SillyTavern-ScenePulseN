@@ -226,6 +226,7 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 
 ### Custom Panels
 - Create panels to track **anything** — health, mana, reputation, faction standings
+- Choose **Global** for a standalone panel or **Each Character** to repeat the fields inside every character card
 - Each field supports text, number, meter, list, or enum types
 - LLM hints tell the AI what to output for each field
 <img width="858" height="472" alt="image" src="https://github.com/user-attachments/assets/6732fa65-dc8b-4390-8445-bbd08d36f9df" />
@@ -507,13 +508,16 @@ Create custom tracking panels with any fields you need:
 
 1. Open **Panel Manager** (grid icon in toolbar)
 2. Scroll to **Custom Panels** → **+ Add Panel**
-3. Add fields with:
+3. Choose a target:
+   - **Global panel** — fields live at the root of the tracker and render as a standalone section
+   - **Each character** — fields are added to every `characters[]` item and render inside character cards
+4. Add fields with:
    - **Key** — JSON field name (e.g., `player_health`)
    - **Label** — display name (e.g., "Health Points")
    - **Type** — text, number, meter (0–100), list, or enum
    - **LLM Hint** — instruction for the AI (e.g., "Current HP out of 100")
 
-Custom fields are automatically included in the tracker prompt and extracted from AI responses.
+Custom fields are automatically included in the tracker prompt and extracted from AI responses. Character-scoped fields are required during a full refresh and optional in Delta Mode, so unchanged values can carry forward without being repeated every turn. Profiles with a custom schema or full system-prompt override must declare the character fields in that override manually.
 
 ## Known Issues
 
@@ -528,7 +532,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.13** - Scene-build badge lifecycle: dismiss removes controller state, absolute deadlines, chat/swipe wipe, hung saving expire.
+**Latest: v7.1.14** - Character-scoped custom panels: Global vs Each Character target, full/delta field rules, reserved-alias and structural reconciliation.
 
 ## Contributing
 
