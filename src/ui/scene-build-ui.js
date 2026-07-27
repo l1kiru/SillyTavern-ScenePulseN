@@ -133,8 +133,9 @@ function _mountPoint(mes) {
 }
 
 /**
- * Together starts the op at inject time; wait until parse/save (reply finished)
- * so the stub appears under the completed message. Manual/recover: text already there.
+ * Together starts the op at inject time; hide under-message stub while ST is
+ * still streaming so it does not sit above growing text. Once streaming stops
+ * (or status is parsing+), show the stub under the completed reply.
  */
 function _shouldShowStub(op) {
     if (op.status === 'superseded') return false;
@@ -143,7 +144,13 @@ function _shouldShowStub(op) {
     if (!mes?.querySelector('.mes_text')) return false;
     const src = String(op.source || '');
     if (src.startsWith('manual') || src.includes('recover') || src.includes('fallback')) return true;
-    return !['pending', 'generating'].includes(op.status);
+    if (op.status === 'pending') return false;
+    if (op.status === 'generating') {
+        try {
+            if (document.getElementById('mes_stop')?.offsetParent) return false;
+        } catch {}
+    }
+    return true;
 }
 
 function _clearSiblingStubs(op) {
