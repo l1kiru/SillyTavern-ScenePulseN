@@ -2,7 +2,7 @@
 
 import {
     updateSceneBuild, settleSceneBuild, failSceneBuild, cancelSceneBuild,
-    isOperationCurrent, getActiveSceneBuilds,
+    cancelTogetherSceneBuilds, isOperationCurrent, getActiveSceneBuilds,
 } from './scene-build-controller.js';
 import { processExtraction } from './pipeline.js';
 import { rebindInlineCtxForExpectedSwipe } from './inline-ctx.js';
@@ -61,6 +61,34 @@ export async function processTogetherExtraction(mesIdx, extracted, source, inlin
 export function discardTogetherSceneBuild(inlineCtx, reason = 'discarded') {
     const opId = inlineCtx?.sceneBuildOperationId;
     if (opId && isOperationCurrent(opId)) cancelSceneBuild(opId, reason);
+}
+
+/** Same threshold as historical onCharMsg short-message wait gate. */
+export const TOGETHER_SHORT_REPLY_CHARS = 100;
+
+export function isShortTogetherReply(rawMes) {
+    return String(rawMes || '').length < TOGETHER_SHORT_REPLY_CHARS;
+}
+
+/**
+ * Empty/short chat reply: cancel scene-build and block recovery/fallback.
+ * @returns {true}
+ */
+export function abortShortTogetherReply(inlineCtx, reason = 'empty-reply') {
+    log('Together: short/empty reply — aborting scene build', reason);
+    setCancelRequested(true);
+    try { cancelTogetherSceneBuilds(reason); } catch {}
+    discardTogetherSceneBuild(inlineCtx, reason);
+    try { cancelSceneSourceTrace(); } catch {}
+    try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
+    setInlineGenerationContext(null);
+    setInlineGenStartMs(0);
+    setInlineExtractionDone(false);
+    setPendingInlineIdx(-1);
+    spSetGenerating(false);
+    try { stopStreamingHider({ abort: true }); } catch {}
+    try { cleanupGenUI(); } catch {}
+    return true;
 }
 
 /**

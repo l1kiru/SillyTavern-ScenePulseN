@@ -21,7 +21,7 @@ import { clearPromptInjection } from '../generation/prompt-injection.js';
 import { continuationReprompt } from '../generation/engine.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
-import { processTogetherExtraction, discardTogetherSceneBuild } from '../generation/together-scene-build.js';
+import { processTogetherExtraction, discardTogetherSceneBuild, abortShortTogetherReply, isShortTogetherReply } from '../generation/together-scene-build.js';
 import { rebindInlineCtxForExpectedSwipe } from '../generation/inline-ctx.js';
 import { cancelSceneSourceTrace, finishSceneSourceTrace } from '../scene-source-trace.js';
 import { ensureChatSaved, anyPanelsActive } from '../settings.js';
@@ -144,27 +144,19 @@ export async function onCharMsg(idx){
             log('onCharMsg [inline]: skipping — ScenePulse did not inject into this generation cycle (inlineGenStartMs=0)');
             return;
         }
-        // FALLBACK: GENERATION_ENDED didn't extract (empty msg, timing issue)
+        // FALLBACK: GENERATION_ENDED didn't extract (timing / long reply without tracker).
         // Remove waiting indicators
         clearInlineWaitBanner();
         clearThoughtLoading();
         setPendingInlineIdx(idx);
         log('onCharMsg [inline]: GENERATION_ENDED missed, retrying as fallback');
-        // Streaming may not have finished -- retry extraction with delay if message is empty.
         // Always split BEFORE extract (extract strips tracker from mes).
         let { extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(idx);
-        if(!extracted){
-            const msgLen=rawMes.length;
-            if(msgLen<100){
-                log('onCharMsg [inline]: message too short ('+msgLen+' chars), waiting 2s for streaming...');
-                await new Promise(r=>setTimeout(r,2000));
-                ({ extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(idx));
-                if(!extracted){
-                    log('onCharMsg [inline]: retry after 2s, still no tracker, waiting 4s more...');
-                    await new Promise(r=>setTimeout(r,4000));
-                    ({ extracted, replySplit, rawMes } = extractInlineTrackerWithReplySplit(idx));
-                }
-            }
+        if (!extracted && isShortTogetherReply(rawMes)) {
+            log('onCharMsg [inline]: short/empty reply (' + rawMes.length + ' chars), aborting scene build');
+            abortShortTogetherReply(_inlineCtx, 'empty-reply');
+            spSetGenerating(false);
+            return;
         }
         if(extracted){
             const _compTokens=replySplit.totalTokens||Math.round(rawMes.length/4);
@@ -192,7 +184,7 @@ export async function onCharMsg(idx){
             const _failureKind=_markersPresent?'markers found, JSON unparseable':'no SP markers';
             log('onCharMsg [inline]: no tracker found in message',idx,'('+msgLen+' chars,',_failureKind+')');
             // If the AI wrote content but omitted the tracker, recover.
-            if(msgLen>100&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!shouldSkipAutoSceneRecovery()){
+            if(!isShortTogetherReply(msgText)&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!shouldSkipAutoSceneRecovery()){
                 const fbProfile=s.fallbackProfile||s.connectionProfile||'';
                 const fbPreset=s.fallbackPreset||s.chatPreset||'';
                 // v6.23.9: removed the `if(!fbProfile && !fbPreset) showRecoveryCard`
@@ -296,14 +288,17 @@ export async function onCharMsg(idx){
                     hideStopButton();stopElapsedTimer();
                     clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
                 }
-            } else if(msgLen>100&&shouldSkipAutoSceneRecovery()){
+            } else if(!isShortTogetherReply(msgText)&&shouldSkipAutoSceneRecovery()){
                 log('Together mode: recovery skipped — user stopped generation');
                 discardTogetherSceneBuild(_inlineCtx,'reply-stopped');
                 stopStreamingHider();
-            } else if(msgLen>100&&!s.fallbackEnabled){
+            } else if(!isShortTogetherReply(msgText)&&!s.fallbackEnabled){
                 log('Together mode: AI omitted tracker, fallback disabled by user');
                 discardTogetherSceneBuild(_inlineCtx,'no-fallback');
                 stopStreamingHider();
+            } else if(isShortTogetherReply(msgText)){
+                // Defensive: short path should have returned earlier; still abort if reached.
+                abortShortTogetherReply(_inlineCtx,'empty-reply');
             }
             // Always show existing data for this message+swipe if we didn't generate
             const prev=getTrustedSnapshotFor(idx);
