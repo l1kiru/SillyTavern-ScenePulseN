@@ -84,8 +84,7 @@ export function startSceneBuild(opts = {}) {
     for (const [id, existing] of [..._ops.entries()]) {
         if (existing.chatKey !== chatKey || existing.messageId !== messageId || existing.swipeId !== swipeId) continue;
         if (existing.status !== 'error' && existing.status !== 'expired') continue;
-        _ops.delete(id);
-        _emit(existing, 'replace-terminal');
+        dismissSceneBuild(id, 'replace-terminal');
     }
 
     const abortController = typeof AbortController !== 'undefined' ? new AbortController() : { signal: { aborted: false }, abort() {} };
@@ -205,6 +204,36 @@ export function cancelSceneBuild(operationId, reason = 'user') {
     return _settle(operationId, 'cancelled', { cancellationReason: reason });
 }
 
+/** Remove op with one emit. Active: abort only — do not settle cancelled. */
+export function dismissSceneBuild(operationId, reason = 'dismiss') {
+    const op = _ops.get(operationId);
+    if (!op) return null;
+    if (isActiveStatus(op.status)) {
+        try { op.abortController?.abort?.(reason); } catch {}
+    }
+    const key = targetKey(op.chatKey, op.messageId, op.swipeId);
+    if (_targetIndex.get(key) === operationId) _targetIndex.delete(key);
+    _ops.delete(operationId);
+    _emit(op, reason);
+    if (![..._ops.values()].some(o => isActiveStatus(o.status))) stopSceneBuildWatchdog();
+    return op;
+}
+
+export function dismissSceneBuildsForChat(chatKey, reason = 'chat-changed') {
+    for (const op of [..._ops.values()]) {
+        if (op.chatKey !== chatKey) continue;
+        dismissSceneBuild(op.operationId, reason);
+    }
+}
+
+export function dismissSceneBuildsForMessage(messageId, chatKey = currentChatKey(), reason = 'message-deleted') {
+    const mid = Number(messageId);
+    for (const op of [..._ops.values()]) {
+        if (op.chatKey !== chatKey || op.messageId !== mid) continue;
+        dismissSceneBuild(op.operationId, reason);
+    }
+}
+
 export function supersedeSceneBuild(operationId, reason = 'superseded') {
     const op = _ops.get(operationId);
     if (!op || isTerminalStatus(op.status)) return op;
@@ -278,7 +307,7 @@ export function pruneTerminalSceneBuilds(maxAgeMs = 120000) {
     const now = _nowFn();
     for (const [id, op] of [..._ops.entries()]) {
         if (!isTerminalStatus(op.status)) continue;
-        if (now - op.updatedAt > maxAgeMs) _ops.delete(id);
+        if (now - op.updatedAt > maxAgeMs) dismissSceneBuild(id, 'prune');
     }
 }
 
@@ -307,10 +336,10 @@ export function tickSceneBuildWatchdog() {
             op.updatedAt = now;
             _emit(op, 'soft');
         }
-        if (op.status === 'saving' || op.requestInFlight || stBusy) continue;
-        if (now - op.updatedAt >= SCENE_BUILD_EXPIRED_MS) {
-            expireSceneBuild(op.operationId, 'watchdog');
-        }
+        const age = now - (op.softBaseAt ?? op.startedAt);
+        if (age < SCENE_BUILD_EXPIRED_MS) continue;
+        if (op.status !== 'saving' && (op.requestInFlight || stBusy)) continue;
+        expireSceneBuild(op.operationId, 'watchdog');
     }
     pruneTerminalSceneBuilds();
 }

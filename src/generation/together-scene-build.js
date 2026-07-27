@@ -21,29 +21,41 @@ import { spSetGenerating } from '../ui/mobile.js';
 import { setBrandState } from '../ui/panel.js';
 import { log } from '../logger.js';
 
+let _processExtractionFn = processExtraction;
+/** @param {typeof processExtraction|null} fn */
+export function _setTogetherProcessExtractionForTests(fn) {
+    _processExtractionFn = fn || processExtraction;
+}
+
 export async function processTogetherExtraction(mesIdx, extracted, source, inlineCtx, baseOpts = {}) {
     const opId = inlineCtx?.sceneBuildOperationId || null;
     if (opId && isOperationCurrent(opId)) {
         updateSceneBuild(opId, { status: 'parsing' });
-        updateSceneBuild(opId, { status: 'saving' });
     }
-    const result = await processExtraction(mesIdx, extracted, source, {
-        ...baseOpts,
-        swipeId: baseOpts.swipeId ?? inlineCtx?.swipeId,
-        expectedSwipeId: baseOpts.expectedSwipeId ?? inlineCtx?.swipeId,
-        baseSnapshot: Object.hasOwn(baseOpts, 'baseSnapshot') ? baseOpts.baseSnapshot : (inlineCtx?.baseSnapshot ?? null),
-        expectedChatKey: baseOpts.expectedChatKey ?? inlineCtx?.chatKey,
-        expectedParentFingerprint: baseOpts.expectedParentFingerprint ?? inlineCtx?.parentFingerprint,
-        owner: baseOpts.owner ?? inlineCtx?.owner,
-        sceneBuildOperationId: opId,
-        frozenRequestSchema: baseOpts.frozenRequestSchema ?? inlineCtx?.frozenRequestSchema,
-        frozenDeltaMode: baseOpts.frozenDeltaMode ?? inlineCtx?.frozenDeltaMode,
-    });
-    if (opId && isOperationCurrent(opId)) {
-        if (result) settleSceneBuild(opId, 'ready');
-        else failSceneBuild(opId, new Error('Together extraction pipeline failed'), 'pipeline');
+    try {
+        const result = await _processExtractionFn(mesIdx, extracted, source, {
+            ...baseOpts,
+            swipeId: baseOpts.swipeId ?? inlineCtx?.swipeId,
+            expectedSwipeId: baseOpts.expectedSwipeId ?? inlineCtx?.swipeId,
+            baseSnapshot: Object.hasOwn(baseOpts, 'baseSnapshot') ? baseOpts.baseSnapshot : (inlineCtx?.baseSnapshot ?? null),
+            expectedChatKey: baseOpts.expectedChatKey ?? inlineCtx?.chatKey,
+            expectedParentFingerprint: baseOpts.expectedParentFingerprint ?? inlineCtx?.parentFingerprint,
+            owner: baseOpts.owner ?? inlineCtx?.owner,
+            sceneBuildOperationId: opId,
+            frozenRequestSchema: baseOpts.frozenRequestSchema ?? inlineCtx?.frozenRequestSchema,
+            frozenDeltaMode: baseOpts.frozenDeltaMode ?? inlineCtx?.frozenDeltaMode,
+        });
+        if (opId && isOperationCurrent(opId)) {
+            if (result) settleSceneBuild(opId, 'ready');
+            else failSceneBuild(opId, new Error('Together extraction pipeline failed'), 'pipeline');
+        }
+        return result;
+    } catch (error) {
+        if (opId && isOperationCurrent(opId)) {
+            failSceneBuild(opId, error, 'pipeline');
+        }
+        throw error;
     }
-    return result;
 }
 
 export function discardTogetherSceneBuild(inlineCtx, reason = 'discarded') {

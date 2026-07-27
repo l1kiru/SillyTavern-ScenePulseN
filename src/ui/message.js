@@ -34,10 +34,6 @@ import { renderTimeline } from './timeline.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
 import { renderEmptyState } from './empty-state.js';
 import { runManualSceneBuild, reconcileSceneBuildUi } from './scene-build-ui.js';
-import {
-    cancelSceneBuildsForMessage, supersedeSceneBuildsForMessageExceptSwipe,
-    getActiveSceneBuilds,
-} from '../generation/scene-build-controller.js';
 import { runSceneBuild } from '../generation/scene-build-runner.js';
 
 /** Prefer this message+swipe snapshot after manual gen fails — never a foreign latest. */
@@ -67,13 +63,7 @@ function _queueChatMutation(work){
 // SillyTavern passes the new chat length here, not the deleted message id.
 export function spOnMessageDeleted(){
     return _queueChatMutation(async()=>{
-        try{
-            const chat=SillyTavern.getContext().chat||[];
-            // Cancel ops whose message no longer exists
-            for(const op of getActiveSceneBuilds()){
-                if(!chat[op.messageId])cancelSceneBuildsForMessage(op.messageId,op.chatKey,'message-deleted');
-            }
-        }catch{}
+        // Scene-build wipe is sync in index.js MESSAGE_DELETED (before this queue).
         const summary=reconcileSnapshotsAfterChatMutation({type:'message-delete'});
         await _refreshAfterChatMutation(summary,'Message deletion');
         reconcileSceneBuildUi();
@@ -82,9 +72,7 @@ export function spOnMessageDeleted(){
 
 export function spOnSwipeDeleted(payload,activeChanged){
     return _queueChatMutation(async()=>{
-        if(Number.isFinite(Number(payload?.messageId))){
-            cancelSceneBuildsForMessage(Number(payload.messageId),undefined,'swipe-deleted');
-        }
+        // Scene-build wipe is sync in index.js MESSAGE_SWIPE_DELETED (before this queue).
         const summary=reconcileSnapshotsAfterChatMutation({
             type:'swipe-delete',messageId:payload?.messageId,swipeId:payload?.swipeId,activeChanged
         });

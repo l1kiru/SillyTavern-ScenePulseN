@@ -42,8 +42,8 @@ import {
     handleTogetherSwipeChange, unlockAfterSwipeCancel,
 } from './src/generation/together-scene-build.js';
 import {
-    cancelTogetherSceneBuilds, cancelSceneBuildsForChat, disposeSceneBuilds,
-    supersedeSceneBuildsForMessageExceptSwipe,
+    cancelTogetherSceneBuilds, dismissSceneBuildsForChat, dismissSceneBuildsForMessage,
+    disposeSceneBuilds, supersedeSceneBuildsForMessageExceptSwipe,
 } from './src/generation/scene-build-controller.js';
 import { currentChatKey } from './src/message-fingerprint.js';
 import { initSceneBuildUi, reconcileSceneBuildUi, runManualSceneBuild } from './src/ui/scene-build-ui.js';
@@ -541,12 +541,14 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
 });
 
 eventSource.on(event_types.CHAT_CHANGED, async () => {
-    try { await ensureChatSaved(); } catch (e) { warn('CHAT_CHANGED save:', e); }
+    // Wipe old-chat scene-build ops before any await (ensureChatSaved / dynamic imports).
     try {
-        if (_lastSceneBuildChatKey) cancelSceneBuildsForChat(_lastSceneBuildChatKey, 'chat-changed');
+        const oldKey = _lastSceneBuildChatKey;
+        if (oldKey) dismissSceneBuildsForChat(oldKey, 'chat-changed');
         _lastSceneBuildChatKey = currentChatKey();
         reconcileSceneBuildUi();
     } catch (e) { warn('CHAT_CHANGED scene-build:', e); }
+    try { await ensureChatSaved(); } catch (e) { warn('CHAT_CHANGED save:', e); }
     if (generating) cancelGeneration();
     try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
     clearPromptAbortReason();
@@ -593,6 +595,9 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
 if (event_types.MESSAGE_DELETED) {
     eventSource.on(event_types.MESSAGE_DELETED, (idx) => {
         log('MESSAGE_DELETED event, new chat length=', idx);
+        // Sync wipe: MESSAGE_DELETED reports new length, not deleted id — mid-chat
+        // deletes shift mes ids, so probing chat[op.messageId] is unsafe.
+        try { dismissSceneBuildsForChat(currentChatKey(), 'message-deleted'); } catch {}
         _rememberSwipeIds();
         forceFullStateRefresh();
         void spOnMessageDeleted();
@@ -601,6 +606,10 @@ if (event_types.MESSAGE_DELETED) {
 if(event_types.MESSAGE_SWIPE_DELETED){
     eventSource.on(event_types.MESSAGE_SWIPE_DELETED,payload=>{
         const id=Number(payload?.messageId);const deleted=Number(payload?.swipeId);
+        // Sync wipe before the optional 2s active-swipe reconciliation delay.
+        if(Number.isFinite(id)){
+            try{dismissSceneBuildsForMessage(id,currentChatKey(),'swipe-deleted')}catch{}
+        }
         const oldActive=_knownSwipeIds.get(id);
         const activeChanged=oldActive==null||oldActive===deleted;
         _knownSwipeIds.set(id,Math.max(0,Number(payload?.newSwipeId??0)||0));

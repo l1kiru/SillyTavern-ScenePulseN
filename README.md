@@ -528,7 +528,7 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.12** - Together swipe SP Context rebind, capture-time lore highlight, config export of new settings, prompt/budget and matcher fixes.
+**Latest: v7.1.13** - Scene-build badge lifecycle: dismiss removes controller state, absolute deadlines, chat/swipe wipe, hung saving expire.
 
 ## Contributing
 
