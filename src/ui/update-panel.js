@@ -9,8 +9,7 @@ import { markStart as _spPmStart, markEnd as _spPmEnd } from '../perf-monitor.js
 import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
 import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId } from '../settings.js';
-import { getLatestSnapshot, getLatestSnapshotEntry, getPrevSnapshot } from '../settings.js';
-import { getLastSessionCoverage } from '../generation/request-token-ledger.js';
+import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
 import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
@@ -25,7 +24,7 @@ import {
     currentSnapshotMesIdx,
     currentWeatherType,
     _isTimelineScrub,
-    _sessionTokensUsed, _lastDeltaSavings,
+    _lastDeltaSavings,
     getLastPromptInjectionMetrics,
     inlineGenerationContext,
 } from '../state.js';
@@ -1574,30 +1573,6 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const _fullEst=Math.round(_mTokens/(1-pct/100));
             const _saved=_fullEst-_mTokens;
             fhtml+=`<span title="${t('Delta mode saved')} ~${_saved} ${t('tokens')} (${t('full output would be')} ~${_fullEst} ${t('tokens')})" class="sp-gen-badge-delta"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M7 2v10M4 5l3-3 3 3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg> -${pct}%</span>`;
-        }
-        // Session cumulative tokens
-        // Session cumulative API tokens (runtime since open) — hide while scrubbing history.
-        {
-            let _showSessionSigma = _sessionTokensUsed > 0;
-            if (_showSessionSigma) {
-                try {
-                    const _latestId = getLatestSnapshotEntry()?.id;
-                    if (typeof _latestId === 'number' && currentSnapshotMesIdx >= 0 && currentSnapshotMesIdx !== _latestId) {
-                        _showSessionSigma = false;
-                    }
-                } catch {}
-            }
-            if (_showSessionSigma) {
-                const _cov = getLastSessionCoverage();
-                const _tipLines = [
-                    t('API tokens since open (estimate)'),
-                    t('Resets when you switch chats or reload.'),
-                ];
-                if (_cov && _cov !== 'exact') {
-                    _tipLines.push(t('Tools/schema may be excluded from the count.'));
-                }
-                fhtml += `<span title="${esc(_tipLines.join('\n'))}" class="sp-gen-badge-session">\u03A3 ${_sessionTokensUsed > 1000 ? (_sessionTokensUsed / 1000).toFixed(1) + 'k' : _sessionTokensUsed}</span>`;
-            }
         }
         // Inspect payload button
         if(currentSnapshotMesIdx>=0)fhtml+=`<span class="sp-gen-inspect" title="${t('Inspect')}"><svg viewBox="0 0 14 14" width="11" height="11" fill="none"><path d="M9.5 1.5h3v3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/><path d="M12.5 1.5L8 6" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/><path d="M7 2H2.5a1 1 0 0 0-1 1v8.5a1 1 0 0 0 1 1H11a1 1 0 0 0 1-1V7" stroke="currentColor" stroke-width="1.1" stroke-linecap="round"/></svg> ${t('Inspect')}</span>`;

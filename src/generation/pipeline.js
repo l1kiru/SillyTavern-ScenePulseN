@@ -4,7 +4,7 @@
 import { log, warn } from '../logger.js';
 import {
     setCurrentSnapshotMesIdx, setLastGenSource, setLastRawResponse, setLastDeltaPayload,
-    addSessionTokens, setLastDeltaSavings, _lastDeltaSavings, setLastExtractionFailure,
+    setLastDeltaSavings, _lastDeltaSavings, setLastExtractionFailure,
     getActivePromptInjectionRun, getLastPromptInjectionMetrics,
 } from '../state.js';
 import { getSettings, getActiveSchema, getPrevSnapshot, getActiveSwipeId, saveSnapshot, ensureChatSaved, shouldUseDelta, clearForceFullState, hasStaleSnapshotBefore } from '../settings.js';
@@ -55,12 +55,7 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
 
     setLastGenSource(source);
     setLastRawResponse(JSON.stringify(extracted, null, 2));
-    // Together session Σ is charged by the request-token ledger on request
-    // terminal (not extraction success). Separate still uses prompt+completion here.
-    const _togetherSrc = String(source || '').startsWith('auto:together') || String(source || '').includes('together');
-    if (!_togetherSrc && !opts.skipSessionTokens) {
-        addSessionTokens(promptTokens + completionTokens);
-    }
+    // ponytail: session Σ removed — extension cannot show accurate provider usage.
 
     // Delta merge — v6.8.50: use shouldUseDelta() which respects the
     // periodic full-state refresh counter.
@@ -169,9 +164,6 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
     };
     if (narrativeTokens != null) norm._spMeta.narrativeTokens = narrativeTokens;
     if (trackerTokens != null) norm._spMeta.trackerTokens = trackerTokens;
-    if (opts.tokenSource) norm._spMeta.tokenSource = opts.tokenSource;
-    if (opts.tokenCoverage) norm._spMeta.tokenCoverage = opts.tokenCoverage;
-    if (Array.isArray(opts.requestSeqs) && opts.requestSeqs.length) norm._spMeta.requestSeqs = opts.requestSeqs;
     if (_together) {
         const chatKey = currentChatKey();
         const plan = getActivePromptInjectionRun();
