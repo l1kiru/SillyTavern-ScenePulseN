@@ -34,6 +34,7 @@ globalThis.document = {
         return [];
     },
     getElementById(id) {
+        if (id === 'mes_stop') return this._mesStop || null;
         if (id === 'sp-scene-build-toast') return this._toast || null;
         if (String(id).startsWith('sp-scene-build-')) {
             return (this._stubs || []).find(s => s.id === id) || null;
@@ -74,6 +75,7 @@ globalThis.document = {
     },
     _stubs: [],
     _toast: null,
+    _mesStop: null,
 };
 globalThis.window = { addEventListener() {}, removeEventListener() {}, innerWidth: 1280, innerHeight: 720 };
 const chatMessages = [
@@ -106,9 +108,13 @@ console.log('\n── SceneBuild UI reconcile ──');
 ctrl._resetSceneBuildRegistryForTests();
 ui.initSceneBuildUi();
 const together = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'auto:together', chatKey: currentChatKey() });
+document._mesStop = { offsetParent: {} }; // ST still streaming
 ctrl.updateSceneBuild(together.operationId, { status: 'generating' });
-assertTrue('together stub hidden while generating', !document.getElementById(`sp-scene-build-${together.operationId}`));
+assertTrue('together stub hidden while streaming', !document.getElementById(`sp-scene-build-${together.operationId}`));
 assertTrue('toast still mounts while generating', !!document.getElementById('sp-scene-build-toast'));
+document._mesStop = null; // stream finished, reply on screen
+ui.reconcileSceneBuildUi();
+assertTrue('together stub after stream ends (still generating)', !!document.getElementById(`sp-scene-build-${together.operationId}`));
 ctrl.updateSceneBuild(together.operationId, { status: 'parsing' });
 assertTrue('together stub after reply parsed', !!document.getElementById(`sp-scene-build-${together.operationId}`));
 ctrl.cancelSceneBuild(together.operationId, 'user');
