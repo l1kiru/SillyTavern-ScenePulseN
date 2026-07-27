@@ -39,6 +39,7 @@ import { scenePulseInterceptor, noteStreamProgress, clearStallWatchdog } from '.
 import { rebindInlineCtxForExpectedSwipe } from './src/generation/inline-ctx.js';
 import {
     processTogetherExtraction, discardTogetherSceneBuild,
+    abortShortTogetherReply, isShortTogetherReply,
     handleTogetherSwipeChange, unlockAfterSwipeCancel,
 } from './src/generation/together-scene-build.js';
 import {
@@ -468,8 +469,11 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 setInlineGenerationContext(null);
                 log('GENERATION_ENDED: pipeline complete');
                 return;
+            } else if (isShortTogetherReply(rawMes)) {
+                log('GENERATION_ENDED: short/empty reply for message', targetIdx, '(' + rawMes.length + ' chars), aborting scene build');
+                abortShortTogetherReply(_inlineCtx, 'empty-reply');
             } else {
-                const msgLen = (chat[targetIdx]?.mes || '').length;
+                const msgLen = rawMes.length;
                 log('GENERATION_ENDED: primary extraction failed for message', targetIdx, '(' + msgLen + ' chars), deferring to onCharMsg');
                 setPendingInlineIdx(targetIdx);
                 spSetGenerating(false);
@@ -478,9 +482,8 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
                 // metrics already committed after authority for footer.
             }
         } else {
-            log('GENERATION_ENDED: no assistant message found, deferring to onCharMsg');
-            spSetGenerating(false);
-            stopStreamingHider();
+            log('GENERATION_ENDED: no assistant message found, aborting scene build');
+            abortShortTogetherReply(inlineGenerationContext, 'empty-reply');
         }
     } else {
         // Foreign quiet / unrelated GENERATION_ENDED — do NOT clear our Together prompts.
