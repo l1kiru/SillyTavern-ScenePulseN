@@ -468,7 +468,11 @@ export function bindUI(){const s=getSettings();
     });
     $('#sp-btn-reset').on('click',async()=>{
         if(!await spConfirm(t('Reset Settings'),t('Reset all ScenePulse settings to defaults? Tracker data is preserved.')))return;
-        SillyTavern.getContext().extensionSettings[MODULE_NAME]=structuredClone(DEFAULTS);saveSettings();try{localStorage.removeItem(SP_LS_KEY)}catch(e){}loadUI();toastr.info(t('Settings reset to defaults'));
+        const previous=captureTrackerStructure();
+        SillyTavern.getContext().extensionSettings[MODULE_NAME]=structuredClone(DEFAULTS);saveSettings();
+        try{localStorage.removeItem(SP_LS_KEY)}catch(e){}
+        reconcileTrackerStructureChange(previous);
+        loadUI();toastr.info(t('Settings reset to defaults'));
     });
     // Config export/import
     $('#sp-btn-export-config').on('click',()=>{

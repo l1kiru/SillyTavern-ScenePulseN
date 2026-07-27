@@ -33,12 +33,18 @@ const {
     getLatestSnapshot,
     getSettings,
     getSnapshotFor,
+    invalidateSettingsCache,
     reconcileLatestCustomPanelValues,
     reconcileTrackerStructureChange,
+    rearmForceFullAfterFailedFullRun,
     sanitizeCharacterCustomFields,
+    saveSettings,
     saveSnapshot,
     shouldUseDelta,
 } = await import('../src/settings.js');
+const { DEFAULTS } = await import('../src/constants.js');
+const { makeProfile, updateActiveProfile } = await import('../src/profiles.js');
+const { processTogetherExtraction, _setTogetherProcessExtractionForTests } = await import('../src/generation/together-scene-build.js');
 
 let pass = 0, fail = 0;
 function ok(name, value) {
@@ -251,6 +257,83 @@ console.log('\n── In-flight Together lifecycle ──');
     eq('invalid frozen-schema extraction is rejected',result,null);
     ok('late extraction does not clear a newer force-full request',!shouldUseDelta(getLatestSnapshot()));
     clearForceFullState();
+}
+
+console.log('\n── Force-full survives failed full run ──');
+{
+    const root=getSettings();
+    root.deltaMode=true;
+    forceFullStateRefresh();
+    ok('force-full armed before consume',!shouldUseDelta(getLatestSnapshot()));
+    clearForceFullState();
+    ok('consume allows delta again',shouldUseDelta(getLatestSnapshot()));
+    rearmForceFullAfterFailedFullRun(false);
+    ok('failed full run rearms force-full',!shouldUseDelta(getLatestSnapshot()));
+
+    clearForceFullState();
+    forceFullStateRefresh();
+    clearForceFullState();
+    forceFullStateRefresh(); // mid-flight structural re-arm after a delta decision
+    rearmForceFullAfterFailedFullRun(true);
+    ok('failed delta run does not clear mid-flight force-full',!shouldUseDelta(getLatestSnapshot()));
+    clearForceFullState();
+
+    _setTogetherProcessExtractionForTests(async()=>null);
+    try{
+        forceFullStateRefresh();
+        clearForceFullState(); // interceptor already consumed for this Together full run
+        const togetherResult=await processTogetherExtraction(51,{},'auto:together',{frozenDeltaMode:false});
+        eq('Together pipeline null result',togetherResult,null);
+        ok('Together failed full rearms force-full',!shouldUseDelta(getLatestSnapshot()));
+    }finally{
+        _setTogetherProcessExtractionForTests(null);
+        clearForceFullState();
+    }
+}
+
+console.log('\n── Reset / template structure reconcile ──');
+{
+    const root=getSettings();
+    root.deltaMode=true;
+    const rich=makeProfile({
+        name:'Rich',
+        panels:{dashboard:false,scene:false,quests:false,relationships:false,characters:true,storyIdeas:false},
+        customPanels:[structuredClone(characterPanel)],
+    });
+    root.profiles=[rich];
+    root.activeProfileId=rich.id;
+    delete _ctx.chatMetadata.scenepulse.chatPanels;
+    invalidateSettingsCache();
+
+    saveSnapshot(12,{characters:[{name:'Jenna',role:'Ally',disposition:'Wary',threat:37}]});
+    const beforeReset=captureTrackerStructure();
+    _ctx.extensionSettings.scenepulse=structuredClone(DEFAULTS);
+    saveSettings();
+    ok('reset-like structure change reconciles',reconcileTrackerStructureChange(beforeReset));
+    ok('reset clears stale character custom fields',!Object.hasOwn(getLatestSnapshot().characters[0],'disposition'));
+    ok('reset forces full state',!shouldUseDelta(getLatestSnapshot()));
+    clearForceFullState();
+
+    // Restore chat panels for template switch (profile-owned panels already wiped).
+    _ctx.chatMetadata.scenepulse.chatPanels=[structuredClone(globalPanel),structuredClone(characterPanel)];
+    const s=getSettings();
+    if(!Array.isArray(s.profiles)||!s.profiles.length){
+        const seed=makeProfile({name:'Seed'});
+        s.profiles=[seed];
+        s.activeProfileId=seed.id;
+    }
+    invalidateSettingsCache();
+    const beforeTemplate=captureTrackerStructure();
+    const empty=makeProfile({name:'From Template',promptOverrides:{role:'x'}});
+    s.profiles.push(empty);
+    s.activeProfileId=empty.id;
+    ok('empty-profile activate reconciles',reconcileTrackerStructureChange(beforeTemplate));
+    ok('template activate forces full state',!shouldUseDelta(getLatestSnapshot()));
+    clearForceFullState();
+
+    const beforePrompt=captureTrackerStructure();
+    updateActiveProfile(s,{promptOverrides:{role:'new'},systemPromptRole:'user'});
+    ok('prompt-only patch does not reconcile',!reconcileTrackerStructureChange(beforePrompt));
 }
 
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} ${pass}/${pass + fail}`);

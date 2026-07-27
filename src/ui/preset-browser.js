@@ -10,7 +10,7 @@
 
 import { t } from '../i18n.js';
 import { esc, spConfirm, spPrompt } from '../utils.js';
-import { getSettings, saveSettings } from '../settings.js';
+import { getSettings, saveSettings, captureTrackerStructure, reconcileTrackerStructureChange } from '../settings.js';
 import { getActiveProfile, updateActiveProfile, makeProfile } from '../profiles.js';
 import { BUILT_IN_PRESETS, buildPresetPatch, getActiveModelId, findMatchingPreset, getOrStats, getStatsTimestamp, hasOrStats, _resetOrStatsCache } from '../presets/registry.js';
 import { getPresetFamilies } from '../presets/built-in.js';
@@ -440,6 +440,7 @@ export function openPresetBrowser(opts = {}) {
         const finalName = chosenName.trim();
         // Build profile via makeProfile so all defaults (incl. promptOverrides /
         // systemPromptRole / appliedPresetId) flow through one path.
+        const previous = captureTrackerStructure();
         const newProfile = makeProfile({
             name: finalName,
             description: t('Seeded from template: {preset}', { preset: preset.displayName }),
@@ -450,6 +451,7 @@ export function openPresetBrowser(opts = {}) {
         if (!Array.isArray(sNow.profiles)) sNow.profiles = [];
         sNow.profiles.push(newProfile);
         sNow.activeProfileId = newProfile.id;
+        reconcileTrackerStructureChange(previous);
         saveSettings();
         try { toastr.success(t('Created "{profile}" from {preset} template — switched to it.', { profile: finalName, preset: preset.displayName })); } catch {}
         // Local view update so the row reflects the new applied state.
