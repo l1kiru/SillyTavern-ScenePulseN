@@ -531,41 +531,6 @@ export function promptInjectionOwnerMatches(candidate, { chatKey, messageId, swi
 }
 
 /**
- * Keep PromptInjectionPlan + last runtime metrics keyed to the final swipe
- * when Together rebinds expected advance (frozen → frozen+1).
- * @param {{ chatKey?: string|null, messageId?: number|null, targetMessageId?: number|null, swipeId?: number|null }} owner
- * @returns {boolean} true if plan and/or metrics swipeId changed
- */
-export function rebindPromptInjectionOwner(owner) {
-    if (!owner) return false;
-    const chatKey = owner.chatKey ?? null;
-    const messageId = owner.targetMessageId ?? owner.messageId ?? null;
-    const swipeId = Math.max(0, Number(owner.swipeId) || 0);
-    if (chatKey == null || messageId == null) return false;
-
-    let changed = false;
-    const plan = getActivePromptInjectionRun();
-    if (plan?.owner
-        && plan.owner.chatKey === chatKey
-        && Number(plan.owner.messageId) === Number(messageId)
-        && Number(plan.owner.swipeId ?? 0) !== swipeId) {
-        plan.owner = { ...plan.owner, swipeId };
-        setActivePromptInjectionRun(plan);
-        changed = true;
-    }
-
-    const rt = getLastPromptInjectionMetrics();
-    if (rt
-        && rt.chatKey === chatKey
-        && Number(rt.messageId) === Number(messageId)
-        && Number(rt.swipeId ?? 0) !== swipeId) {
-        setLastPromptInjectionMetrics({ ...rt, swipeId });
-        changed = true;
-    }
-    return changed;
-}
-
-/**
  * Intermediate materialize: trust candidate only if it matches sourceText under allowlist.
  */
 export function materializePromptInjection(payload, plan = getActivePromptInjectionRun(), {
