@@ -14,6 +14,7 @@ import {
 } from '../settings.js';
 import { genNonce, genMeta, setLastGenSource } from '../state.js';
 import { customPanelSectionKey, getActiveProfile, updateActiveProfile, createProfile, duplicateProfile, renameProfile, deleteProfile, setActiveProfile, validateImportedProfile, validateImportedConfigSettings, importProfile, exportProfile, migrateLegacySettingsToProfile } from '../profiles.js';
+import { normalizeTrackerPromptStyle } from '../prompts/together-framing.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { hidePanel, _applyFontScale as _applyFontScaleFromUI, updateFeatBadge } from '../ui/panel.js';
 import { updateThoughts } from '../ui/thoughts.js';
@@ -480,6 +481,8 @@ export function bindUI(){const s=getSettings();
                 fontScale:s.fontScale,contextMessages:s.contextMessages,maxRetries:s.maxRetries,promptMode:s.promptMode,
                 embedSnapshots:s.embedSnapshots,embedRole:s.embedRole,autoGenerate:s.autoGenerate,
                 showThoughts:s.showThoughts,showEmptyFields:s.showEmptyFields,sceneTransitions:s.sceneTransitions,
+                sceneSourceTrace:s.sceneSourceTrace===true,sceneSourceTraceDiagnostics:s.sceneSourceTraceDiagnostics===true,
+                trackerPromptStyle:normalizeTrackerPromptStyle(getActiveProfile(s)?.trackerPromptStyle),
                 panels:{...DEFAULTS.panels,...sView.panels},dashCards:{...DEFAULTS.dashCards,...sView.dashCards},
                 fieldToggles:sView.fieldToggles,customPanels:sView.customPanels||[],
                 openSections:_cleanOpen}};

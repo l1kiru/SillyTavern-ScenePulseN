@@ -54,6 +54,7 @@ class FakeEl {
         this._mesText = null;
         this.focused = false;
         this.scrolled = false;
+        this._attrs = Object.create(null);
         const self = this;
         this.classList = {
             _s: new Set(),
@@ -63,6 +64,8 @@ class FakeEl {
     }
     get className() { return this._className || ''; }
     get firstChild() { return this.childNodes[0] || null; }
+    setAttribute(k, v) { this._attrs[k] = String(v); }
+    getAttribute(k) { return Object.hasOwn(this._attrs, k) ? this._attrs[k] : null; }
     appendChild(ch) {
         if (ch.parentNode?.removeChild) {
             try { ch.parentNode.removeChild(ch); } catch { /* ignore */ }
@@ -116,15 +119,24 @@ function allText(node, out = []) {
     return out;
 }
 
-const mesText = new FakeEl('div');
-mesText.classList.add('mes_text');
-mesText.appendChild(new FakeText('Go to командный центр then командный центр again'));
-const mes = new FakeEl('div');
-mes.classList.add('mes');
-mes._mesText = mesText;
-mes.appendChild(mesText);
+function makeMes(mesid, text) {
+    const mesText = new FakeEl('div');
+    mesText.classList.add('mes_text');
+    mesText.appendChild(new FakeText(text));
+    const mes = new FakeEl('div');
+    mes.classList.add('mes');
+    mes.setAttribute('mesid', String(mesid));
+    mes._mesText = mesText;
+    mes.appendChild(mesText);
+    return mes;
+}
+
+const mesOld = makeMes(2, 'old командный центр only here');
+const mesNew = makeMes(9, 'new командный центр after growth');
 const chat = new FakeEl('div');
-chat.appendChild(mes);
+chat.appendChild(mesOld);
+chat.appendChild(mesNew);
+const allMes = [mesOld, mesNew];
 
 globalThis.NodeFilter = { SHOW_TEXT: 4, FILTER_ACCEPT: 1, FILTER_REJECT: 2 };
 globalThis.document = {
@@ -135,20 +147,29 @@ globalThis.document = {
         return { nextNode() { i++; return i < nodes.length ? nodes[i] : null; } };
     },
     querySelectorAll(sel) {
-        if (sel === '#chat .mes') return [mes];
+        if (sel === '#chat .mes') return allMes;
         if (String(sel).includes(WI_KEY_HIT_CLASS)) return walkHits(chat);
         return [];
     },
     querySelector(sel) {
+        const m = String(sel).match(/#chat \.mes\[mesid="(\d+)"\]/);
+        if (m) return allMes.find(el => el.getAttribute('mesid') === m[1]) || null;
         if (String(sel).includes(WI_KEY_HIT_CLASS)) return walkHits(chat)[0] || null;
         return null;
     },
 };
 
 _resetWiKeyHighlightForTests();
+assert.equal(highlightMatchedKeysInChat(['командный центр'], { messageIds: [2] }), 1);
+assert.equal(walkHits(mesOld).length, 1);
+assert.equal(walkHits(mesNew).length, 0);
+clearWiKeyHighlights();
+
+_resetWiKeyHighlightForTests();
 assert.equal(highlightMatchedKeysInChat(['командный центр']), 2);
+assert.equal(walkHits(mesOld).length, 1);
+assert.equal(walkHits(mesNew).length, 1);
 const hitNodes = walkHits(chat);
-assert.equal(hitNodes.length, 2);
 assert.equal(hitNodes[0].scrolled, true);
 assert.equal(hitNodes[0].focused, true);
 assert.equal(highlightMatchedKeysInChat([]), 0);

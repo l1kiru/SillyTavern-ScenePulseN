@@ -21,6 +21,29 @@ import fixture from './fixtures/wi-artoria-regex.json' with { type: 'json' };
 }
 
 {
+    const no = inferTriggersForEntry(
+        { key: ['red dragon'], matchWholeWords: true },
+        'bred dragons',
+        { matchWholeWords: true },
+    );
+    assert.deepEqual(no.matchedKeys, []);
+
+    const yes = inferTriggersForEntry(
+        { key: ['red dragon'], matchWholeWords: true },
+        'the red dragon flew',
+        { matchWholeWords: true },
+    );
+    assert.ok(yes.matchedKeys.some(k => /red dragon/i.test(k)));
+
+    const substr = inferTriggersForEntry(
+        { key: ['red dragon'], matchWholeWords: false },
+        'bred dragons',
+        { matchWholeWords: false },
+    );
+    assert.ok(substr.matchedKeys.some(k => /red dragon/i.test(k)));
+}
+
+{
     const r = inferTriggersForEntry(
         { key: [fixture.key], selectiveLogic: 0, keysecondary: [] },
         'met Арторией Пендрагон',

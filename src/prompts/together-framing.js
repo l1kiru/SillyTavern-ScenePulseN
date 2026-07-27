@@ -42,7 +42,7 @@ INTERNAL REASONING (do this silently before writing the JSON):
 
 const _OUTPUT_FORMAT_FOOTER = `- No explanations, no commentary, no extra text before or after the markers.
 - Do not wrap the JSON in markdown code blocks.
-- The tracker block does not count toward any response length limits.`;
+- Tracker JSON shares the same response output limit as the narrative — reserve enough budget to finish the complete tracker block.`;
 
 const _FULL_JSON_EXAMPLE = '{"time":"14:30","date":"03/15/2025","location":"Town Square",...all fields...}';
 

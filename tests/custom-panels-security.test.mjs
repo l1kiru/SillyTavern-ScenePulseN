@@ -84,6 +84,19 @@ ok('__proto__ absent from settings patch', !Object.hasOwn(config.settingsPatch, 
 ok('constructor absent from settings patch', !Object.hasOwn(config.settingsPatch, 'constructor'));
 ok('Object prototype remains unpolluted', ({}).polluted === undefined);
 
+{
+    const roundTrip = validateImportedConfigSettings({
+        sceneSourceTrace: true,
+        sceneSourceTraceDiagnostics: true,
+        trackerPromptStyle: 'full',
+        autoGenerate: true,
+    });
+    ok('new settings config accepted', roundTrip.ok);
+    eq('sceneSourceTrace imported', roundTrip.settingsPatch.sceneSourceTrace, true);
+    eq('sceneSourceTraceDiagnostics imported', roundTrip.settingsPatch.sceneSourceTraceDiagnostics, true);
+    eq('trackerPromptStyle profile patch', roundTrip.profilePatch.trackerPromptStyle, 'full');
+}
+
 const invalidConfig = validateImportedConfigSettings({ autoGenerate: 'yes', customPanels: [{ name: 'Bad', fields: 'nope' }] });
 ok('invalid config is rejected atomically', !invalidConfig.ok && invalidConfig.settingsPatch === null && invalidConfig.profilePatch === null);
 

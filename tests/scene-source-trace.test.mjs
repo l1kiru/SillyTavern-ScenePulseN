@@ -140,6 +140,23 @@ assert.equal(buildWiScanBuffer([{ mes: 'SecretKey' }], 0), '');
     assert.deepEqual(d0.lorebook.entries[0].matchedKeys, []);
     assert.equal(d0.lorebook.entries[0].matchKind, 'none');
     assert.equal(d0.settings.scanDepth, 0);
+    assert.deepEqual(d0.scanContext?.messageIds, []);
+}
+
+{
+    _resetSceneSourceTraceForTests();
+    const chat = [
+        { mes: 'zero' },
+        { mes: 'one' },
+        { mes: 'two has Artoria' },
+        { mes: 'three' },
+    ];
+    startSceneSourceTrace(
+        { chatKey: 'c-ids', targetMessageId: 4, swipeId: 0 },
+        { enabled: true, chat, depth: 2 },
+    );
+    const finished = finishSceneSourceTrace({ chatKey: 'c-ids', targetMessageId: 4, swipeId: 0 });
+    assert.deepEqual(finished.scanContext?.messageIds, [2, 3]);
 }
 
 const event = {
@@ -437,6 +454,7 @@ assert.match(mounted.drawer.innerHTML, /~12/);
 assert.match(mounted.drawer.innerHTML, /Tokens/);
 assert.match(mounted.drawer.innerHTML, /data-matched-keys="\[&quot;Artoria Pendragon&quot;\]"/);
 assert.match(mounted.drawer.innerHTML, /data-match-kind="keys"/);
+assert.equal(mounted.drawer.getAttribute('data-scan-message-ids'), '[]');
 assert.ok(!mounted.drawer.innerHTML.includes(sampleRx));
 assert.ok(!mounted.drawer.innerHTML.includes('(?:'));
 
@@ -470,5 +488,37 @@ const mountedConst = mountSceneSourceTrace(bodyConst, {
 assert.ok(mountedConst);
 assert.match(mountedConst.drawer.innerHTML, /data-matched-keys="\[\]"/);
 assert.match(mountedConst.drawer.innerHTML, /data-match-kind="constant"/);
+
+{
+    const bodyIds = el('div');
+    const footIds = el('div');
+    footIds.className = 'sp-gen-footer';
+    bodyIds.appendChild(footIds);
+    const mountedIds = mountSceneSourceTrace(bodyIds, {
+        settings: { sceneSourceTrace: true },
+        snapshot: {
+            _spMeta: {
+                injectionMethod: 'inline',
+                sceneSourceTrace: {
+                    v: 3,
+                    capturedAt: '2026-07-25T00:00:00.000Z',
+                    scanContext: { messageIds: [2, 3] },
+                    lorebook: {
+                        count: 1,
+                        entries: [{
+                            world: 'Book',
+                            uid: '1',
+                            title: 'Hero',
+                            matchedKeys: ['Artoria'],
+                            matchKind: 'keys',
+                        }],
+                    },
+                },
+            },
+        },
+        footer: footIds,
+    });
+    assert.equal(mountedIds.drawer.getAttribute('data-scan-message-ids'), '[2,3]');
+}
 
 console.log('scene-source-trace.test.mjs: all tests passed');
