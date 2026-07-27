@@ -2,6 +2,15 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.13] — 2026-07-27
+
+#### Fixed — Scene-build badge lifecycle
+
+- Ready/cancelled dismiss now removes the controller op (not only DOM), using an absolute deadline so background-tab timer delay cannot remount a stale “Scene ready” badge.
+- Owner (chat + active swipe) is gated on every UI path; sibling stubs hide DOM only and keep their dismiss timers.
+- `MESSAGE_DELETED` / `MESSAGE_SWIPE_DELETED` / `CHAT_CHANGED` wipe ephemeral scene-build ops synchronously in `index.js` before queued snapshot work.
+- Watchdog expires hung `saving` even with stuck busy flags; Together pipeline failures fail the op and rethrow.
+
 ### [7.1.12] — 2026-07-27
 
 #### Fixed — Together / Scene Source Trace / config round-trip

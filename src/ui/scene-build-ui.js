@@ -6,13 +6,15 @@ import { esc } from '../utils.js';
 import { spDetectMode } from './mobile.js';
 import {
     subscribeSceneBuild, getActiveSceneBuilds, getAllSceneBuilds, getSceneBuild,
-    cancelSceneBuild, isActiveStatus, disposeSceneBuilds,
+    cancelSceneBuild, dismissSceneBuild, isActiveStatus, disposeSceneBuilds,
 } from '../generation/scene-build-controller.js';
 import { runSceneBuild } from '../generation/scene-build-runner.js';
 import { setLastGenSource } from '../state.js';
+import { currentChatKey } from '../message-fingerprint.js';
+import { getActiveSwipeId } from '../settings.js';
 
-const READY_DISMISS_MS = 1200;
-const CANCEL_DISMISS_MS = 900;
+export const READY_DISMISS_MS = 1200;
+export const CANCEL_DISMISS_MS = 900;
 const _dismissTimers = new Map();
 let _subscribed = false;
 let _unsubscribe = null;
@@ -83,6 +85,15 @@ function _stubId(operationId) {
     return `sp-scene-build-${operationId}`;
 }
 
+function _isOwnerVisible(op) {
+    if (!op || op.chatKey !== currentChatKey()) return false;
+    try {
+        return op.swipeId === getActiveSwipeId(op.messageId);
+    } catch {
+        return false;
+    }
+}
+
 function _clearDismiss(operationId) {
     const tmr = _dismissTimers.get(operationId);
     if (tmr) clearTimeout(tmr);
@@ -93,11 +104,24 @@ function _scheduleRemove(operationId, ms) {
     _clearDismiss(operationId);
     _dismissTimers.set(operationId, setTimeout(() => {
         _dismissTimers.delete(operationId);
-        document.getElementById(_stubId(operationId))?.remove();
-        _syncFloating();
-        _syncMesButtons();
-        _syncToolbar();
+        dismissSceneBuild(operationId, 'dismiss');
     }, ms));
+}
+
+/** Schedule absolute ready/cancelled deadline. Returns false if op was dismissed. */
+function _ensureDismissDeadline(op) {
+    if (op.status !== 'ready' && op.status !== 'cancelled') {
+        if (op.status === 'superseded') _clearDismiss(op.operationId);
+        return true;
+    }
+    const windowMs = op.status === 'ready' ? READY_DISMISS_MS : CANCEL_DISMISS_MS;
+    const remaining = (op.updatedAt + windowMs) - Date.now();
+    if (remaining <= 0) {
+        dismissSceneBuild(op.operationId, 'dismiss');
+        return false;
+    }
+    _scheduleRemove(op.operationId, remaining);
+    return true;
 }
 
 /** Place stub after message body so it never sits above streaming text. */
@@ -114,6 +138,7 @@ function _mountPoint(mes) {
  */
 function _shouldShowStub(op) {
     if (op.status === 'superseded') return false;
+    if (!_isOwnerVisible(op)) return false;
     const mes = _mesEl(op.messageId);
     if (!mes?.querySelector('.mes_text')) return false;
     const src = String(op.source || '');
@@ -122,11 +147,11 @@ function _shouldShowStub(op) {
 }
 
 function _clearSiblingStubs(op) {
+    // Hide other stubs for this message (incl. other swipes). DOM only —
+    // do not cancel their dismiss timers; those still remove controller ops.
     document.querySelectorAll(`.sp-scene-build[data-sp-mes="${op.messageId}"]`).forEach(el => {
         if (el.dataset.spOp === op.operationId) return;
-        if (el.dataset.spSwipe != null && el.dataset.spSwipe !== String(op.swipeId)) return;
         el.remove();
-        _clearDismiss(el.dataset.spOp);
     });
 }
 
@@ -180,7 +205,7 @@ function _renderStub(op) {
 }
 
 function _syncFloating() {
-    const active = getActiveSceneBuilds();
+    const active = getActiveSceneBuilds().filter(_isOwnerVisible);
     let toast = document.getElementById('sp-scene-build-toast');
     if (!active.length) {
         toast?.remove();
@@ -209,6 +234,7 @@ function _syncFloating() {
 function _syncMesButtons() {
     const activeByMes = new Map();
     for (const op of getActiveSceneBuilds()) {
+        if (!_isOwnerVisible(op)) continue;
         activeByMes.set(op.messageId, op);
     }
     document.querySelectorAll('.sp-mes-btn').forEach(btn => {
@@ -230,7 +256,7 @@ function _syncMesButtons() {
 function _syncToolbar() {
     const regen = document.getElementById('sp-tb-regen');
     if (!regen) return;
-    const busy = getActiveSceneBuilds().length > 0;
+    const busy = getActiveSceneBuilds().some(_isOwnerVisible);
     regen.disabled = busy;
     regen.setAttribute('aria-busy', busy ? 'true' : 'false');
     regen.title = busy ? t('Creating…') : t('Regenerate all');
@@ -285,9 +311,7 @@ function _onClick(e) {
     if (close) {
         e.preventDefault();
         e.stopPropagation();
-        const id = close.getAttribute('data-sp-close');
-        document.getElementById(_stubId(id))?.remove();
-        _syncFloating();
+        dismissSceneBuild(close.getAttribute('data-sp-close'), 'dismiss');
     }
 }
 
@@ -301,7 +325,8 @@ function _onChange(op, reason) {
         _syncToolbar();
         return;
     }
-    if (reason === 'replace-terminal' && op) {
+    // 1) Removal events first — clear DOM even for foreign chat/swipe.
+    if (op && (reason === 'replace-terminal' || reason === 'dismiss' || reason === 'prune')) {
         document.getElementById(_stubId(op.operationId))?.remove();
         _clearDismiss(op.operationId);
         _syncFloating();
@@ -315,13 +340,24 @@ function _onChange(op, reason) {
         _syncToolbar();
         return;
     }
+    // 2) Absolute deadline / timer even when owner is not visible.
+    if (op.status === 'ready' || op.status === 'cancelled') {
+        if (!_ensureDismissDeadline(op)) return;
+    } else if (op.status === 'superseded') {
+        _clearDismiss(op.operationId);
+    }
+    // 3) Owner-gate only for rendering.
+    if (!_isOwnerVisible(op)) {
+        document.getElementById(_stubId(op.operationId))?.remove();
+        _syncFloating();
+        _syncMesButtons();
+        _syncToolbar();
+        return;
+    }
     _renderStub(op);
     _syncFloating();
     _syncMesButtons();
     _syncToolbar();
-    if (op.status === 'ready') _scheduleRemove(op.operationId, READY_DISMISS_MS);
-    else if (op.status === 'cancelled') _scheduleRemove(op.operationId, CANCEL_DISMISS_MS);
-    else if (op.status === 'superseded') _clearDismiss(op.operationId);
 }
 
 function _onVisibilityChange() {
@@ -345,20 +381,20 @@ export function initSceneBuildUi() {
 export function reconcileSceneBuildUi() {
     const liveIds = new Set();
     for (const op of getAllSceneBuilds()) {
+        if (op.status === 'ready' || op.status === 'cancelled') {
+            if (!_ensureDismissDeadline(op)) continue;
+        }
         const keep = isActiveStatus(op.status)
             || op.status === 'error'
             || op.status === 'expired'
             || op.status === 'ready'
             || op.status === 'cancelled';
         if (!keep) continue;
+        if (!_isOwnerVisible(op)) continue;
         liveIds.add(op.operationId);
         _renderStub(op);
-        if (op.status === 'ready' && !_dismissTimers.has(op.operationId)) {
-            _scheduleRemove(op.operationId, READY_DISMISS_MS);
-        } else if (op.status === 'cancelled' && !_dismissTimers.has(op.operationId)) {
-            _scheduleRemove(op.operationId, CANCEL_DISMISS_MS);
-        }
     }
+    // Sweep stray stubs; DOM only — do not cancel dismiss timers for hidden siblings.
     document.querySelectorAll('.sp-scene-build').forEach(el => {
         const id = el.dataset.spOp;
         if (!liveIds.has(id)) el.remove();
@@ -381,6 +417,11 @@ export function disposeSceneBuildUi() {
     _dismissTimers.forEach(clearTimeout);
     _dismissTimers.clear();
     _subscribed = false;
+}
+
+/** Test hook: whether a dismiss timer is pending for an operation. */
+export function _hasDismissTimerForTests(operationId) {
+    return _dismissTimers.has(operationId);
 }
 
 /** Helper for entry points: run generateTracker under SceneBuild. */
