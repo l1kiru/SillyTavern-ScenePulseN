@@ -249,6 +249,7 @@ globalThis.clearTimeout = (id) => {
     ctrl.failSceneBuild(b.operationId, new Error('x'));
     ctrl.dismissSceneBuildsForChat(currentChatKey(), 'message-deleted');
     eq('mid-chat delete wipe clears current chat ops', ctrl.getAllSceneBuilds().filter(o => o.chatKey === currentChatKey()).length, 0);
+    eq('mid-chat delete wipe clears current chat DOM', document.querySelectorAll('.sp-scene-build').length, 0);
 }
 
 {

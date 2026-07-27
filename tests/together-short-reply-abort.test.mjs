@@ -65,6 +65,33 @@ eq('inline start cleared', state.inlineGenStartMs, 0);
 assertTrue('inline ctx cleared', state.inlineGenerationContext == null);
 eq('pending cleared', state.pendingInlineIdx, -1);
 
+// GENERATION_ENDED short-abort then CHARACTER_MESSAGE_RENDERED/onCharMsg:
+// same guards onCharMsg uses — must not restart waits/recovery.
+{
+    ctrl._resetSceneBuildRegistryForTests();
+    state.setCancelRequested(false);
+    state.setInlineGenStartMs(Date.now());
+    state.setInlineExtractionDone(false);
+    state.setPendingInlineIdx(1);
+    const op2 = ctrl.startSceneBuild({
+        messageId: 1, swipeId: 0, source: 'auto:together', chatKey: currentChatKey(),
+    });
+    ctrl.updateSceneBuild(op2.operationId, { status: 'generating' });
+    const inlineCtx = {
+        mesIdx: 1, swipeId: 0, sceneBuildOperationId: op2.operationId, chatKey: currentChatKey(),
+    };
+    state.setInlineGenerationContext(inlineCtx);
+
+    const rawMes = ''; // empty final reply at GENERATION_ENDED
+    assertTrue('GENERATION_ENDED sees short reply', isShortTogetherReply(rawMes));
+    abortShortTogetherReply(inlineCtx, 'empty-reply');
+
+    // onCharMsg [inline] gates:
+    assertTrue('onCharMsg would skip — inlineGenStartMs cleared', state.inlineGenStartMs <= 0);
+    assertTrue('onCharMsg would skip recovery — cancelRequested', state.shouldSkipAutoSceneRecovery());
+    assertTrue('scene-build no longer current', !ctrl.isOperationCurrent(op2.operationId));
+}
+
 ctrl._resetSceneBuildRegistryForTests();
 state.setCancelRequested(false);
 

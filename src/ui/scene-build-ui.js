@@ -326,7 +326,12 @@ function _onChange(op, reason) {
         return;
     }
     // 1) Removal events first — clear DOM even for foreign chat/swipe.
-    if (op && (reason === 'replace-terminal' || reason === 'dismiss' || reason === 'prune')) {
+    // Structural wipes emit message-deleted/swipe-deleted/chat-changed; treat any
+    // emit whose op is already gone from the registry as removal (reason-agnostic).
+    if (op && (
+        reason === 'replace-terminal' || reason === 'dismiss' || reason === 'prune'
+        || !getSceneBuild(op.operationId)
+    )) {
         document.getElementById(_stubId(op.operationId))?.remove();
         _clearDismiss(op.operationId);
         _syncFloating();
