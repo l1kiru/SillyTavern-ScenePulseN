@@ -861,6 +861,13 @@ export function normalizeChar(ch){
         o.archetype=VALID.has(canonized)?canonized:'';
     }
     o.role=g(['role','identity','who','emotion','title']);
+    {
+        const rawGender=String(g(['gender','sex'])||ch.gender||ch.sex||'').trim().toLowerCase();
+        o.gender=/^(f|female|woman|girl|she|her|she\/her)$/.test(rawGender)?'female'
+            :/^(m|male|man|boy|he|him|he\/him)$/.test(rawGender)?'male'
+            :/^(nb|enby|nonbinary|non-binary|non binary|they|them|they\/them|other)$/.test(rawGender)?'nonbinary'
+            :rawGender&&['female','male','nonbinary',''].includes(rawGender)?rawGender:'';
+    }
     o.innerThought=g(['innerthought','inner_thought','thought','thinking','monologue']);
     o.immediateNeed=g(['immediateneed','immediate_need','need','doing','trying','urgentaction']);
     o.shortTermGoal=g(['shorttermgoal','short_term_goal','shortterm','neargoal']);

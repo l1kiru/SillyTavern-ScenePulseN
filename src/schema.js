@@ -15,6 +15,7 @@ import {
     isValidCustomFieldKey,
 } from './profiles.js';
 import { assemblePrompt } from './prompts/assembler.js';
+import { audienceIsOpen, audienceNeedsGender } from './character-audience.js';
 
 // ── Sub-field toggle → schema property mappings ──
 // v6.8.15: schema trim dropped 6 fertility sub-fields (reason/phase/day/window/
@@ -34,7 +35,8 @@ const CHAR_SUBFIELD_MAP={
     char_proximity:['proximity'],
     char_notableDetails:['notableDetails'],
     char_inventory:['inventory'],
-    char_fertility:['fertStatus','fertNotes']
+    char_fertility:['fertStatus','fertNotes'],
+    char_gender:['gender']
 };
 const REL_SUBFIELD_MAP={
     rel_type:['relType'],
@@ -68,7 +70,7 @@ function cloneSchema(value){
 }
 
 /** Build the schema for one concrete request without mutating the profile schema. */
-export function buildRequestSchema(schemaWrapper,{mode='full',fields=[]}={}){
+export function buildRequestSchema(schemaWrapper,{mode='full',fields=[],syncActiveCharacterRequirements=true}={}){
     const wrapper=cloneSchema(schemaWrapper||{});
     const value=wrapper.value&&typeof wrapper.value==='object'?wrapper.value:wrapper;
     const props=value?.properties||{};
@@ -80,15 +82,17 @@ export function buildRequestSchema(schemaWrapper,{mode='full',fields=[]}={}){
     else if(mode==='section')value.required=selected;
     else value.required=(Array.isArray(value.required)?value.required:selected).filter(key=>selectedSet.has(key));
     const characterItems=value.properties?.characters?.items;
-    if(characterItems?.properties){
-        const customKeys=getActiveCustomFieldSpecs(getActivePanels(),'character')
-            .map(spec=>spec.key)
-            .filter(key=>Object.hasOwn(characterItems.properties,key));
-        const customKeySet=new Set(customKeys);
+    if(characterItems?.properties&&syncActiveCharacterRequirements){
+        const customSpecs=getActiveCustomFieldSpecs(getActivePanels(),'character')
+            .filter(spec=>Object.hasOwn(characterItems.properties,spec.key));
+        const customKeySet=new Set(customSpecs.map(spec=>spec.key));
+        const requiredCustom=customSpecs
+            .filter(spec=>audienceIsOpen(spec.panel?.audience))
+            .map(spec=>spec.key);
         const itemRequired=Array.isArray(characterItems.required)?characterItems.required:[];
         characterItems.required=mode==='delta'
             ?itemRequired.filter(key=>!customKeySet.has(key))
-            :[...itemRequired,...customKeys.filter(key=>!itemRequired.includes(key))];
+            :[...itemRequired,...requiredCustom.filter(key=>!itemRequired.includes(key))];
     }
     if(value.additionalProperties===undefined)value.additionalProperties=false;
     if(wrapper.value){
@@ -135,6 +139,16 @@ export function buildDynamicSchema(s){
     const props={};const required=[];
     const panels=s.panels||DEFAULTS.panels;
     const ft=s.fieldToggles||{};
+    const customPanels=getActivePanels(s);
+    // Gender is an internal routing dependency whenever a character panel
+    // targets gender. Keep it in the request contract even when the visible
+    // built-in Gender row is disabled; otherwise the audience matcher has no
+    // stable value to route against.
+    const audienceGenderRequired=customPanels.some(cp =>
+        cp?.enabled !== false &&
+        customPanelScope(cp) === 'character' &&
+        audienceNeedsGender(cp.audience)
+    );
     // Operational time fields are not standalone UI cards, but generation,
     // delta merging and temporal validation depend on them. Keep them in the
     // request schema even though the panel manager does not expose toggles.
@@ -161,6 +175,17 @@ export function buildDynamicSchema(s){
                 props[f.key]=filterArraySchema(BUILTIN_SCHEMA.value.properties.relationships,REL_SUBFIELD_MAP,ft);
             } else if(f.type==='characterArray'){
                 props[f.key]=filterArraySchema(BUILTIN_SCHEMA.value.properties.characters,CHAR_SUBFIELD_MAP,ft);
+                if(props[f.key]?.items?.properties&&(ft.char_gender!==false||audienceGenderRequired)){
+                    props[f.key].items.properties.gender={
+                        type:'string',
+                        enum:['female','male','nonbinary',''],
+                        description:'Stated or clearly presented gender: female, male, nonbinary, or empty if unknown. Do not guess from the name alone.',
+                    };
+                    if(audienceGenderRequired){
+                        const itemRequired=props[f.key].items.required||(props[f.key].items.required=[]);
+                        if(!itemRequired.includes('gender'))itemRequired.push('gender');
+                    }
+                }
             } else if(f.type==='plotArray'){
                 // Filter enabled branch types
                 const enabledTypes=BRANCH_TYPES.filter(t=>ft['branch_'+t]!==false);
@@ -178,7 +203,6 @@ export function buildDynamicSchema(s){
     // Custom panels: global panels add top-level fields; character-scoped
     // panels extend each characters[] item. Legacy panels without a scope
     // remain global for backward compatibility.
-    const customPanels=getActivePanels(s);
     for(const cp of customPanels){
         if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
         const scope=customPanelScope(cp);
@@ -195,7 +219,7 @@ export function buildDynamicSchema(s){
             if(!fieldSchema)continue;
             targetProps[k]=fieldSchema;
             if(scope==='global')required.push(k);
-            else{
+            else if(audienceIsOpen(cp.audience)){
                 const itemRequired=props.characters.items.required||(props.characters.items.required=[]);
                 if(!itemRequired.includes(k))itemRequired.push(k);
             }

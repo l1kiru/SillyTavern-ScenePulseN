@@ -40,6 +40,11 @@
     animation: sp-glass-in 0.18s ease-out;
 }
 
+/* v7.1.14-r5: the Debug Inspector must sit above ScenePulse's mobile top chrome
+   (mobile.css uses z-index:100002 for that chrome). Keep this scoped to the
+   inspector so other shared .sp-cl overlays retain their established stack. */
+.sp-di-overlay { z-index: 100010; }
+
 /* v6.16.0 → v6.16.1: Doctor button in the header — neutral styling so it
    doesn't compete with accent-colored Diagnostics. Wrapped in .sp-di-doctor-wrap
    for the info-popover treatment matching Diagnostics. Manual-trigger only per
@@ -913,7 +918,7 @@
 body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
 
 .sp-cl-container {
-    margin: auto; width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 32px);
+    margin: auto; width: min(900px, calc(100vw - 32px)); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px);
     /* v6.23.1: fully opaque container background so the chat behind the
        modal doesn't bleed through. Was using --sp-surface which is
        rgba(28,32,42,0.9) — the 10% transparency stacked with the backdrop
@@ -1585,4 +1590,174 @@ body.sp-reduce-effects #sp-btn-debug-inspector.sp-di-flash { animation: none; }
     /* Doctor step pill labels can shrink to fit. */
     .sp-di-doctor-step-pill { min-width: 60px; font-size: 8px; padding: 2px 5px; }
     .sp-di-doctor-step-name { font-size: var(--sp-fs-xs); }
+}
+
+
+/* Profile Manager: its reused crash-log toolbar needs a dedicated mobile layout. */
+@media (max-width: 600px) {
+    #sp-profile-manager-overlay .sp-cl-container {
+        width: calc(100vw - 16px);
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    #sp-profile-manager-overlay .sp-cl-header { flex-wrap: wrap; padding: 8px; }
+    #sp-profile-manager-overlay .sp-cl-title { order: 0; flex: 1 1 calc(100% - 52px); min-width: 0; }
+    #sp-profile-manager-overlay .sp-cl-close {
+        order: 1; width: 44px; height: 44px; padding: 0; flex: 0 0 44px;
+    }
+    #sp-profile-manager-overlay .sp-cl-export-btn {
+        order: 2; flex: 1 1 calc(50% - 4px); min-height: 44px;
+        white-space: normal; line-height: 1.2;
+    }
+}
+
+/* Touch-first sizing shared by Debug Inspector and Profile Manager. Desktop
+   keeps the compact toolbar; coarse pointers get reliable hit targets and
+   wrapping instead of controls escaping the viewport. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-cl-overlay {
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+        box-sizing: border-box;
+    }
+    .sp-cl-container {
+        width: 100%;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    .sp-cl-header { flex-wrap: wrap; gap: 6px; }
+    .sp-cl-title { min-width: 0; overflow-wrap: anywhere; }
+    .sp-cl-export-btn { min-height: 44px; padding: 7px 10px; }
+    .sp-cl-header .sp-cl-close,
+    .sp-di-doctor-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; }
+    .sp-di-info { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+    .sp-di-doctor-wrap,
+    .sp-di-diag-wrap { min-height: 44px; }
+    .sp-di-prompt-details summary,
+    .sp-di-perf-manifest summary { min-height: 44px; display: flex; align-items: center; }
+    .sp-cl-row-actions { flex-wrap: wrap; }
+    #sp-profile-manager-overlay .sp-cl-row-actions .sp-btn {
+        flex: 1 1 calc(50% - 4px); min-width: 0; min-height: 44px;
+        justify-content: center; text-align: center; white-space: normal;
+    }
+    /* Debug Inspector has many compact desktop controls (tabs, filters,
+       retry/copy/navigation). On touch they all need a real hit target. */
+    .sp-di-tab,
+    .sp-cl-filter,
+    .sp-di-doctor-cancel,
+    .sp-di-doctor-retry,
+    .sp-cl-copy-one,
+    .sp-cl-report-one,
+    .sp-cl-show-response,
+    .sp-cl-go-message,
+    .sp-di-copy,
+    .sp-di-export,
+    .sp-di-clear,
+    .sp-di-net-copy,
+    .sp-di-net-clear,
+    .sp-di-net-jump-pair,
+    .sp-di-pair-prev,
+    .sp-di-pair-next,
+    .sp-di-overview-copy,
+    .sp-di-copy-pair,
+    .sp-di-copy-workbench,
+    .sp-di-open-issues,
+    .sp-di-open-response,
+    .sp-di-orphan-clean,
+    .sp-di-perf-capture,
+    .sp-di-perf-copy {
+        min-height: 44px;
+    }
+    .sp-di-tab,
+    .sp-cl-filter,
+    .sp-di-pair-prev,
+    .sp-di-pair-next,
+    .sp-di-info { min-width: 44px; }
+}
+
+/* v7.1.14-r4: Debug Inspector phone header.
+   The generic touch rule allowed the title to shrink between four fixed-size
+   controls; with overflow-wrap:anywhere the Russian title collapsed to one
+   character per line and made the header hundreds of pixels tall. Give the
+   inspector (only) a deterministic two-row header on phone widths: title +
+   close on row 1, Doctor + Diagnostics on row 2. Other .sp-cl overlays keep
+   their existing layout. */
+@media (max-width: 600px) {
+    .sp-di-container > .sp-cl-header {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) 44px minmax(0, 1fr) 44px;
+        grid-template-areas:
+            "title title title close"
+            "doctor doctor diagnostics diagnostics";
+        align-items: center;
+        gap: 6px;
+        padding: 8px 10px;
+    }
+
+    .sp-di-container > .sp-cl-header > .sp-cl-title {
+        grid-area: title;
+        min-width: 0;
+        width: auto;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        overflow-wrap: normal;
+        word-break: normal;
+        line-height: 1.2;
+    }
+
+    .sp-di-container > .sp-cl-header > .sp-cl-title .sp-di-header-version {
+        display: inline-block;
+        white-space: nowrap;
+    }
+
+    .sp-di-container > .sp-cl-header > .sp-cl-close {
+        grid-area: close;
+        justify-self: end;
+        margin-left: 0;
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        padding: 0;
+    }
+
+    .sp-di-container > .sp-cl-header > .sp-di-doctor-wrap {
+        grid-area: doctor;
+    }
+
+    .sp-di-container > .sp-cl-header > .sp-di-diag-wrap {
+        grid-area: diagnostics;
+        margin: 0;
+    }
+
+    .sp-di-container > .sp-cl-header > .sp-di-doctor-wrap,
+    .sp-di-container > .sp-cl-header > .sp-di-diag-wrap {
+        display: flex;
+        width: 100%;
+        min-width: 0;
+        min-height: 44px;
+        gap: 6px;
+    }
+
+    .sp-di-container > .sp-cl-header .sp-di-doctor,
+    .sp-di-container > .sp-cl-header .sp-di-diagnostics {
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 44px;
+        padding: 7px 8px;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        text-align: center;
+    }
+
+    .sp-di-container > .sp-cl-header .sp-di-info-area {
+        flex: 0 0 44px;
+        width: 44px;
+    }
+
+    .sp-di-container > .sp-cl-header .sp-di-info {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+    }
 }

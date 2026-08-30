@@ -505,3 +505,21 @@
     .sp-pb-srow-guidance-only { padding: 6px 8px; gap: 4px; }
     .sp-pb-srow-note-label { font-size: 9px; }
 }
+
+/* Preset browser touch targets + dynamic viewport. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-pb-container {
+        width: 100%;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    .sp-pb-search { min-height: 44px; font-size: 16px; }
+    .sp-pb-family-pill { min-width: 44px; }
+    .sp-pb-family-pill,
+    .sp-pb-refresh-btn,
+    .sp-pb-apply,
+    .sp-pb-create,
+    .sp-pb-apply-overlay { min-height: 44px; padding-top: 7px; padding-bottom: 7px; }
+    .sp-pb-sort { min-height: 44px; font-size: 16px; }
+    .sp-pb-row-actions { flex-wrap: wrap; }
+    .sp-pb-row-actions .sp-btn { min-height: 44px; }
+}

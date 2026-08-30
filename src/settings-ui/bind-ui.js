@@ -1,14 +1,14 @@
 // ScenePulse — Bind UI Module
 // Extracted from index.js lines 5132-5368
 
-import { MODULE_NAME, DEFAULTS, SP_LS_KEY, VERSION, normalizePromptMode } from '../constants.js';
+import { MODULE_NAME, DEFAULTS, SP_LS_KEY, VERSION, normalizePromptMode, normalizeParallelMaxConcurrent } from '../constants.js';
 import { log, warn } from '../logger.js';
 import { esc, clamp, spConfirm } from '../utils.js';
 import { buildDynamicSchema } from '../schema.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     captureTrackerStructure, getSettings, saveSettings,
-    getConnectionProfiles, getChatPresets,
+    getConnectionProfiles, getChatPresets, getResolvedConnectionProfileId,
     getLatestSnapshot, clearAllSnapshots, buildProfileView,
     canGenerateScene, getLastAssistantMessageIndex, reconcileTrackerStructureChange
 } from '../settings.js';
@@ -33,6 +33,7 @@ import { showSetupGuide } from './setup-guide.js';
 import { startGuidedTour } from './guided-tour.js';
 import { t, resetI18nCache, initI18n } from '../i18n.js';
 import { createSettings } from './create-settings.js';
+import { renderCustomPanelsMgr } from './custom-panels.js';
 import { renderEmptyState } from '../ui/empty-state.js';
 
 let _globalDebugShortcutBound=false;
@@ -105,7 +106,20 @@ export function disposeGlobalBindings(){
 export function updateBadge(){const on=getSettings().enabled;const b=document.getElementById('sp-badge');if(b){b.className='sp-drawer-badge '+(on?'sp-on':'sp-off');b.innerHTML=`<span class="sp-drawer-badge-dot"></span>${on?t('Active'):t('Off')}`}}
 
 function _syncFeatBadge(){try{updateFeatBadge()}catch(_){}}
-export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s.enabled);$('#sp-auto-gen').prop('checked',s.autoGenerate);$('#sp-show-thoughts').prop('checked',s.showThoughts!==false);$('#sp-show-weather').prop('checked',s.weatherOverlay!==false);$('#sp-show-timetint').prop('checked',s.timeTint!==false);$('#sp-show-devbtns').prop('checked',s.devButtons===true);$('#sp-console-debug').prop('checked',s.consoleDebug===true);$('#sp-reduce-effects').prop('checked',s.reduceVisualEffects===true);if(s.reduceVisualEffects===true)document.body.classList.add('sp-reduce-effects');else document.body.classList.remove('sp-reduce-effects');$('#sp-font-scale').val(s.fontScale||1);$('#sp-font-scale-val').text((s.fontScale||1).toFixed(1)+'x');$('#sp-language').val(s.language||'');$('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);$('#sp-mode').val(s.promptMode||'json');$('#sp-embed-n').val(s.embedSnapshots);$('#sp-embed-role').val(s.embedRole);$('#sp-max-snapshots').val(s.maxSnapshots||0);
+function _syncParallelControls(s=getSettings()){
+    const enabled=s.parallelFullGeneration===true;
+    const maxEl=document.getElementById('sp-parallel-max');
+    if(maxEl){
+        maxEl.disabled=!enabled;
+        maxEl.value=String(normalizeParallelMaxConcurrent(s.parallelMaxConcurrent));
+    }
+    const warn=document.getElementById('sp-parallel-profile-warn');
+    if(warn){
+        const hasUsableProfile=!!getResolvedConnectionProfileId(s);
+        warn.style.display=enabled&&!hasUsableProfile?'block':'none';
+    }
+}
+export function loadUI(){const s=getSettings();$('#sp-enabled').prop('checked',s.enabled);$('#sp-auto-gen').prop('checked',s.autoGenerate);$('#sp-show-thoughts').prop('checked',s.showThoughts!==false);$('#sp-show-weather').prop('checked',s.weatherOverlay!==false);$('#sp-show-timetint').prop('checked',s.timeTint!==false);$('#sp-show-devbtns').prop('checked',s.devButtons===true);$('#sp-console-debug').prop('checked',s.consoleDebug===true);$('#sp-reduce-effects').prop('checked',s.reduceVisualEffects===true);if(s.reduceVisualEffects===true)document.body.classList.add('sp-reduce-effects');else document.body.classList.remove('sp-reduce-effects');$('#sp-font-scale').val(s.fontScale||1);$('#sp-font-scale-val').text((s.fontScale||1).toFixed(1)+'x');$('#sp-language').val(s.language||'');$('#sp-ctx').val(s.contextMessages);$('#sp-retries').val(s.maxRetries);$('#sp-mode').val(s.promptMode||'json');$('#sp-parallel-full').prop('checked',s.parallelFullGeneration===true);$('#sp-parallel-max').val(String(normalizeParallelMaxConcurrent(s.parallelMaxConcurrent)));_syncParallelControls(s);$('#sp-embed-n').val(s.embedSnapshots);$('#sp-embed-role').val(s.embedRole);$('#sp-max-snapshots').val(s.maxSnapshots||0);
     $('#sp-story-ideas').prop('checked',buildProfileView(s,getActiveProfile(s)).panels?.storyIdeas!==false);
     // Rebuild profile/preset dropdowns from current DOM (ST may load them late)
     const profiles=getConnectionProfiles();const presets=getChatPresets();
@@ -277,7 +291,34 @@ export function bindUI(){const s=getSettings();
     // exists in the settings object for backward compat (users who
     // explicitly set it to false before v6.9.0 keep their preference),
     // but it's no longer user-facing.
-    $('#sp-injection-method').on('change',function(){s.injectionMethod=this.value;saveSettings();_spSaveLS();$('#sp-method-inline').toggle(this.value==='inline');$('#sp-method-separate').toggle(this.value!=='inline');$('#sp-embed-section').toggle(this.value!=='inline');$('#sp-separate-settings').toggle(this.value!=='inline')});
+    const refreshOpenPanelManager=()=>{
+        const list=document.getElementById('sp-panel-mgr-custom');
+        const panelBody=document.getElementById('sp-panel-body');
+        if(list&&panelBody)renderCustomPanelsMgr(s,list,panelBody);
+    };
+    $('#sp-injection-method').on('change',function(){s.injectionMethod=this.value;saveSettings();_spSaveLS();$('#sp-method-inline').toggle(this.value==='inline');$('#sp-method-separate').toggle(this.value!=='inline');$('#sp-embed-section').toggle(this.value!=='inline');$('#sp-separate-settings').toggle(this.value!=='inline');refreshOpenPanelManager()});
+    $('#sp-parallel-full').on('change',function(){
+        s.parallelFullGeneration=this.checked;
+        saveSettings();
+        _syncParallelControls(s);
+        refreshOpenPanelManager();
+        if(this.checked){
+            const hasUsableProfile=!!getResolvedConnectionProfileId(s);
+            try{
+                toastr[hasUsableProfile?'info':'warning'](
+                    hasUsableProfile
+                        ?t('Higher lane counts send more requests at once. This can trip provider rate limits (429) and fail the whole tracker turn.')
+                        :t('Parallel builds need a Connection Manager profile. Pick one below, or keep a profile selected in SillyTavern.'),
+                    t('Request parallelism')
+                );
+            }catch{}
+        }
+    });
+    $('#sp-parallel-max').on('change',function(){
+        s.parallelMaxConcurrent=normalizeParallelMaxConcurrent(this.value);
+        saveSettings();
+        _syncParallelControls(s);
+    });
     $('#sp-show-thoughts').on('change',function(){s.showThoughts=this.checked;saveSettings();_spSaveLS();const tp=document.getElementById('sp-thought-panel');if(tp){if(this.checked){const snap=getLatestSnapshot();if(snap)updateThoughts(normalizeTracker(snap))}else tp.classList.remove('sp-tp-visible')}});
     // v6.8.23: toggle thought panel truncation. Off by default (full
     // thought rendered). When on, sentences are sliced to a hash-stable
@@ -353,7 +394,7 @@ export function bindUI(){const s=getSettings();
     $('#sp-ctx').on('change',function(){s.contextMessages=clamp(+this.value,1,30);saveSettings();_spSaveLS()});
     $('#sp-max-snapshots').on('change',function(){s.maxSnapshots=Math.max(0,Math.floor(+this.value||0));saveSettings();log('Max snapshots:',s.maxSnapshots||'unlimited')});
     $('#sp-retries').on('change',function(){s.maxRetries=clamp(+this.value,0,5);saveSettings();_spSaveLS()});
-    $('#sp-profile').on('change',function(){s.connectionProfile=this.value;saveSettings();_spSaveLS()});
+    $('#sp-profile').on('change',function(){s.connectionProfile=this.value;saveSettings();_spSaveLS();_syncParallelControls(s)});
     $('#sp-preset').on('change',function(){s.chatPreset=this.value;saveSettings();_spSaveLS();$('#sp-preset-info').toggle(!this.value)});
     $('#sp-mode').on('change',function(){s.promptMode=this.value;saveSettings();_spSaveLS()});
     $('#sp-tracker-prompt-style').on('change',function(){
@@ -484,7 +525,8 @@ export function bindUI(){const s=getSettings();
         const _cleanOpen={};
         for(const[k,v]of Object.entries(s.openSections||{})){if(_validSections.includes(k)||_cpNames.includes(k))_cleanOpen[k]=v}
         const exportData={extension:'ScenePulse',version:VERSION,exportedAt:new Date().toISOString(),
-            settings:{injectionMethod:s.injectionMethod,deltaMode:s.deltaMode,language:s.language,theme:s.theme,
+            settings:{injectionMethod:s.injectionMethod,deltaMode:s.deltaMode,parallelFullGeneration:s.parallelFullGeneration===true,parallelMaxConcurrent:normalizeParallelMaxConcurrent(s.parallelMaxConcurrent),
+                panelActivationStrategy:s.panelActivationStrategy==='automatic'?'automatic':'manual',language:s.language,theme:s.theme,
                 fontScale:s.fontScale,contextMessages:s.contextMessages,maxRetries:s.maxRetries,promptMode:s.promptMode,
                 embedSnapshots:s.embedSnapshots,embedRole:s.embedRole,autoGenerate:s.autoGenerate,
                 showThoughts:s.showThoughts,showEmptyFields:s.showEmptyFields,sceneTransitions:s.sceneTransitions,

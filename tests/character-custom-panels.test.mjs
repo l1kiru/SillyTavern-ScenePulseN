@@ -31,6 +31,7 @@ const {
     clearForceFullState,
     forceFullStateRefresh,
     getLatestSnapshot,
+    getPanelActivationStrategy,
     getSettings,
     getSnapshotFor,
     invalidateSettingsCache,
@@ -40,6 +41,7 @@ const {
     sanitizeCharacterCustomFields,
     saveSettings,
     saveSnapshot,
+    setPanelActivationStrategy,
     shouldUseDelta,
 } = await import('../src/settings.js');
 const { DEFAULTS } = await import('../src/constants.js');
@@ -114,6 +116,10 @@ console.log('\n── Prompt placement ──');
     ok('character panel marker is included', charBlock.includes('[custom panel: Character State]'));
     ok('global panel field remains in Custom Tracked Fields', globalBlock.includes('#### Global State') && globalBlock.includes('- status: Overall story status.'));
     ok('character panel is not emitted as a top-level custom section', !globalBlock.includes('#### Character State'));
+
+    const runtimePrompt = assemblePrompt({ ...settings, runtimeActivePanelIds: ['cp_character'] }, null, {});
+    ok('runtime prompt includes active character panel', runtimePrompt.includes('[custom panel: Character State]'));
+    ok('runtime prompt omits inactive global panel', !runtimePrompt.includes('#### Global State'));
 
     const disabled={...settings,panels:{...settings.panels,characters:false}};
     const disabledSchema=buildDynamicSchema(disabled);
@@ -214,6 +220,21 @@ console.log('\n── Persistence and structural transitions ──');
     eq('unchanged field remains in current snapshot',current.traits,['injured']);
     eq('historical snapshot is not rewritten',getSnapshotFor(7).characters[0].disposition,'Wary');
 
+    saveSnapshot(91,{
+        characters:[
+            {name:'Jenna',gender:'female',role:'Ally',disposition:'Wary',traits:['keep']},
+            {name:'Bob',gender:'male',role:'Guard',disposition:'Neutral',traits:['drop']},
+        ],
+    });
+    const audiencePrev=structuredClone(_ctx.chatMetadata.scenepulse.chatPanels);
+    const audienceNext=structuredClone(audiencePrev);
+    audiencePrev[1].audience={};
+    audienceNext[1].audience={genders:['female']};
+    reconcileLatestCustomPanelValues(audiencePrev,audienceNext);
+    const audienceSnap=getLatestSnapshot();
+    eq('audience tightening preserves still-matching value',audienceSnap.characters[0].traits,['keep']);
+    ok('audience tightening removes only non-matching value',!Object.hasOwn(audienceSnap.characters[1],'traits'));
+
     const root=getSettings();
     root.deltaMode=true;
     ok('delta is available before structural refresh',shouldUseDelta(getLatestSnapshot()));
@@ -224,6 +245,18 @@ console.log('\n── Persistence and structural transitions ──');
     saveSnapshot(10,{
         characters:[{name:'Jenna',role:'Ally',disposition:'Wary',threat:37}],
     });
+    const beforeActivationEdit=captureTrackerStructure();
+    _ctx.chatMetadata.scenepulse.chatPanels[1].activationMode='auto';
+    _ctx.chatMetadata.scenepulse.chatPanels[1].activationTags=['combat'];
+    ok('activation policy edit is a request-shape change',reconcileTrackerStructureChange(beforeActivationEdit));
+    eq('activation policy edit preserves stored values',getLatestSnapshot().characters[0].disposition,'Wary');
+    clearForceFullState();
+    const beforeStrategyEdit=captureTrackerStructure();
+    setPanelActivationStrategy('automatic');
+    eq('chat-local activation strategy overrides the global default',getPanelActivationStrategy(root),'automatic');
+    ok('chat activation strategy edit is a request-shape change',reconcileTrackerStructureChange(beforeStrategyEdit));
+    eq('chat activation strategy edit preserves stored values',getLatestSnapshot().characters[0].disposition,'Wary');
+    clearForceFullState();
     const beforeDisable=captureTrackerStructure();
     _ctx.chatMetadata.scenepulse.chatPanels[1].enabled=false;
     ok('shared lifecycle detects custom-panel toggle',reconcileTrackerStructureChange(beforeDisable));

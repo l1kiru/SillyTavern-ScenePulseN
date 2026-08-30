@@ -8,7 +8,7 @@ import { relPhaseFamily } from '../rel-phase.js';
 import { markStart as _spPmStart, markEnd as _spPmEnd } from '../perf-monitor.js';
 import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId } from '../settings.js';
+import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId, getPanelActivationStrategy } from '../settings.js';
 import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
 import {
     customPanelScope,
@@ -47,6 +47,8 @@ import { classifyQuest } from './classify-quest.js';
 import { openDiffViewer } from './diff-viewer.js';
 import { createSparklineCanvas } from './sparklines.js';
 import { detectStagnation } from '../stagnation.js';
+import { isCustomPanelLive } from '../panel-activation-policy.js';
+import { characterMatchesAudience } from '../character-audience.js';
 import { getPortraitHtml, buildPortraitIndex, setPortraitOverride, clearPortraitOverride } from './portraits.js';
 import { getCharacterHistory, invalidateCharacterHistory } from './character-history.js';
 import { updateCharacterField } from '../character-identity.js';
@@ -385,8 +387,6 @@ function _updatePanelInner(d,_force=false){
     // Update contextual subtitle with live scene info
     {const _sub=document.getElementById('sp-brand-subtitle');
     if(_sub){const _nc=d?.characters?.length||0;const _nr=d?.relationships?.length||0;const _mi=currentSnapshotMesIdx;const parts=[];if(_nc)parts.push(_nc+' char'+((_nc!==1)?'s':''));if(_nr)parts.push(_nr+' rel'+((_nr!==1)?'s':''));if(typeof _mi==='number'&&_mi>=0)parts.push('Msg #'+_mi);_sub.textContent=parts.join(' \u00b7 ')}}
-    // Snapshot previous content for error boundary recovery
-    const _prevContent=body.innerHTML;
     // Preserve panel manager during rebuild
     const mgrNode=document.getElementById('sp-panel-mgr');
     if(mgrNode)mgrNode.remove();
@@ -397,7 +397,11 @@ function _updatePanelInner(d,_force=false){
     const s=buildProfileView(rootSettings,getActiveProfile(rootSettings));
     const ft=s.fieldToggles||{};
     const customPanels=getActivePanels(s);
-    const characterCustomPanels=s.panels?.characters===false?[]:customPanels.filter(cp=>cp&&cp.enabled!==false&&customPanelScope(cp)==='character'&&Array.isArray(cp.fields)&&cp.fields.some(f=>f?.enabled!==false&&isValidCustomFieldKey(f?.key)&&!isBuiltInCharacterFieldKey(f.key)));
+    const livePanelOpts={
+        strategy:getPanelActivationStrategy(rootSettings),
+        activation:(()=>{const snap=getLatestSnapshot();return snap?._spMeta?.panelActivation||snap?._spMeta?.parallel?.activation||null})(),
+    };
+    const characterCustomPanels=s.panels?.characters===false?[]:customPanels.filter(cp=>cp&&cp.enabled!==false&&customPanelScope(cp)==='character'&&isCustomPanelLive(cp,livePanelOpts)&&Array.isArray(cp.fields)&&cp.fields.some(f=>f?.enabled!==false&&isValidCustomFieldKey(f?.key)&&!isBuiltInCharacterFieldKey(f.key)));
 
     // Environment -- always visible, NOT collapsible
     const envDiv=document.createElement('div');envDiv.className='sp-env-permanent';
@@ -863,7 +867,7 @@ function _updatePanelInner(d,_force=false){
             rightGroup.appendChild(actWrap);headerDiv.appendChild(rightGroup)}
             headerDiv.addEventListener('click',(ev)=>{if(ev.target.closest('.sp-quest-actions'))return;e.classList.toggle('sp-card-open')});e.appendChild(headerDiv);const detailEl=document.createElement('div');detailEl.className='sp-quest-detail';detailEl.textContent=p.detail||'\u2014';if(!p.detail){detailEl.classList.add('sp-empty-field');detailEl.dataset.placeholder=t('Quest details')}mkEditable(detailEl,()=>p.detail||'',v=>{p.detail=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,p.name);if(_si>=0)snap[tier.key][_si].detail=v});e.appendChild(detailEl);mkEditable(nameEl,()=>p.name||'',v=>{const _oldName=p.name;p.name=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,_oldName);if(_si>=0)snap[tier.key][_si].name=v});tierBody.appendChild(e)}}
             // Add quest button
-            const addBtn=document.createElement('div');addBtn.className='sp-quest-add';addBtn.innerHTML='<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> '+t('Add quest');
+            const addBtn=document.createElement('button');addBtn.type='button';addBtn.className='sp-quest-add';addBtn.innerHTML='<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> '+t('Add quest');
             addBtn.addEventListener('click',()=>{_showAddQuestDialog(tier.t,tier.key,d)});
             tierBody.appendChild(addBtn);
             b.appendChild(tierBody);f.appendChild(b)}
@@ -1039,6 +1043,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const invB = Array.isArray(prv.inventory) ? [...prv.inventory].map(String).sort().join('|') : '';
             if (invA !== invB) changed.add('inventory');
             for(const cp of characterCustomPanels){
+                if(!characterMatchesAudience(cur,cp.audience))continue;
                 for(const field of cp.fields||[]){
                     if(!field||field.enabled===false||!isValidCustomFieldKey(field.key)||isBuiltInCharacterFieldKey(field.key))continue;
                     const a=Array.isArray(cur[field.key])?cur[field.key].map(String).join('|'):String(cur[field.key]??'');
@@ -1340,6 +1345,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             // render inside every character card instead of as standalone
             // top-level sections.
             for(const cp of characterCustomPanels){
+                if(!characterMatchesAudience(ch,cp.audience))continue;
                 const activeFields=(cp.fields||[]).filter(field=>
                     field&&field.enabled!==false&&isValidCustomFieldKey(field.key)&&!isBuiltInCharacterFieldKey(field.key)
                 );
@@ -1526,13 +1532,14 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     // Custom Panels (v6.9.14: per-chat definitions)
     for(const cp of customPanels){
         if(!cp||customPanelScope(cp)!=='global'||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
+        if(!isCustomPanelLive(cp,livePanelOpts))continue;
         const cpName=typeof cp.name==='string'&&cp.name.trim()?cp.name:'Untitled';
         const cpKey=customPanelSectionKey(cpName);
         const _cpSec=mkSection(cpKey,cpName,null,()=>{
             const frag=document.createDocumentFragment();
             for(const f of cp.fields){
                 if(!f||f.enabled===false||!isValidCustomFieldKey(f.key))continue; // v6.9.13: per-field toggle
-                const r=document.createElement('div');r.className='sp-row';
+                const r=document.createElement('div');r.className='sp-row sp-cp-display-row';
                 r.innerHTML=`<div class="sp-row-label">${esc(f.label||f.key)}</div>`;
                 if(f.type==='meter'){
                     // v6.9.12: threshold-based meter with danger colors
@@ -1559,7 +1566,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     const arr=Array.isArray(d[f.key])?d[f.key]:[];
                     const vd=document.createElement('div');vd.className='sp-row-value sp-cp-list-chips';
                     if(arr.length===0){vd.textContent='\u2014'}
-                    else{for(const item of arr){const chip=document.createElement('span');chip.className='sp-cp-list-chip';chip.textContent=item;vd.appendChild(chip)}}
+                    else{for(const item of arr){const chip=document.createElement('span');chip.className='sp-cp-list-chip';chip.textContent=str(item)||'\u2014';vd.appendChild(chip)}}
                     r.appendChild(vd);
                 } else if(f.type==='number'){
                     // v6.9.12: monospace styled well
@@ -1599,7 +1606,9 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     // Generation stats footer (always last)
     const _meta=d._spMeta||{};
     const _mTokens=_meta.completionTokens||genMeta.completionTokens||0;
-    const _mElapsed=_meta.elapsed||genMeta.elapsed||0;
+    const _mElapsed=(_meta.timing?.status==='ok'&&_meta.timing?.wallMs>0)
+        ? _meta.timing.wallMs/1000
+        : (_meta.elapsed||genMeta.elapsed||0);
     const _mSource=_meta.source||lastGenSource||'';
     const _mInject=_meta.injectionMethod||s.injectionMethod||'inline';
     if(_mTokens>0||_mElapsed>0||_mSource){
@@ -1745,8 +1754,12 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     log('\u23F1 updatePanel:',((performance.now()-_perfStart)|0)+'ms');
     } catch(_renderErr) {
         // Error boundary: restore previous panel content on failure
-        log('ERROR updatePanel render failed — restoring previous content:', _renderErr?.message||_renderErr);
+        log('ERROR updatePanel render failed:', _renderErr?.message||_renderErr);
         err('updatePanel render error:', _renderErr);
-        if(body&&_prevContent){body.innerHTML=_prevContent}
+        if(body&&!body.querySelector('.sp-env-permanent')&&!body.querySelector('.sp-error')){
+            const fail=document.createElement('div');fail.className='sp-error';
+            fail.textContent=String(_renderErr?.message||_renderErr||'Panel render failed');
+            body.appendChild(fail);
+        }
     }
 }

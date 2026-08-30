@@ -105,7 +105,7 @@ console.log('━━━━━━━━━━━━━━━━━━━━━━�
 // ═══════════════════════════════════════════════════════════════════════
 console.log('\n── Scenario 1: all expected commands registered ──');
 {
-    const expected = ['sp', 'sp-regen', 'sp-status', 'sp-clear', 'sp-toggle', 'sp-export', 'sp-debug', 'sp-help', 'sp-refresh', 'sp-profile'];
+    const expected = ['sp', 'sp-regen', 'sp-status', 'sp-clear', 'sp-toggle', 'sp-export', 'sp-debug', 'sp-transport-probe', 'sp-help', 'sp-refresh', 'sp-profile'];
     for (const name of expected) {
         assertTrue(`/${name} registered`, typeof captured[name] === 'function');
     }
@@ -124,8 +124,32 @@ console.log('\n── Scenario 2: /sp help text ──');
     assertContains('mentions profile', out, '/sp profile');
     assertContains('mentions export', out, '/sp export');
     assertContains('mentions debug', out, '/sp debug');
+    assertContains('mentions parallel full control', out, '/sp parallel');
+    assertContains('mentions transport probe', out, '/sp transport-probe');
     assertContains('mentions standalone shortcuts', out, 'Standalone shortcuts');
     assertContains('mentions /scenepulse alias', out, '/scenepulse');
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// 3a. /sp parallel — explicit experimental feature flag
+// ═══════════════════════════════════════════════════════════════════════
+console.log('\n── Scenario 3a: /sp parallel feature flag ──');
+{
+    resetSettings();
+    const initial = await captured['sp']({}, 'parallel status');
+    assertContains('parallel mode defaults off', initial, 'OFF');
+    const enabled = await captured['sp']({}, 'parallel on');
+    assertContains('parallel mode can be enabled', enabled, 'ON');
+    assertEq('parallel flag persisted in settings', settings.getSettings().parallelFullGeneration, true);
+    const invalid = await captured['sp']({}, 'parallel maybe');
+    assertContains('invalid parallel action shows usage', invalid, 'Usage:');
+    const lanes = await captured['sp']({}, 'parallel 4');
+    assertContains('parallel lane count can be set', lanes, 'x4');
+    assertEq('parallel flag stays on after lane set', settings.getSettings().parallelFullGeneration, true);
+    assertEq('parallel lane count persisted', settings.getSettings().parallelMaxConcurrent, 4);
+    const disabled = await captured['sp']({}, 'parallel off');
+    assertContains('parallel mode can be disabled', disabled, 'OFF');
+    assertEq('parallel flag can be cleared', settings.getSettings().parallelFullGeneration, false);
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -155,6 +179,33 @@ console.log('\n── Scenario 4: /sp-status without data ──');
     assertContains('shows no-data hint', out, 'No tracker data yet');
     assertContains('shows profile line', out, 'Profile:');
     assertContains('shows ScenePulse version', out, 'ScenePulse v');
+}
+
+console.log('\n── Scenario 4b: /sp-status exposes persisted parallel metrics ──');
+{
+    resetSettings();
+    _stCtx.chat = [{ is_user: false, mes: 'Tracked reply', swipe_id: 0, swipes: ['Tracked reply'] }];
+    _stCtx.chatMetadata.scenepulse.snapshots = {
+        0: {
+            time: '10:00:00', date: '08/24/2026 (Monday)', location: 'Lab', weather: 'Clear', temperature: '20°C',
+            sceneMood: 'Focused', sceneTension: 'low', sceneTopic: 'Testing', northStar: 'Ship safely',
+            charactersPresent: ['Jenna'], characters: [{ name: 'Jenna' }], relationships: [], mainQuests: [], sideQuests: [],
+            _spMeta: {
+                source: 'manual:parallel-full', elapsed: 38.5, promptTokens: 1200, completionTokens: 800,
+                parallel: {
+                    mode: 'parallel-full', concurrency: 2, wallMs: 38500, sumLaneMs: 80000, parallelGain: 2.08,
+                    lanes: [{ id: 'core' }, { id: 'characters-0' }, { id: 'global' }],
+                },
+                panelActivation: { activeTags: ['social', 'combat'], activePanelIds: ['cp_social', 'cp_combat'] },
+            },
+        },
+    };
+    const status = await captured['sp-status']({}, '');
+    assertContains('status shows lane count and concurrency', status, '3 lane(s), concurrency 2');
+    assertContains('status shows measured parallel gain', status, 'gain 2.08x');
+    assertContains('status shows active runtime tags', status, 'tags social, combat');
+    const debug = await captured['sp-debug']({}, '');
+    assertContains('debug also shows measured parallel gain', debug, 'gain 2.08x');
 }
 
 // ═══════════════════════════════════════════════════════════════════════

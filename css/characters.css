@@ -231,3 +231,18 @@
 .sp-char-custom-row .sp-row-value { min-width: 0; overflow-wrap: anywhere; }
 .sp-char-custom-row .sp-cp-meter-wrap { width: 100%; }
 .sp-char-custom-row .sp-cp-list-chips { justify-content: flex-start; }
+
+
+/* Mobile/touch: portrait upload, merge and merge-picker actions must be tappable. */
+@media (max-width: 600px), (pointer: coarse) {
+    #sp-panel .sp-char-portrait {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+    }
+    #sp-panel .sp-char-offscene-stub .sp-char-portrait {
+        width: 44px; height: 44px;
+    }
+    #sp-panel .sp-char-merge-btn {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+    }
+    .sp-merge-picker-option { min-height: 44px; padding: 9px 10px; }
+}

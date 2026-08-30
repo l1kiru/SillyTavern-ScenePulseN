@@ -233,3 +233,26 @@
     .sp-web-close { min-width: 44px; min-height: 44px; }
     .sp-web-toolbar button { padding: 4px 6px; font-size: var(--sp-fs-xs); }
 }
+
+/* Mobile/touch hardening for the graph toolbar + legend filters. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-web-overlay {
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+        box-sizing: border-box;
+    }
+    .sp-web-container {
+        max-width: 100%;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    .sp-web-header { flex-wrap: wrap; gap: 6px; padding: 8px; }
+    .sp-web-title { min-width: 0; flex: 1 1 100%; overflow-wrap: anywhere; }
+    .sp-web-toolbar { width: 100%; flex-wrap: wrap; gap: 6px; }
+    .sp-web-layout-toggle,
+    .sp-web-generate-btn,
+    .sp-web-labels-toggle,
+    .sp-web-reset-btn { flex: 1 1 54px; min-width: 44px; min-height: 44px; padding: 6px 8px; }
+    .sp-web-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; flex: 0 0 44px; }
+    .sp-web-legend-row,
+    .sp-web-org-chip { min-height: 44px; box-sizing: border-box; }
+    .sp-web-legend-panel { max-height: min(220px, 38dvh); }
+}

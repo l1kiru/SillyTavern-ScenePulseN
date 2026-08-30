@@ -7,14 +7,17 @@ import {
     setLastDeltaSavings, _lastDeltaSavings, setLastExtractionFailure,
     getActivePromptInjectionRun, getLastPromptInjectionMetrics,
 } from '../state.js';
-import { getSettings, getActiveSchema, getPrevSnapshot, getActiveSwipeId, saveSnapshot, ensureChatSaved, shouldUseDelta, hasStaleSnapshotBefore, sanitizeCharacterCustomFields } from '../settings.js';
+import { getSettings, getActiveSchema, getPrevSnapshot, getActiveSwipeId, saveSnapshot, ensureChatSaved, shouldUseDelta, hasStaleSnapshotBefore, sanitizeCharacterCustomFields, getActivePanels, getPanelActivationStrategy, buildProfileView } from '../settings.js';
+import { getActiveProfile } from '../profiles.js';
+import { hasAutomaticPanels } from '../panel-activation-policy.js';
+import { preserveInactivePanelState, resolvePanelActivation } from './panel-activation.js';
 import { normalizeTracker } from '../normalize.js';
 import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { spPostGenShow, spSetGenerating } from '../ui/mobile.js';
 import { addMesButton } from '../ui/message.js';
 import { stopStreamingHider } from './streaming.js';
-import { validateExtraction } from './validation.js';
+import { validateCharacterAudienceRequirements, validateExtraction } from './validation.js';
 import { recordExtractionFailure } from './extraction.js';
 import { buildRequestSchema } from '../schema.js';
 import { classifyTimeChange } from '../temporal-check.js';
@@ -114,6 +117,35 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         preserveOffSceneEntities(extracted, prevSnap);
     }
 
+    let panelActivation=null;
+    try{
+        const root=getSettings();
+        const view=buildProfileView(root,getActiveProfile(root));
+        const panels=getActivePanels(view);
+        if(getPanelActivationStrategy(root)==='automatic'&&hasAutomaticPanels(panels)){
+            panelActivation=resolvePanelActivation({
+                panels,
+                sceneTags:extracted?.sceneTags,
+                resolvedTags:extracted?.resolvedTags,
+                previousState:prevSnap?._spMeta?.panelActivation||prevSnap?._spMeta?.parallel?.activation||null,
+            });
+            preserveInactivePanelState(prevSnap,extracted,panels,panelActivation.inactivePanelIds);
+        }
+    }catch(e){warn('Pipeline: automatic panel freeze skipped:',e?.message||e)}
+
+    const _audienceValidation=validateCharacterAudienceRequirements(extracted,{
+        schema:requestSchema,
+        customFieldSpecs:opts.frozenCharacterCustomFieldSpecs,
+        mode:_useDelta?'delta':'full',
+        activePanelIds:panelActivation?.activePanelIds||null,
+    });
+    if(!_audienceValidation.valid){
+        warn('Pipeline: rejecting audience-incomplete tracker payload:',_audienceValidation.errors.join('; '));
+        recordExtractionFailure('SEMANTIC_INVALID','Tracker JSON failed character audience validation',JSON.stringify(extracted),mesIdx,{stage:'validate',owner:opts.owner,validationErrors:_audienceValidation.errors});
+        return null;
+    }
+    _validation.warnings.push(..._audienceValidation.warnings);
+
     // Drop unknown/type-invalid character custom values before normalization
     // so arbitrary properties cannot crowd configured fields out of its cap.
     sanitizeCharacterCustomFields(extracted,{
@@ -166,6 +198,8 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         deltaMode: _useDelta,
         deltaTurnsSinceFull: _useDelta ? _prevCounter + 1 : 0,
     };
+    if(panelActivation)norm._spMeta.panelActivation=panelActivation;
+    else if(prevSnap?._spMeta?.panelActivation)norm._spMeta.panelActivation=structuredClone(prevSnap._spMeta.panelActivation);
     if (narrativeTokens != null) norm._spMeta.narrativeTokens = narrativeTokens;
     if (trackerTokens != null) norm._spMeta.trackerTokens = trackerTokens;
     if (_together) {

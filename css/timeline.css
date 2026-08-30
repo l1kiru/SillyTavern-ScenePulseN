@@ -182,3 +182,20 @@
 /* Together mode waiting indicator */
 .sp-inline-wait { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--sp-accent-dim); border-bottom: 1px solid var(--sp-border); font-size: var(--sp-fs-xs); color: var(--sp-accent); animation: sp-pulse-glow 2s ease-in-out infinite; }
 .sp-inline-wait-spinner { width: 12px; height: 12px; border: 2px solid var(--sp-accent); border-top-color: transparent; border-radius: 50%; animation: sp-spin 0.8s linear infinite; }
+
+
+/* Timeline nodes keep their small visual dots but expose a 44px interactive hit area. */
+.sp-tl-node::before {
+    content: ''; position: absolute; width: 44px; height: 44px;
+    left: 50%; top: 50%; transform: translate(-50%, -50%);
+}
+.sp-tl-node:focus { outline: none; }
+.sp-tl-node:focus-visible .sp-tl-dot {
+    outline: 2px solid var(--sp-accent); outline-offset: 4px;
+    box-shadow: 0 0 0 5px rgba(77,184,164,0.16);
+}
+@media (hover: none), (pointer: coarse), (max-width: 600px) {
+    .sp-browse-pg-btn { min-width: 44px; min-height: 44px; }
+    .sp-browse-close { min-width: 44px; min-height: 44px; }
+    .sp-tl-disc-btn, .sp-tl-browse-btn { min-height: 44px; }
+}

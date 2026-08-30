@@ -4,11 +4,99 @@ All notable changes to ScenePulse are documented in this file.
 
 ### Unreleased
 
-#### Fixed — Force-full and structure reconcile lifecycle
+### [7.1.15] — 2026-08-30
 
-- Failed whole-tracker full requests re-arm force-full so the retry cannot slip into delta (Separate + Together terminals).
-- Section regen no longer consumes a pending whole-tracker force-full flag.
+Consolidates the 7.1.14-r6 … r15-panel2 iterations: parallel Separate lanes, character
+audience filters, the pinnable Panel Library, automatic scene-based panel selection, and a
+broad mobile/layout pass. Russian UI coverage is back at 100%.
+
+#### Added — parallel Separate requests
+
+- Separate mode exposes an explicit **Parallel requests** switch instead of hiding the behavior behind implementation wording. It stays off by default; with it off, Separate uses the existing single-request path for providers with strict concurrency/rate limits.
+- **Max parallel requests** selects `2 / 3 / 4` lanes (default 2), also settable through `/sp parallel 2|3|4`. Settings export/import and Connection-profile-bound builds honor `parallelMaxConcurrent`.
+- Automatic scene-based panel selection continues to require the parallel path.
+
+#### Added — character audience filters
+
+- Character-scoped custom panels can target names, gender (`female` / `male` / `nonbinary`), and keywords such as `cat`, `neko`, `tail`.
+- An empty filter still means every character; specified groups combine with AND.
+- Live character cards hide non-matching panels, and the prompt tells the model to fill those fields only for matching characters.
+
+#### Added — pin panel sets from the library
+
+- Each library set has an On/Off pin. On keeps that preset in chats until it is turned off in the library.
+- Pinned panels are tagged with the library source and re-synced on chat switch. Clearing a chat's local panels does not drop a still-pinned set.
+
+#### Changed
+
+- Built-in field switches in Panel Manager start collapsed under `Fields n/n`, and auto-panel scene tags sit behind a one-line summary (`combat · rest`) instead of eleven checkboxes.
+- Default `maxSnapshots` is 60; Separate+parallel no longer embeds the full snapshot into the narrative chat.
+- Enabling parallel shows a rate-limit warning; a missing Connection Manager profile is warned in settings and toasted on generate.
+- Pinned Panel Library panels are explicitly read-only in chat instead of looking editable and then silently reverting on the next library sync. Duplicate creates a detached local copy with collision-free keys.
+- Replace/Append are disabled for a set while it is globally pinned, avoiding misleading local duplicates and collisions with the same source-owned set.
+- Audience instructions are emitted once per custom panel instead of repeated on every field.
+- Remaining hard-coded dark/mauve Custom Panel editor colors now follow the active ScenePulse theme variables.
+
+#### Fixed — generation contract and parallel resilience
+
+- A failed or skipped character/global lane no longer discards a successful Core when a previous snapshot can fill the gap; such builds are marked `partial`.
+- First-turn parallel builds without previous state still fail closed.
+- Failed whole-tracker full requests re-arm force-full so the retry cannot slip into delta (Separate and Together terminals). Section regen no longer consumes a pending whole-tracker force-full flag.
 - Reset Settings and create-from-template profile activation run `reconcileTrackerStructureChange` like other structural edits.
+- Creating a new custom panel reconciles tracker structure immediately, so the next generation cannot incorrectly stay on Delta with a newly added active field.
+- Profile-bound Separate auto-gen no longer waits 4s — that delay was only for global profile switching.
+- Full-state returning NPCs and section regen keep previous custom fields when the model omits them.
+- Automatic panels freeze inactive fields after a Together extract, matching Separate parallel.
+- The parallel profile warning and toast use the same profile resolution as generation (ScenePulse Connection Profile, else SillyTavern `connectionManager.selectedProfile`), so `(Current)` no longer false-alarms.
+
+#### Fixed — character audience
+
+- Characters schema and normalizer carry `gender` (`female` / `male` / `nonbinary` / empty); the matcher infers from pronouns when the field is empty, including common Russian pronouns.
+- Gender-targeted character panels force an internal `gender` field into schema and prompt even when the visible Gender row is disabled; it is required but may be empty when genuinely unknown.
+- Keyword and phrase matching uses Unicode-aware boundaries, so Cyrillic and multi-word targets no longer fall back to substring matching (`cat` ≠ Catherine, `tail` ≠ retail).
+- Full `buildRequestSchema` no longer marks audience-targeted character fields required for every NPC; Full/character-section generation requires them only on characters that actually match, and Delta keeps carry-forward fields optional.
+- `sanitizeCharacterCustomFields` drops values that fail the panel audience.
+- Audience signatures are canonicalized, so reordering equivalent filters does not force a structural refresh. Tightening an audience removes stale values only from characters that stopped matching.
+
+#### Fixed — Panel Library and custom panels
+
+- Removing a saved library set keeps any copy already present in the current chat as a normal local panel and strips stale library provenance.
+- Clear All reports pinned panels that remain instead of claiming they were deleted.
+- Genre templates go through the same append/collision validation path as imports, preventing duplicate field keys.
+- Pinned sync is idempotent: reopening the manager no longer rewrites and saves identical library-owned panels on every `ensureChatPanels()` call. Missing or deleted library sources automatically lose stale read-only provenance.
+- Updating an enabled/pinned library set through Import or Save Current immediately resyncs the current chat and reconciles request structure.
+- Pinned read-only protection also covers delete, field remove, and desktop drag/drop paths.
+- Library payloads are portable: ownership metadata is stripped when saving, exporting, replacing, or appending sets, and stamped only while a set is actually pinned.
+- Pinned-library sync rejects collisions by field key, panel name, and runtime panel id; skipped collisions are surfaced in the UI. Duplicate imported panel ids are normalized to unique runtime ids.
+- Panel editor collapse state follows panel identity rather than list index, so deleting or inserting a card does not transfer the open state to its neighbour.
+- Disabled custom panels remain editable while still excluded from generation; turning a panel off no longer hides its editor body.
+- Duplicating a panel performs a full live tracker refresh so the new panel appears immediately.
+- The Characters quick-add action no longer targets a read-only pinned panel, and avoids situational Auto panels so a generic character field cannot accidentally become scene-gated.
+- Custom-panel list chips stringify non-string model values instead of showing `[object Object]`.
+
+#### Fixed — automatic panels and live list
+
+- Automatic panel selection no longer leaves inactive Auto panels in the dashboard as empty placeholder sections.
+- Character-scoped Auto fields are omitted from character cards until their scene tags match.
+- Switching Panel control to Automatic rebuilds the live panel immediately instead of waiting for the next message.
+- The scene tag registry includes `rest` for downtime / long-rest panels.
+
+#### Fixed — wiki durability and performance
+
+- Wiki archive stores a `structuredClone`, so snapshot arrays cannot mutate archived entries, and alias keys are no longer stored as the same object as the canonical entry — lookup goes through `aliasOwners`.
+- Archive field-merge keeps previous custom values when a later snapshot omits them (manual Off / sanitize).
+- Character wiki indexes snapshots once per open instead of walking roster × history for every name.
+- Panel rebuild no longer serializes the entire panel HTML on every frame; timeline provenance is limited to visible nodes.
+- The stream hider measures height at most once per frame and caches tracker-start scans.
+
+#### Fixed — mobile and layout
+
+- SillyTavern's top bar is restored on panel hide, desktop resize, `pagehide`, and tab hide; becoming visible again re-applies the mobile overlay instead of leaving ST chrome stuck hidden.
+- Mobile Panel Manager uses the main ScenePulse scroll surface instead of a nested manager/library scroll trap; pinned badges and all four library actions have stable phone layouts.
+- Mobile custom-panel live refresh and just-created panel rows keep the stacked phone layout immediately, not only after a full panel rebuild.
+- Character-scoped custom fields stack label above value on phones and tablets, matching standalone custom panels and preventing long labels from squeezing values.
+- On phone widths the Debug Inspector header uses a deterministic two-row layout (title + close, then Doctor + Diagnostics) and its title can no longer be squeezed to one character per line. The change is scoped to the Debug Inspector and does not alter other overlays reusing the crash-log shell.
+- The first-run success toast goes through `t()`.
 
 ### [7.1.14] — 2026-07-27
 

@@ -532,7 +532,9 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.14** - Character-scoped custom panels: Global vs Each Character target, full/delta field rules, reserved-alias and structural reconciliation.
+**Latest release: v7.1.15** - Selectable parallel lanes for Separate mode, character audience filters with a tightened generation contract, the pinnable Panel Library, automatic scene-based panel selection, and a large mobile/layout pass. Russian UI coverage is back to 100%.
+
+**Previous release: v7.1.14** - Character-scoped custom panels.
 
 ## Contributing
 

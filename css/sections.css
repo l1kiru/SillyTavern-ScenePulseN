@@ -133,3 +133,12 @@
     width: 5px; height: 5px; border-radius: 50%;
     background: currentColor; flex-shrink: 0;
 }
+
+/* Touch: refresh is an independent action inside a clickable section header. */
+@media (hover: none), (pointer: coarse), (max-width: 600px) {
+    .sp-section-refresh, .sp-char-toggle-all {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+        opacity: 0.7 !important;
+    }
+    .sp-empty-action { min-height: 44px; }
+}

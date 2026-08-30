@@ -280,6 +280,20 @@
     #scenepulse-settings .sp-btn,
     #scenepulse-settings .sp-btn-sm,
     #scenepulse-settings select,
+    #scenepulse-settings textarea,
     #scenepulse-settings input[type="number"] { min-height: 44px; }
     #scenepulse-settings .sp-font-scale-row { flex-wrap: wrap; }
+    #scenepulse-settings .sp-prompt-legacy summary {
+        min-height: 44px; display: flex; align-items: center;
+    }
+    #scenepulse-settings .sp-devsec-header,
+    #scenepulse-settings .sp-devsec-unlock-btn,
+    #scenepulse-settings .sp-devsec-relock-btn { min-height: 44px; }
+}
+
+@media (hover: none), (pointer: coarse) {
+    #scenepulse-settings textarea { min-height: 44px; }
+    #scenepulse-settings .sp-devsec-header,
+    #scenepulse-settings .sp-devsec-unlock-btn,
+    #scenepulse-settings .sp-devsec-relock-btn { min-height: 44px; }
 }

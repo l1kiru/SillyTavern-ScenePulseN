@@ -32,8 +32,33 @@ export function spApplyMode(){
     spUpdateFab();
     return mode;
 }
+function _stChromeEl(){
+    return document.getElementById('top-bar')||document.getElementById('top-settings-holder');
+}
+function restoreStChrome(force=false){
+    const stTop=_stChromeEl();
+    if(!stTop)return;
+    if(force){
+        stTop.style.display='';
+        return;
+    }
+    const p=document.getElementById('sp-panel');
+    const panelVis=p?.classList.contains('sp-visible');
+    const mode=spDetectMode();
+    if(!(panelVis&&(mode==='mobile'||mode==='tablet'))) stTop.style.display='';
+}
+function bindChromeRestoreGuards(){
+    if(bindChromeRestoreGuards.bound)return;
+    bindChromeRestoreGuards.bound=true;
+    window.addEventListener('pagehide',()=>restoreStChrome(true));
+    document.addEventListener('visibilitychange',()=>{
+        if(document.hidden)restoreStChrome(true);
+        else spInjectTopBar(spDetectMode());
+    });
+}
 export function spInjectTopBar(mode){
-    const stTop=document.getElementById('top-bar')||document.getElementById('top-settings-holder');
+    bindChromeRestoreGuards();
+    const stTop=_stChromeEl();
     if(!stTop)return;
     let spTop=document.getElementById('sp-mobile-topbar');
     if(mode==='mobile'||mode==='tablet'){
@@ -50,11 +75,11 @@ export function spInjectTopBar(mode){
             }
             spTop.style.display='flex';spTop.classList.add('sp-mt-visible');
         } else {
-            stTop.style.display='';
+            restoreStChrome();
             if(spTop){spTop.style.display='none';spTop.classList.remove('sp-mt-visible')}
         }
     } else {
-        stTop.style.display='';
+        restoreStChrome();
         if(spTop)spTop.style.display='none';
     }
 }
@@ -106,6 +131,7 @@ export function spMinimizePanel(){
         p.style.transition='';p.style.transform='';p.style.opacity='';
         if(spTop){spTop.style.transition='';spTop.style.transform='';spTop.style.opacity=''}
         hidePanel();
+        restoreStChrome();
         spUpdateFab();
         log('Mobile: panel minimized');
     },260);

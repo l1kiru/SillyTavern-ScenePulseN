@@ -73,6 +73,7 @@
 .sp-quest-undo:hover { background: rgba(77,184,164,0.15); color: var(--sp-accent); }
 /* Add quest button */
 .sp-quest-add {
+    width: 100%; border: 0; background: transparent; font-family: inherit; text-align: left;
     font-size: var(--sp-fs-xs); color: var(--sp-text); padding: 4px 6px; cursor: pointer;
     display: flex; align-items: center; gap: 4px; opacity: 0.7;
     transition: opacity 0.15s, color 0.15s; user-select: none;
@@ -122,3 +123,14 @@
 .sp-section-status-updated { font-size: var(--sp-fs-xs); font-weight: 600; color: var(--sp-amber); opacity: 0.85; }
 .sp-section-status-done { font-size: var(--sp-fs-xs); font-weight: 600; color: var(--sp-green); opacity: 0.85; }
 .sp-section-status-sep { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); opacity: 0.4; }
+
+
+/* Touch/mobile: actions cannot rely on hover and need real tap targets. */
+@media (hover: none), (pointer: coarse), (max-width: 600px) {
+    .sp-quest-actions, .sp-quest-resolved .sp-quest-actions { opacity: 1; }
+    .sp-quest-action { width: 44px; height: 44px; min-width: 44px; }
+    .sp-quest-header { gap: 4px; }
+    .sp-quest-add { min-height: 44px; }
+    .sp-quest-dialog { width: calc(100vw - 32px); min-width: 0; max-width: 420px; box-sizing: border-box; }
+    .sp-quest-dialog-input, .sp-quest-dialog-select, .sp-quest-dialog-textarea { font-size: 16px; min-height: 44px; }
+}

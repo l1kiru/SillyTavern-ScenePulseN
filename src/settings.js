@@ -1,7 +1,7 @@
 // ScenePulse — Settings & Data Access Module
 // Extracted from index.js lines 413-453, 786-895
 
-import { MODULE_NAME, DEFAULTS, normalizePromptMode } from './constants.js';
+import { MODULE_NAME, DEFAULTS, normalizePromptMode, normalizeParallelMaxConcurrent } from './constants.js';
 import { log, warn } from './logger.js';
 import { esc } from './utils.js';
 import { buildDynamicSchema, buildDynamicPrompt } from './schema.js';
@@ -20,6 +20,9 @@ import {
     normalizeCustomFieldValue,
 } from './profiles.js';
 import { currentChatFingerprint, buildActiveFingerprintIndex, FINGERPRINT_VERSION } from './message-fingerprint.js';
+import { customPanelActivationKey, normalizePanelActivationMode, normalizePanelActivationStrategy, normalizeSceneTags } from './panel-activation-policy.js';
+import { loadPanelLibrary, syncPinnedLibraryPanels } from './panel-library.js';
+import { characterMatchesAudience, normalizeAudience } from './character-audience.js';
 
 // Minimal inline user-name check for the one-shot migration below.
 // Duplicates the logic in normalize.isUserName to avoid a circular import
@@ -46,6 +49,7 @@ const{extensionSettings}=SillyTavern.getContext();if(!extensionSettings[MODULE_N
     if(Object.hasOwn(s,'functionToolEnabled')){delete s.functionToolEnabled;try{SillyTavern.getContext().saveSettingsDebounced()}catch{}}
     const oldPromptMode=s.promptMode;s.promptMode=normalizePromptMode(s.promptMode);
     if(oldPromptMode!==s.promptMode){try{SillyTavern.getContext().saveSettingsDebounced()}catch{}}
+    s.parallelMaxConcurrent=normalizeParallelMaxConcurrent(s.parallelMaxConcurrent);
 // where both name AND all keys were empty, which deleted panels mid-
 // edit when the user changed a field type before filling in the key.
 // Now only strips panels with zero fields (truly abandoned stubs).
@@ -129,10 +133,10 @@ export function getActivePanels(s) {
     try {
         const profile = getActiveProfile(s);
         if (profile && Array.isArray(profile.customPanels) && profile.customPanels.length > 0) {
-            return profile.customPanels;
+            return syncPinnedLibraryPanels(profile.customPanels, loadPanelLibrary()).panels;
         }
     } catch {}
-    return [];
+    return syncPinnedLibraryPanels([], loadPanelLibrary()).panels;
 }
 
 /**
@@ -158,8 +162,37 @@ export function ensureChatPanels() {
             ctx.chatMetadata.scenepulse.chatPanels = structuredClone(seed);
             try { ctx.saveMetadata(); } catch {}
         }
+        syncPinnedLibraryIntoChat(ctx.chatMetadata.scenepulse.chatPanels, { save: true });
         return ctx.chatMetadata.scenepulse.chatPanels;
     } catch { return seed; }
+}
+
+export function syncPinnedLibraryIntoChat(chatPanels = null, { save = false, library = null } = {}) {
+    const target = Array.isArray(chatPanels) ? chatPanels : (() => {
+        try {
+            const cp = SillyTavern.getContext()?.chatMetadata?.scenepulse?.chatPanels;
+            return Array.isArray(cp) ? cp : null;
+        } catch {
+            return null;
+        }
+    })();
+    if (!Array.isArray(target)) return { changed: false, added: 0, removed: 0, detachedStale: 0, skipped: 0, skippedPanels: [] };
+    const synced = syncPinnedLibraryPanels(target, library || loadPanelLibrary());
+    const changed = synced.changed === true;
+    if (changed) {
+        target.splice(0, target.length, ...synced.panels);
+        if (save) {
+            try { SillyTavern.getContext()?.saveMetadata?.(); } catch {}
+        }
+    }
+    return {
+        changed,
+        added: synced.added,
+        removed: synced.removed,
+        detachedStale: synced.detachedStale || 0,
+        skipped: synced.skipped || 0,
+        skippedPanels: Array.isArray(synced.skippedPanels) ? synced.skippedPanels : [],
+    };
 }
 
 /** Save per-chat panel changes to metadata. No-op if no chat is active. */
@@ -168,6 +201,30 @@ export function saveChatPanels() {
         const ctx = SillyTavern.getContext();
         if (ctx && ctx.chatMetadata) ctx.saveMetadata();
     } catch {}
+}
+
+/** Effective manual/automatic panel selection for the current chat. */
+export function getPanelActivationStrategy(s=getSettings()) {
+    try {
+        const data=SillyTavern.getContext().chatMetadata?.scenepulse;
+        if(data&&Object.hasOwn(data,'panelActivationStrategy')){
+            return normalizePanelActivationStrategy(data.panelActivationStrategy);
+        }
+    } catch {}
+    return normalizePanelActivationStrategy(s?.panelActivationStrategy);
+}
+
+/** Persist a chat-local override without rewriting panel definitions. */
+export function setPanelActivationStrategy(value) {
+    const strategy=normalizePanelActivationStrategy(value);
+    try {
+        const ctx=SillyTavern.getContext();
+        if(!ctx?.chatMetadata)return strategy;
+        if(!ctx.chatMetadata.scenepulse)ctx.chatMetadata.scenepulse={snapshots:{}};
+        ctx.chatMetadata.scenepulse.panelActivationStrategy=strategy;
+        ctx.saveMetadata?.();
+    } catch {}
+    return strategy;
 }
 
 /**
@@ -203,11 +260,27 @@ export function clearLatestCustomPanelValues(specs) {
     return changed;
 }
 
-function _customFieldStorageSignature(spec) {
+function _canonicalAudience(audience) {
+    const normalized=normalizeAudience(audience);
+    return {
+        names:[...normalized.names].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'})),
+        genders:[...normalized.genders].sort(),
+        keywords:[...normalized.keywords].sort(),
+    };
+}
+
+function _customFieldValueSignature(spec) {
     const field = spec?.field || {};
     return JSON.stringify([
         field.type || '',
         field.type === 'enum' && Array.isArray(field.options) ? field.options : [],
+    ]);
+}
+
+function _customFieldStorageSignature(spec) {
+    return JSON.stringify([
+        _customFieldValueSignature(spec),
+        _canonicalAudience(spec?.audience || spec?.panel?.audience || null),
     ]);
 }
 
@@ -223,7 +296,7 @@ function _configuredCustomFieldSpecs(panels, { charactersEnabled = true } = {}) 
             // Never treat a built-in property or legacy alias as removable
             // custom data.
             if(scope==='character'&&isBuiltInCharacterFieldKey(key))continue;
-            specs.push({scope,key,field});
+            specs.push({scope,key,field,audience:panel.audience||null,panel});
         }
     }
     return specs;
@@ -236,16 +309,40 @@ export function reconcileLatestCustomPanelValues(previousPanels, nextPanels, {
     previousCharactersEnabled = true,
     nextCharactersEnabled = true,
 } = {}) {
-    const next = new Map(
-        _configuredCustomFieldSpecs(nextPanels, { charactersEnabled: nextCharactersEnabled })
-            .map(spec => [`${spec.scope}:${spec.key}`, _customFieldStorageSignature(spec)]),
-    );
-    const stale = _configuredCustomFieldSpecs(previousPanels, {
-        charactersEnabled: previousCharactersEnabled,
-    }).filter(spec =>
-        next.get(`${spec.scope}:${spec.key}`) !== _customFieldStorageSignature(spec),
-    );
-    return clearLatestCustomPanelValues(stale);
+    const previousSpecs=_configuredCustomFieldSpecs(previousPanels,{charactersEnabled:previousCharactersEnabled});
+    const nextSpecs=_configuredCustomFieldSpecs(nextPanels,{charactersEnabled:nextCharactersEnabled});
+    const nextByPath=new Map(nextSpecs.map(spec=>[`${spec.scope}:${spec.key}`,spec]));
+    const clearAll=[];
+    const audienceChanged=[];
+    for(const previous of previousSpecs){
+        const path=`${previous.scope}:${previous.key}`;
+        const next=nextByPath.get(path);
+        if(!next||_customFieldValueSignature(previous)!==_customFieldValueSignature(next)){
+            clearAll.push(previous);
+            continue;
+        }
+        if(_customFieldStorageSignature(previous)!==_customFieldStorageSignature(next)){
+            audienceChanged.push(next);
+        }
+    }
+    let changed=clearLatestCustomPanelValues(clearAll);
+    if(audienceChanged.length){
+        const snapshot=getLatestSnapshot();
+        if(snapshot){
+            for(const spec of audienceChanged){
+                if(spec.scope!=='character')continue;
+                for(const character of Array.isArray(snapshot.characters)?snapshot.characters:[]){
+                    if(!character||typeof character!=='object'||!Object.hasOwn(character,spec.key))continue;
+                    if(!characterMatchesAudience(character,spec.audience||spec.panel?.audience||null)){
+                        delete character[spec.key];
+                        changed=true;
+                    }
+                }
+            }
+            if(changed){try{SillyTavern.getContext().saveMetadata()}catch{}}
+        }
+    }
+    return changed;
 }
 
 function _sortedEntries(value) {
@@ -261,12 +358,23 @@ function _trackerStructureSignature(structure) {
         `${spec.scope}:${spec.key}`,
         _customFieldStorageSignature(spec),
     ]).sort(([a],[b])=>a.localeCompare(b));
+    const customActivation=(Array.isArray(structure?.customPanels)?structure.customPanels:[])
+        .filter(panel=>panel?.enabled!==false)
+        .map(panel=>[
+            customPanelActivationKey(panel),
+            normalizePanelActivationMode(panel),
+            normalizeSceneTags(panel?.activationTags),
+            _canonicalAudience(panel?.audience||null),
+        ])
+        .sort(([a],[b])=>a.localeCompare(b));
     return JSON.stringify({
         profileId:structure?.profileId||null,
         panels:_sortedEntries(structure?.panels),
         fieldToggles:_sortedEntries(structure?.fieldToggles),
         dashCards:_sortedEntries(structure?.dashCards),
         customFields,
+        customActivation,
+        panelActivationStrategy:normalizePanelActivationStrategy(structure?.panelActivationStrategy),
     });
 }
 
@@ -281,6 +389,7 @@ export function captureTrackerStructure() {
         fieldToggles:structuredClone(view.fieldToggles||{}),
         dashCards:structuredClone({...DEFAULTS.dashCards,...(view.dashCards||{})}),
         customPanels:structuredClone(getActivePanels(view)),
+        panelActivationStrategy:getPanelActivationStrategy(settings),
     };
 }
 
@@ -1022,7 +1131,16 @@ function _updateWikiArchive(data, snap){
             if(!nm || nm === '?') continue;
             // Latest write wins. Stash a deep copy so future delta merges
             // mutating the original snapshot don't bleed into the archive.
-            arc.characters[nm] = { ...ch, _spArchivedAt: new Date().toISOString() };
+            const incoming = { ...structuredClone(ch), _spArchivedAt: new Date().toISOString() };
+            const prior = arc.characters[nm];
+            if (prior && typeof prior === 'object') {
+                for (const key of Object.keys(prior)) {
+                    if (key.startsWith('_sp')) continue;
+                    const val = incoming[key];
+                    if (val === undefined || val === null || val === '') incoming[key] = prior[key];
+                }
+            }
+            arc.characters[nm] = incoming;
             // Index by aliases too so the wiki can look up by old placeholder.
             // Always reassign — if the model reveals "Karen had alias Stranger",
             // the alias key should resolve to the Karen entry, not whatever
@@ -1040,7 +1158,6 @@ function _updateWikiArchive(data, snap){
                         continue;
                     }
                     arc.aliasOwners[al] = nm;
-                    arc.characters[al] = arc.characters[nm];
                 }
             }
         }
@@ -1049,7 +1166,7 @@ function _updateWikiArchive(data, snap){
         for(const rel of snap.relationships){
             const nm = (rel?.name || '').toLowerCase().trim();
             if(!nm) continue;
-            arc.relationships[nm] = { ...rel, _spArchivedAt: new Date().toISOString() };
+            arc.relationships[nm] = { ...structuredClone(rel), _spArchivedAt: new Date().toISOString() };
         }
     }
 }
@@ -1090,7 +1207,13 @@ export function captureCharacterCustomFieldSpecs() {
     const view=buildProfileView(settings,getActiveProfile(settings));
     if(view.panels?.characters===false)return[];
     return getActiveCustomFieldSpecs(getActivePanels(view),'character')
-        .map(spec=>({key:spec.key,field:structuredClone(spec.field)}));
+        .map(spec=>({
+            key:spec.key,
+            field:structuredClone(spec.field),
+            audience:structuredClone(spec.panel?.audience||spec.audience||null),
+            panelId:customPanelActivationKey(spec.panel),
+            activationMode:normalizePanelActivationMode(spec.panel),
+        }));
 }
 
 export function sanitizeCharacterCustomFields(snapshot, {
@@ -1100,7 +1223,7 @@ export function sanitizeCharacterCustomFields(snapshot, {
     if (!snapshot || !Array.isArray(snapshot.characters)) return;
     const specs = new Map(
         (customFieldSpecs??captureCharacterCustomFieldSpecs())
-            .map(spec=>[spec.key,spec.field]),
+            .map(spec=>[spec.key,spec]),
     );
     for (const character of snapshot.characters) {
         if (!character || typeof character !== 'object') continue;
@@ -1111,7 +1234,12 @@ export function sanitizeCharacterCustomFields(snapshot, {
                 || (preserveAliases&&key==='_spKey')
                 || key === '_isPrimary'
             ) continue;
-            const field = specs.get(key);
+            const spec = specs.get(key);
+            const field = spec?.field || spec;
+            if (spec?.audience && !characterMatchesAudience(character, spec.audience)) {
+                delete character[key];
+                continue;
+            }
             const normalized = field ? normalizeCustomFieldValue(field, character[key]) : { ok: false };
             if (!normalized.ok) delete character[key];
             else character[key] = normalized.value;
@@ -1174,9 +1302,11 @@ export function getTrustedSnapshotFor(id,swipeId=getActiveSwipeId(id)){
     return getSnapshotStatus(id,swipeId,snap)==='stale'?null:snap;
 }
 
-export function getSnapshotProvenance(){
+export function getSnapshotProvenance(ids=null){
     const data=getTrackerData();const ctx=SillyTavern.getContext();const index=buildActiveFingerprintIndex(ctx.chat);const out=[];
+    const wanted=Array.isArray(ids)&&ids.length?new Set(ids.map(Number)):null;
     for(const id of Object.keys(data.swipeSnapshots||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)){
+        if(wanted&&!wanted.has(id))continue;
         const swipeId=getActiveSwipeId(id);const snapshot=_snapshotFor(data,id,swipeId);if(!snapshot)continue;
         const current=index.get(id)||'';const status=getSnapshotStatus(id,swipeId,snapshot,current);
         let reason='';
@@ -1318,7 +1448,16 @@ export function getActivePrompt(opts){
     // (full-text override) still wins inside the assembler. Settings UI
     // preview and slash-command preview keep using buildDynamicPrompt(s)
     // (no profile) so they always render the slot defaults.
-    const sView = buildProfileView(s, profile);
+    const baseView = buildProfileView(s, profile);
+    const hasRuntimeIds=Array.isArray(opts?.runtimeActivePanelIds);
+    const hasRuntimePanels=Array.isArray(opts?.runtimeCustomPanels);
+    const sView = hasRuntimeIds||hasRuntimePanels
+        ? {
+            ...baseView,
+            ...(hasRuntimeIds?{runtimeActivePanelIds:[...opts.runtimeActivePanelIds]}:{}),
+            ...(hasRuntimePanels?{runtimeCustomPanels:structuredClone(opts.runtimeCustomPanels)}:{}),
+        }
+        : baseView;
     return assemblePrompt(sView, profile, opts);
 }
 
@@ -1361,6 +1500,16 @@ export function getLanguage(){
 
 // ── External Access ──
 export function getConnectionProfiles(){try{const o=document.querySelectorAll('#connection_profiles option, #connection_profile option');if(o.length)return Array.from(o).filter(x=>x.value).map(x=>({id:x.value,name:x.textContent.trim()}))}catch(e){warn('Profiles:',e)}return[]}
+
+export function getResolvedConnectionProfileId(settings=getSettings(),ctx=_getContextSafe()){
+    const local=String(settings?.connectionProfile||'').trim();
+    if(local)return local;
+    try{
+        return String(ctx?.extensionSettings?.connectionManager?.selectedProfile||'').trim();
+    }catch{
+        return '';
+    }
+}
 
 export function getChatPresets(){try{for(const sel of['#settings_preset_openai','#preset_openai_select','#settings_preset_chat']){const o=document.querySelectorAll(`${sel} option`);if(o.length>1)return Array.from(o).filter(x=>x.value).map(x=>({id:x.value,name:x.textContent.trim()}))}}catch(e){warn('Presets:',e)}return[]}
 

@@ -212,3 +212,37 @@
 .sp-env-permanent { padding: 8px 12px; }
 
 /* Story Ideas hint */
+
+
+/* Touch/mobile thought panel: desktop chrome was 26px and ghost mode hid it
+   behind hover, which does not exist on a phone. Keep the compact visuals on
+   desktop but expose usable controls on coarse pointers. */
+@media (max-width: 600px), (pointer: coarse), (hover: none) {
+    #sp-thought-panel .sp-tp-header {
+        gap: 4px; padding: 4px 6px; min-height: 52px;
+    }
+    #sp-thought-panel .sp-tp-title {
+        min-width: 0; overflow: hidden; text-overflow: ellipsis;
+    }
+    #sp-thought-panel .sp-tp-close,
+    #sp-thought-panel .sp-tp-regen,
+    #sp-thought-panel .sp-tp-snapleft,
+    #sp-thought-panel .sp-tp-ghost,
+    #sp-thought-panel .sp-tp-fit {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+        flex: 0 0 44px;
+    }
+    #sp-thought-panel .sp-tp-resize { width: 44px; height: 44px; }
+    #sp-thought-panel .sp-tp-resize svg { width: 22px; height: 22px; position: absolute; right: 4px; bottom: 4px; }
+    #sp-thought-panel.sp-tp-ghost-mode .sp-tp-header {
+        opacity: 1;
+        background: rgba(22,24,32,0.88) !important;
+    }
+}
+
+/* Touch: character portraits in thought cards open character details. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    #sp-thought-panel .sp-tp-name .sp-char-portrait {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+    }
+}
