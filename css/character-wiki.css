@@ -248,3 +248,35 @@
     .sp-wiki-thought { font-size: var(--sp-fs-xs); }
     .sp-wiki-section-label { font-size: var(--sp-fs-xs); }
 }
+
+/* Mobile/touch hardening. The wiki header contains three export buttons plus
+   close, while the toolbar contains three icon buttons and two selects. Let
+   both rows wrap instead of pushing controls outside the viewport. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-wiki-overlay {
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+        box-sizing: border-box;
+    }
+    .sp-wiki-container {
+        max-width: 100%;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    .sp-wiki-header { flex-wrap: wrap; gap: 6px; padding: 8px; }
+    .sp-wiki-title { min-width: 0; flex: 1 1 140px; overflow-wrap: anywhere; }
+    .sp-wiki-export-btn,
+    .sp-wiki-close { min-width: 44px; min-height: 44px; height: 44px; box-sizing: border-box; }
+    .sp-wiki-toolbar { padding: 8px; }
+    .sp-wiki-search { min-height: 44px; font-size: 16px; box-sizing: border-box; }
+    .sp-wiki-filter { min-width: 44px; min-height: 44px; }
+    .sp-wiki-toolbar-right { width: 100%; justify-content: flex-start; flex-wrap: wrap; gap: 6px; }
+    .sp-wiki-expand-btn { width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .sp-wiki-sort,
+    .sp-wiki-archetype-filter { min-width: 0; min-height: 44px; flex: 1 1 118px; padding: 6px 8px; font-size: 16px; }
+    .sp-wiki-notes { min-height: 88px; font-size: 16px; }
+    .sp-wiki-avatar,
+    .sp-wiki-avatar-slot,
+    .sp-wiki-grid-inner .sp-wiki-avatar,
+    .sp-wiki-grid-inner .sp-wiki-avatar-slot {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+    }
+}

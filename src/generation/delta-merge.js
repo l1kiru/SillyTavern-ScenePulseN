@@ -4,6 +4,7 @@
 import { log, warn } from '../logger.js';
 import { getSettings, saveSettings } from '../settings.js';
 import { buildCharacterNameMap, characterNameKey } from '../character-identity.js';
+import { isBuiltInCharacterFieldKey, isCanonicalCharacterFieldKey } from '../profiles.js';
 
 // Array fields merged by 'name' key (entity merge)
 const ENTITY_ARRAYS = {
@@ -75,6 +76,20 @@ export function preserveOffSceneEntities(current, previous) {
                 seen.add(key);
                 return true;
             });
+            if (prior && match && typeof prior === 'object' && typeof match === 'object') {
+                for (const fieldKey of Object.keys(prior)) {
+                    if (
+                        isCanonicalCharacterFieldKey(fieldKey)
+                        || isBuiltInCharacterFieldKey(fieldKey)
+                        || fieldKey === '_spKey'
+                        || fieldKey === '_isPrimary'
+                    ) continue;
+                    const currentVal = match[fieldKey];
+                    if (currentVal === undefined || currentVal === null || currentVal === '') {
+                        match[fieldKey] = structuredClone(prior[fieldKey]);
+                    }
+                }
+            }
         }
     }
     if (Array.isArray(current.relationships) && Array.isArray(previous.relationships)) {

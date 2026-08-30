@@ -2,6 +2,7 @@
 
 import { log } from '../logger.js';
 import { getActiveSchema } from '../settings.js';
+import { audienceIsOpen, characterMatchesAudience } from '../character-audience.js';
 
 function typeName(value){
     if(Array.isArray(value))return'array';
@@ -110,6 +111,49 @@ function coerceKnownProviderShapes(data,schema,warnings){
             warnings.push(`root.characters[${i}].inventory: coerced string to array`);
         }
     }
+}
+
+
+/**
+ * Conditional contract for audience-targeted character fields.
+ * JSON Schema cannot express "required only when this character matches a
+ * runtime audience predicate" without duplicating a large per-character schema,
+ * so enforce that one rule after ordinary schema validation.
+ */
+export function validateCharacterAudienceRequirements(data, {
+    schema = null,
+    customFieldSpecs = [],
+    mode = 'full',
+    activePanelIds = null,
+} = {}) {
+    const errors=[];const warnings=[];
+    if(mode==='delta'||!data||!Array.isArray(data.characters))return{valid:true,errors,warnings};
+    let active=schema;
+    if(active?.value)active=active.value;
+    const charProps=active?.properties?.characters?.items?.properties;
+    if(!charProps)return{valid:true,errors,warnings};
+    const activeSet=Array.isArray(activePanelIds)?new Set(activePanelIds):null;
+    const specs=(Array.isArray(customFieldSpecs)?customFieldSpecs:[]).filter(spec=>{
+        if(!spec?.key||!Object.hasOwn(charProps,spec.key)||audienceIsOpen(spec.audience))return false;
+        if(activeSet&&spec.activationMode==='auto'&&spec.panelId&&!activeSet.has(spec.panelId))return false;
+        return true;
+    });
+    if(!specs.length)return{valid:true,errors,warnings};
+    for(let i=0;i<data.characters.length;i++){
+        const character=data.characters[i];
+        if(!character||typeof character!=='object'||Array.isArray(character))continue;
+        for(const spec of specs){
+            const matches=characterMatchesAudience(character,spec.audience);
+            const present=Object.hasOwn(character,spec.key)&&character[spec.key]!==null&&character[spec.key]!==undefined;
+            if(matches&&!present){
+                const name=String(character.name||`#${i+1}`);
+                errors.push(`root.characters[${i}].${spec.key}: missing required audience field for ${name}`);
+            }else if(!matches&&present){
+                warnings.push(`root.characters[${i}].${spec.key}: audience does not match; field will be ignored`);
+            }
+        }
+    }
+    return{valid:errors.length===0,errors,warnings};
 }
 
 /** @returns {{valid:boolean,errors:string[],warnings:string[]}} */

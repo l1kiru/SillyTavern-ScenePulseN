@@ -27,6 +27,8 @@ const validPanels = [{
     name: '  Status "quoted"  ',
     scope: 'CHARACTER',
     enabled: false,
+    activationMode: 'AUTO',
+    activationTags: ['Combat', 'injury', 'combat'],
     ignored: '<img src=x onerror=alert(1)>',
     fields: [
         { key: 'HEALTH', label: ' Health ', type: 'METER', desc: ' HP ', invert: true, ignored: true },
@@ -45,11 +47,18 @@ ok('unknown panel properties are dropped', !Object.hasOwn(valid.panels[0], 'igno
 ok('unknown field properties are dropped', !Object.hasOwn(valid.panels[0].fields[0], 'ignored'));
 eq('explicit false panel state survives', valid.panels[0].enabled, false);
 eq('panel scope is normalized', valid.panels[0].scope, 'character');
+eq('panel activation mode is normalized', valid.panels[0].activationMode, 'auto');
+eq('panel activation tags are canonical and deduplicated', valid.panels[0].activationTags, ['combat', 'injury']);
 eq('meter inversion survives', valid.panels[0].fields[0].invert, true);
 
 const legacyScope = validateCustomPanels([{ name: 'Legacy', fields: [{ key: 'legacy_value', label: '', type: 'text', desc: '' }] }]);
 eq('legacy panels default to global scope', legacyScope.panels[0].scope, 'global');
+eq('legacy panels default to always activation', legacyScope.panels[0].activationMode, 'always');
+eq('legacy panels default to no activation tags', legacyScope.panels[0].activationTags, []);
 ok('invalid panel scope is rejected', !validateCustomPanels([{ name: 'Bad scope', scope: 'relationship', fields: [{ key: 'value', label: '', type: 'text', desc: '' }] }]).ok);
+ok('invalid activation mode is rejected', !validateCustomPanels([{ name: 'Bad mode', activationMode: 'sometimes', fields: [{ key: 'value', label: '', type: 'text', desc: '' }] }]).ok);
+ok('free-form activation tag is rejected', !validateCustomPanels([{ name: 'Bad tag', activationMode: 'auto', activationTags: ['battle'], fields: [{ key: 'value', label: '', type: 'text', desc: '' }] }]).ok);
+ok('non-array activation tags are rejected', !validateCustomPanels([{ name: 'Bad tags', activationTags: 'combat', fields: [{ key: 'value', label: '', type: 'text', desc: '' }] }]).ok);
 for (const alias of ['inner_thought', 'status', 'notes', 'items', 'thought', 'condition', 'position', 'fertility']) {
     ok(`built-in character alias is rejected: ${alias}`, !validateCustomPanels([{ name: 'Conflict', scope: 'character', fields: [{ key: alias, label: '', type: 'text', desc: '' }] }]).ok);
     ok(`same alias remains valid globally: ${alias}`, validateCustomPanels([{ name: 'Global', scope: 'global', fields: [{ key: alias, label: '', type: 'text', desc: '' }] }]).ok);
@@ -95,6 +104,12 @@ const duplicateNames = validateCustomPanels([
 ]);
 ok('duplicate DOM section names rejected', !duplicateNames.ok && duplicateNames.errors.some(e => e.includes('panel name')));
 
+const duplicateIds = validateCustomPanels([
+    { id: 'cp_same', name: 'First ID', fields: [{ key: 'first_id', label: '', type: 'text', desc: '' }] },
+    { id: 'cp_same', name: 'Second ID', fields: [{ key: 'second_id', label: '', type: 'text', desc: '' }] },
+]);
+ok('duplicate imported panel ids are normalized to unique runtime ids', duplicateIds.ok && duplicateIds.panels[0].id !== duplicateIds.panels[1].id);
+
 const badEnum = validateCustomPanels([{ name: 'Enum', fields: [{ key: 'state', label: '', type: 'enum', desc: '', options: ['ok', 7] }] }]);
 ok('non-string enum option rejected', !badEnum.ok);
 
@@ -111,6 +126,11 @@ const pollutedConfig = JSON.parse('{"__proto__":{"polluted":true},"constructor":
 const config = validateImportedConfigSettings(pollutedConfig);
 ok('clean config accepted while inherited names are ignored', config.ok);
 eq('supported scalar imported', config.settingsPatch.autoGenerate, false);
+const parallelConfig = validateImportedConfigSettings({ parallelFullGeneration: true });
+ok('parallel full feature flag imports as a boolean', parallelConfig.ok && parallelConfig.settingsPatch.parallelFullGeneration === true);
+const activationStrategyConfig = validateImportedConfigSettings({ panelActivationStrategy: 'automatic' });
+ok('automatic panel strategy imports as a controlled enum', activationStrategyConfig.ok && activationStrategyConfig.settingsPatch.panelActivationStrategy === 'automatic');
+ok('invalid panel strategy is rejected', !validateImportedConfigSettings({ panelActivationStrategy: 'sometimes' }).ok);
 ok('__proto__ absent from settings patch', !Object.hasOwn(config.settingsPatch, '__proto__'));
 ok('constructor absent from settings patch', !Object.hasOwn(config.settingsPatch, 'constructor'));
 ok('Object prototype remains unpolluted', ({}).polluted === undefined);
@@ -158,9 +178,18 @@ ok('runtime schema properties keep a normal prototype', Object.getPrototypeOf(ru
 const here = dirname(fileURLToPath(import.meta.url));
 const sectionSource = readFileSync(join(here, '../src/ui/section.js'), 'utf8');
 const managerSource = readFileSync(join(here, '../src/settings-ui/custom-panels.js'), 'utf8');
+const settingsSource = readFileSync(join(here, '../src/settings-ui/create-settings.js'), 'utf8');
+const bindingsSource = readFileSync(join(here, '../src/settings-ui/bind-ui.js'), 'utf8');
 ok('refresh title is localized and assigned as a DOM property', sectionSource.includes("refreshButton.title=t('Refresh {title}',{title:String(title)})"));
 ok('user panel title is not interpolated into a title attribute', !sectionSource.includes('title="Refresh ${title}"'));
 ok('dynamic section selectors use CSS.escape', managerSource.includes('globalThis.CSS.escape'));
 ok('collision warning writes message with textContent', managerSource.includes("warn.querySelector('span').textContent=String(message)"));
+ok('activation editor uses canonical tag registry', managerSource.includes('SCENE_TAG_REGISTRY'));
+ok('activation editor keeps enabled separate from activation mode', managerSource.includes("next[cpIdx].activationMode=mode"));
+ok('activation editor labels a disabled panel as forced off', managerSource.includes("badgeText=t('FORCED OFF')"));
+ok('panel manager exposes manual and automatic chat control', managerSource.includes("['manual',t('Manual selection')]") && managerSource.includes("['automatic',t('Automatic by scene')]"));
+ok('Separate settings expose the Parallel Full feature flag', settingsSource.includes('id="sp-parallel-full"'));
+ok('Parallel Full UI loads and saves the existing flag', bindingsSource.includes("$('#sp-parallel-full').prop('checked',s.parallelFullGeneration===true)") && bindingsSource.includes('s.parallelFullGeneration=this.checked'));
+ok('parallel and injection changes refresh an open Panel Manager', bindingsSource.includes('refreshOpenPanelManager()'));
 
 console.log(`\nPASS ${pass}/${pass}`);

@@ -4,11 +4,11 @@
 import { log, warn } from './logger.js';
 import { t } from './i18n.js';
 import { spConfirm } from './utils.js';
-import { captureTrackerStructure, getSettings, saveSettings, getLatestSnapshot, getTrackerData, clearAllSnapshots, anyPanelsActive, forceFullStateRefresh, clearForceFullState, reconcileTrackerStructureChange, buildProfileView, canGenerateScene, getLastAssistantMessageIndex } from './settings.js';
+import { captureTrackerStructure, getSettings, saveSettings, getLatestSnapshot, getTrackerData, clearAllSnapshots, anyPanelsActive, forceFullStateRefresh, clearForceFullState, reconcileTrackerStructureChange, buildProfileView, canGenerateScene, getLastAssistantMessageIndex, getResolvedConnectionProfileId } from './settings.js';
 import { getActiveProfile, setActiveProfile } from './profiles.js';
 import { normalizeTracker, clearNormCache } from './normalize.js';
 import { generating } from './state.js';
-import { BUILTIN_PANELS, DEFAULTS, VERSION } from './constants.js';
+import { BUILTIN_PANELS, DEFAULTS, VERSION, normalizeParallelMaxConcurrent } from './constants.js';
 import { renderEmptyState } from './ui/empty-state.js';
 
 let _registered = false;
@@ -31,10 +31,10 @@ export function registerSlashCommands() {
         name: 'sp',
         callback: _spMain,
         aliases: ['scenepulse'],
-        helpString: 'ScenePulse commands. Subcommands: status, regen, clear, toggle, export, debug. Usage: /sp status',
+        helpString: 'ScenePulse commands. Subcommands: status, regen, clear, toggle, parallel, export, debug, transport-probe. Usage: /sp status',
         returns: 'string',
         unnamedArgumentList: [
-            new SA('Subcommand: status | regen | clear | toggle | export | debug', [AT.STRING], false),
+            new SA('Subcommand: status | regen | clear | toggle | parallel | export | debug | transport-probe', [AT.STRING], false),
             new SA('Argument for subcommand (e.g., panel name for toggle, section for regen)', [AT.STRING], false),
         ],
         splitUnnamedArgument: true,
@@ -94,6 +94,14 @@ export function registerSlashCommands() {
         returns: 'string',
     }));
 
+    // ── /sp-transport-probe — Manual Phase 1 profile transport gate ──
+    SCP.addCommandObject(SC.fromProps({
+        name: 'sp-transport-probe',
+        callback: () => _spTransportProbe(),
+        helpString: 'Run the manual ScenePulse profile-bound concurrency and abort-isolation probe (4 tiny requests)',
+        returns: 'string',
+    }));
+
     // ── /sp-help — Show help ──
     SCP.addCommandObject(SC.fromProps({
         name: 'sp-help',
@@ -121,7 +129,7 @@ export function registerSlashCommands() {
         ],
     }));
 
-    log('Slash commands registered: /sp, /sp-regen, /sp-status, /sp-clear, /sp-toggle, /sp-export, /sp-debug, /sp-help, /sp-refresh, /sp-profile');
+    log('Slash commands registered: /sp, /sp-regen, /sp-status, /sp-clear, /sp-toggle, /sp-export, /sp-debug, /sp-transport-probe, /sp-help, /sp-refresh, /sp-profile');
 }
 
 // ── Main dispatcher for /sp <subcommand> ──
@@ -137,15 +145,18 @@ async function _spMain(args, value) {
         case 'refresh': return _spRefresh();
         case 'clear': return _spClear();
         case 'toggle': return _spToggle(args, rest);
+        case 'parallel': return _spParallel(rest);
         case 'export': return _spExport();
         case 'debug': return _spDebug();
+        case 'transport-probe':
+        case 'probe': return _spTransportProbe();
         case 'profile':
         case 'profiles': return _spProfile(args, rest);
         case '':
         case 'help':
             return _spHelp();
         default:
-            return `Unknown subcommand: ${sub}. Use: status, regen, refresh, clear, toggle, export, debug, profile, help`;
+            return `Unknown subcommand: ${sub}. Use: status, regen, refresh, clear, toggle, parallel, export, debug, transport-probe, profile, help`;
     }
 }
 
@@ -158,17 +169,88 @@ function _spHelp() {
         '  /sp refresh — Force full-state regeneration (bypass delta mode, reset drift counter)',
         '  /sp clear — Clear all tracker data for this chat',
         '  /sp toggle <panel> — Toggle panel on/off (built-in or custom panel name; omit to list)',
+        '  /sp parallel [on|off|status|2|3|4] — Control experimental parallel Separate builds and lane count',
         '  /sp profile [name] — List profiles, or switch to one by name',
         '  /sp export — Export tracker history + profiles as JSON',
         '  /sp debug — Show diagnostics',
+        '  /sp transport-probe — Run the Phase 1 connection concurrency gate (4 tiny requests)',
         '  /sp help — Show this message',
         '',
-        'Standalone shortcuts: /sp-status, /sp-regen, /sp-refresh, /sp-clear, /sp-toggle, /sp-profile, /sp-export, /sp-debug, /sp-help',
+        'Standalone shortcuts: /sp-status, /sp-regen, /sp-refresh, /sp-clear, /sp-toggle, /sp-profile, /sp-export, /sp-debug, /sp-transport-probe, /sp-help',
         'Aliases: /scenepulse <subcommand>',
     ].join('\n');
 }
 
+function _spParallel(value) {
+    const settings = getSettings();
+    const action = String(value || 'status').trim().toLowerCase();
+    const lanes = normalizeParallelMaxConcurrent(action);
+    if (!['on', 'off', 'status', '2', '3', '4'].includes(action)) return 'Usage: /sp parallel on | off | status | 2 | 3 | 4';
+    if (action === 'on') {
+        settings.parallelFullGeneration = true;
+        saveSettings();
+    } else if (action === 'off') {
+        settings.parallelFullGeneration = false;
+        saveSettings();
+    } else if (action === '2' || action === '3' || action === '4') {
+        settings.parallelFullGeneration = true;
+        settings.parallelMaxConcurrent = lanes;
+        saveSettings();
+    }
+    const n = normalizeParallelMaxConcurrent(settings.parallelMaxConcurrent);
+    return `Parallel tracker requests: ${settings.parallelFullGeneration === true ? 'ON' : 'OFF'} x${n} (Separate only; Parallel Full + adaptive Delta)`;
+}
+
+// ── /sp transport-probe ──
+async function _spTransportProbe() {
+    if (generating) return 'Wait for the current generation to finish before running the transport probe.';
+    const ctx = SillyTavern.getContext();
+    const settings = getSettings();
+    const profileRef = getResolvedConnectionProfileId(settings, ctx);
+    if (!profileRef) return 'Select a Connection Manager profile first. The probe never switches the global profile.';
+
+    try {
+        const { getConnectionRequestService, resolveConnectionProfileId } = await import('./generation/profile-request.js');
+        const { runProfileTransportProbe } = await import('./generation/profile-request-probe.js');
+        const service = getConnectionRequestService(ctx);
+        const profileId = resolveConnectionProfileId(profileRef, service);
+        log('Transport probe: starting 4 tiny requests for profile', profileId);
+        const result = await runProfileTransportProbe({ profileId, service, stContext: ctx });
+        log('Transport probe result:', JSON.stringify(result));
+        const o = result.overlap;
+        return [
+            `ScenePulse transport probe: ${result.gate.go ? 'GO' : 'NO-GO'}`,
+            `Profile: ${profileId}`,
+            `Overlap: ${result.gate.providerOverlap ? 'PASS' : 'FAIL'} — wall ${o.wallMs.toFixed(0)}ms, sum ${o.durationSumMs.toFixed(0)}ms, overlap ${o.overlapMs.toFixed(0)}ms, factor ${o.concurrencyFactor.toFixed(2)}x`,
+            `Independent abort: ${result.gate.independentAbort ? 'PASS' : 'FAIL'} (A aborted, B survived)`,
+            `Native schema: ${result.gate.nativeSchema ? 'PASS' : 'FAIL'}`,
+            `JSON-only mode: ${result.gate.jsonMode ? 'PASS' : 'FAIL'}`,
+            'Full details were written to the ScenePulse debug log.',
+        ].join('\n');
+    } catch (error) {
+        warn('Transport probe failed:', error?.message || error);
+        return `ScenePulse transport probe failed: ${error?.cause?.message || error?.message || error}`;
+    }
+}
+
 // ── /sp status ──
+function _parallelStatusLines(meta) {
+    const parallel = meta?.parallel;
+    if (!parallel || parallel.mode !== 'parallel-full') return [];
+    const wallMs = Math.max(0, Number(parallel.wallMs) || 0);
+    const sumMs = Math.max(0, Number(parallel.sumLaneMs) || 0);
+    const gain = Math.max(0, Number(parallel.parallelGain) || 0);
+    const laneCount = Array.isArray(parallel.lanes) ? parallel.lanes.length : 0;
+    const concurrency = Math.max(1, Number(parallel.concurrency) || 1);
+    const activation = meta?.panelActivation || parallel.activation || null;
+    const tags = Array.isArray(activation?.activeTags) ? activation.activeTags : [];
+    const panels = Array.isArray(activation?.activePanelIds) ? activation.activePanelIds : [];
+    return [
+        `Last parallel build: ${laneCount} lane(s), concurrency ${concurrency} | wall ${(wallMs / 1000).toFixed(1)}s | lane sum ${(sumMs / 1000).toFixed(1)}s | gain ${gain.toFixed(2)}x`,
+        activation ? `Runtime activation: tags ${tags.join(', ') || 'none'} | panels ${panels.join(', ') || 'none'}` : '',
+    ].filter(Boolean);
+}
+
 function _spStatus() {
     const s = getSettings();
     const ap = getActiveProfile(s);
@@ -183,6 +265,7 @@ function _spStatus() {
             `ScenePulse v${VERSION}`,
             `Enabled: ${s.enabled ? 'Yes' : 'No'}`,
             `Mode: ${s.injectionMethod || 'inline'}${s.deltaMode ? ' (delta)' : ''}`,
+            `Parallel requests: ${s.parallelFullGeneration === true ? 'ON' : 'OFF'} x${normalizeParallelMaxConcurrent(s.parallelMaxConcurrent)}`,
             `Profile: ${ap?.name || '(none)'}`,
             `Panels: ${enabledPanels.join(', ') || 'none'}`,
             `Snapshots: ${snapCount}`,
@@ -200,6 +283,7 @@ function _spStatus() {
     return [
         `ScenePulse v${VERSION} — Status`,
         `Mode: ${s.injectionMethod || 'inline'}${s.deltaMode ? ' (delta)' : ''} | Language: ${s.language || 'English'}`,
+        `Parallel requests: ${s.parallelFullGeneration === true ? 'ON' : 'OFF'} x${normalizeParallelMaxConcurrent(s.parallelMaxConcurrent)}`,
         `Profile: ${ap?.name || '(none)'}${ap?.systemPrompt || ap?.schema ? ' (custom)' : ''}`,
         `Snapshots: ${snapCount} | Generating: ${generating ? 'Yes' : 'No'}`,
         '',
@@ -214,6 +298,7 @@ function _spStatus() {
         `Quests: ${mainQ} main, ${sideQ} side`,
         `North Star: ${norm.northStar || 'Not revealed'}`,
         '',
+        ..._parallelStatusLines(meta),
         meta.elapsed ? `${t('Last gen')}: ${meta.elapsed.toFixed(1)}s | ~${(meta.promptTokens || 0) + (meta.completionTokens || 0)} ${t('tokens')} | ${t('Source')}: ${meta.source || '?'}` : '',
     ].filter(Boolean).join('\n');
 }
@@ -524,7 +609,7 @@ function _spDebug() {
     return [
         `ScenePulse v${VERSION} — Debug`,
         `Enabled: ${s.enabled} | Generating: ${generating}`,
-        `Injection: ${s.injectionMethod || 'inline'} | Delta: ${s.deltaMode}`,
+        `Injection: ${s.injectionMethod || 'inline'} | Delta: ${s.deltaMode} | Parallel requests: ${s.parallelFullGeneration === true} x${normalizeParallelMaxConcurrent(s.parallelMaxConcurrent)}`,
         `Prompt mode: ${s.promptMode || 'json'} | Context msgs: ${s.contextMessages}`,
         `Embed snapshots: ${s.embedSnapshots || 1} | Max retries: ${s.maxRetries}`,
         `Language: ${s.language || '(auto/English)'}`,
@@ -543,6 +628,7 @@ function _spDebug() {
         snap?.relationships ? `Relationships: ${snap.relationships.map(r => r.name).join(', ')}` : '',
         '',
         meta.source ? `Last gen: source=${meta.source} elapsed=${meta.elapsed?.toFixed(1)}s tokens=~${(meta.promptTokens || 0) + (meta.completionTokens || 0)}` : 'No generation metadata',
+        ..._parallelStatusLines(meta),
         `Active profile: ${activeProfile.name || '(unset)'}`,
         `Schema: ${activeProfile.schema ? 'custom override' : 'dynamic (auto)'}`,
         `Prompt: ${activeProfile.systemPrompt ? 'custom override' : 'dynamic (auto)'}`,

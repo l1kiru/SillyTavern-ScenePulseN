@@ -4,8 +4,8 @@ import { applyPromptRole } from '../prompts/role.js';
 import { suspendPromptInjection, restorePromptInjection } from './prompt-injection.js';
 import { getActivePromptInjectionRun } from '../state.js';
 
-const MIN_OUTPUT={full:4096,delta:2048,section:2048};
-const MAX_OUTPUT=8192;
+const MIN_OUTPUT={full:16384,delta:8192,section:8192};
+const MAX_OUTPUT=16384;
 
 export function buildRecentContext(chat,count,endIdx=Infinity){
     const end=Math.min(Array.isArray(chat)?chat.length:0,Number.isFinite(endIdx)?Math.floor(endIdx)+1:Infinity);

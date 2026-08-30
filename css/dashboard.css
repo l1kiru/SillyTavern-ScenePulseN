@@ -299,3 +299,13 @@ body.sp-reduce-effects .sp-clock-particle {
         opacity: 0 !important;
     }
 }
+
+
+/* Touch: the location compass is an action (scene-transition replay), not decoration. */
+@media (max-width: 600px), (pointer: coarse) {
+    .sp-dash-loc-icon {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+        display: inline-flex; align-items: center; justify-content: center;
+    }
+    .sp-dash-loc-icon svg { width: 32px; height: 32px; }
+}

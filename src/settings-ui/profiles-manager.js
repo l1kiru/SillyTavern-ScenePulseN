@@ -27,9 +27,10 @@ function _fmtTs(iso) {
 }
 
 export function openProfilesManager(onChange) {
-    document.querySelector('.sp-cl-overlay')?.remove();
+    document.getElementById('sp-profile-manager-overlay')?.remove();
 
     const overlay = document.createElement('div');
+    overlay.id = 'sp-profile-manager-overlay';
     overlay.className = 'sp-cl-overlay';
     overlay.innerHTML = `
         <div class="sp-cl-container">

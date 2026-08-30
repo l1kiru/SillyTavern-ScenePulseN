@@ -104,22 +104,30 @@ function _buildEntries() {
     // who appeared as "Stranger" in snap 0 and "Jenna" in snap 5 with
     // aliases=["Stranger"] resolves to the snap 5 Jenna entry when looked
     // up by either name).
-    const _findLatest = (kind, aliasesLow) => {
-        for (let i = snapKeys.length - 1; i >= 0; i--) {
-            const snap = data.snapshots[String(snapKeys[i])];
-            const arr = snap && Array.isArray(snap[kind]) ? snap[kind] : null;
+    const _latestIndex = { characters: new Map(), relationships: new Map() };
+    for (let i = snapKeys.length - 1; i >= 0; i--) {
+        const snap = data.snapshots[String(snapKeys[i])];
+        if (!snap) continue;
+        for (const kind of ['characters', 'relationships']) {
+            const arr = Array.isArray(snap[kind]) ? snap[kind] : null;
             if (!arr) continue;
+            const map = _latestIndex[kind];
             for (const item of arr) {
                 const nm = (item?.name || '').toLowerCase().trim();
-                if (!nm) continue;
-                if (aliasesLow.has(nm)) return item;
+                if (nm && !map.has(nm)) map.set(nm, item);
                 if (Array.isArray(item.aliases)) {
                     for (const a of item.aliases) {
                         const al = (a || '').toLowerCase().trim();
-                        if (al && aliasesLow.has(al)) return item;
+                        if (al && !map.has(al)) map.set(al, item);
                     }
                 }
             }
+        }
+    }
+    const _findLatest = (kind, aliasesLow) => {
+        const map = _latestIndex[kind] || new Map();
+        for (const al of aliasesLow) {
+            if (map.has(al)) return map.get(al);
         }
         return null;
     };
@@ -132,7 +140,10 @@ function _buildEntries() {
     const _archive = (() => { try { return getWikiArchive(); } catch { return { characters: {}, relationships: {} }; } })();
     const _findArchived = (kind, aliasesLow) => {
         const map = _archive[kind] || {};
+        const owners = _archive.aliasOwners || {};
         for (const al of aliasesLow) {
+            const owner = owners[al];
+            if (owner && map[owner]) return map[owner];
             if (map[al]) return map[al];
         }
         return null;

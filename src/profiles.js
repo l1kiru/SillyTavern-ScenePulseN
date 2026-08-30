@@ -16,8 +16,10 @@
 // `s.activeProfileId`. Used by the dropdown switcher when "this chat
 // only" is selected.
 
-import { BUILTIN_SCHEMA, DEFAULTS } from './constants.js';
+import { BUILTIN_SCHEMA, DEFAULTS, normalizeParallelMaxConcurrent } from './constants.js';
 import { log } from './logger.js';
+import { PANEL_ACTIVATION_MODES, PANEL_ACTIVATION_STRATEGIES, SCENE_TAG_REGISTRY } from './panel-activation-policy.js';
+import { CHARACTER_GENDER_OPTIONS, normalizeAudience, normalizeGenderToken } from './character-audience.js';
 import { normalizeTrackerPromptStyle } from './prompts/together-framing.js';
 
 const CUSTOM_PANEL_LIMITS = Object.freeze({
@@ -33,12 +35,16 @@ const CUSTOM_PANEL_LIMITS = Object.freeze({
 });
 const CUSTOM_FIELD_TYPES = new Set(['text', 'number', 'meter', 'list', 'enum']);
 const CUSTOM_PANEL_SCOPES = new Set(['global', 'character']);
+const CUSTOM_PANEL_ACTIVATION_MODES = new Set(PANEL_ACTIVATION_MODES);
+const CUSTOM_PANEL_ACTIVATION_TAGS = new Set(SCENE_TAG_REGISTRY);
 const RESERVED_FIELD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const FIELD_KEY_RE = /^[a-z_][a-z0-9_]*$/;
 const PANEL_ID_RE = /^cp_[a-z0-9_-]+$/i;
-const BUILTIN_CHARACTER_PROPERTY_KEYS = new Set(
-    Object.keys(BUILTIN_SCHEMA.value.properties.characters.items.properties),
-);
+const BUILTIN_CHARACTER_PROPERTY_KEYS = new Set([
+    ...Object.keys(BUILTIN_SCHEMA.value.properties.characters.items.properties),
+    'gender',
+    'sex',
+]);
 // Every alternate key consumed by normalizeChar(). A custom field using one
 // of these names would also write a built-in property during normalization.
 const BUILTIN_CHARACTER_FIELD_ALIASES = [
@@ -69,7 +75,7 @@ const RESERVED_CHARACTER_FIELD_KEYS = new Set(
 );
 const SAFE_MAP_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const CONFIG_SCALAR_KEYS = new Set([
-    'injectionMethod', 'deltaMode', 'language', 'theme', 'fontScale',
+    'injectionMethod', 'deltaMode', 'parallelFullGeneration', 'parallelMaxConcurrent', 'panelActivationStrategy', 'language', 'theme', 'fontScale',
     'contextMessages', 'maxRetries', 'promptMode', 'embedSnapshots',
     'embedRole', 'autoGenerate', 'showThoughts', 'showEmptyFields',
     'sceneTransitions', 'sceneSourceTrace', 'sceneSourceTraceDiagnostics',
@@ -182,6 +188,22 @@ export function validateActiveCustomPanelFields(panels) {
     const fieldPaths = new Set();
     for (const panel of Array.isArray(panels) ? panels : []) {
         if (!panel || panel.enabled === false) continue;
+        if (Object.hasOwn(panel, 'activationMode')) {
+            const mode = typeof panel.activationMode === 'string' ? panel.activationMode.trim().toLowerCase() : '';
+            if (!CUSTOM_PANEL_ACTIVATION_MODES.has(mode)) errors.push(`Panel activationMode must be one of ${PANEL_ACTIVATION_MODES.join(', ')}`);
+        }
+        if (Object.hasOwn(panel, 'activationTags')) {
+            if (!Array.isArray(panel.activationTags)) errors.push('Panel activationTags must be an array');
+            else {
+                const seenTags = new Set();
+                for (const rawTag of panel.activationTags) {
+                    const tag = typeof rawTag === 'string' ? rawTag.trim().toLowerCase() : '';
+                    if (!CUSTOM_PANEL_ACTIVATION_TAGS.has(tag)) errors.push(`Unsupported panel activation tag: ${tag || '(empty)'}`);
+                    else if (seenTags.has(tag)) errors.push(`Duplicate panel activation tag: ${tag}`);
+                    seenTags.add(tag);
+                }
+            }
+        }
         const scope = customPanelScope(panel);
         const name = String(panel.name || '').trim();
         if (name) {
@@ -271,6 +293,7 @@ export function validateCustomPanels(raw) {
 
     const cleanPanels = [];
     const panelKeys = new Set();
+    const panelIds = new Set();
     const fieldKeys = new Set();
 
     for (let panelIndex = 0; panelIndex < Math.min(raw.length, CUSTOM_PANEL_LIMITS.panels); panelIndex++) {
@@ -305,6 +328,61 @@ export function validateCustomPanels(raw) {
                 if (!CUSTOM_PANEL_SCOPES.has(scope)) {
                     errors.push(`${panelLabel}.scope must be one of ${[...CUSTOM_PANEL_SCOPES].join(', ')}`);
                 }
+            }
+        }
+        let activationMode = 'always';
+        if (Object.hasOwn(rawPanel, 'activationMode')) {
+            if (typeof rawPanel.activationMode !== 'string') {
+                errors.push(`${panelLabel}.activationMode must be a string`);
+            } else {
+                activationMode = rawPanel.activationMode.trim().toLowerCase();
+                if (!CUSTOM_PANEL_ACTIVATION_MODES.has(activationMode)) {
+                    errors.push(`${panelLabel}.activationMode must be one of ${PANEL_ACTIVATION_MODES.join(', ')}`);
+                }
+            }
+        }
+        const activationTags = [];
+        if (Object.hasOwn(rawPanel, 'activationTags')) {
+            if (!Array.isArray(rawPanel.activationTags)) {
+                errors.push(`${panelLabel}.activationTags must be an array`);
+            } else {
+                const tagSet = new Set();
+                for (let tagIndex = 0; tagIndex < rawPanel.activationTags.length; tagIndex++) {
+                    const rawTag = rawPanel.activationTags[tagIndex];
+                    const tag = typeof rawTag === 'string' ? rawTag.trim().toLowerCase() : '';
+                    if (!CUSTOM_PANEL_ACTIVATION_TAGS.has(tag)) {
+                        errors.push(`${panelLabel}.activationTags[${tagIndex}] must be one of ${SCENE_TAG_REGISTRY.join(', ')}`);
+                        continue;
+                    }
+                    if (tagSet.has(tag)) continue;
+                    tagSet.add(tag);
+                    activationTags.push(tag);
+                }
+            }
+        }
+        let audience = normalizeAudience();
+        if (Object.hasOwn(rawPanel, 'audience')) {
+            if (!_isPlainObject(rawPanel.audience)) {
+                errors.push(`${panelLabel}.audience must be an object`);
+            } else {
+                if (Object.hasOwn(rawPanel.audience, 'names') && !Array.isArray(rawPanel.audience.names)) {
+                    errors.push(`${panelLabel}.audience.names must be an array`);
+                }
+                if (Object.hasOwn(rawPanel.audience, 'genders') && !Array.isArray(rawPanel.audience.genders)) {
+                    errors.push(`${panelLabel}.audience.genders must be an array`);
+                } else if (Array.isArray(rawPanel.audience.genders)) {
+                    for (const rawGender of rawPanel.audience.genders) {
+                        const gender = String(rawGender || '').trim();
+                        if (!gender) continue;
+                        if (!CHARACTER_GENDER_OPTIONS.includes(normalizeGenderToken(gender))) {
+                            errors.push(`${panelLabel}.audience.genders contains an unsupported value: ${gender}`);
+                        }
+                    }
+                }
+                if (Object.hasOwn(rawPanel.audience, 'keywords') && !Array.isArray(rawPanel.audience.keywords)) {
+                    errors.push(`${panelLabel}.audience.keywords must be an array`);
+                }
+                audience = normalizeAudience(rawPanel.audience);
             }
         }
 
@@ -365,8 +443,17 @@ export function validateCustomPanels(raw) {
             fields.push(field);
         }
 
-        const panel = { id: _newPanelId(rawPanel.id), name, scope, fields };
+        let panelId = _newPanelId(rawPanel.id);
+        while (panelIds.has(panelId)) panelId = _newPanelId('');
+        panelIds.add(panelId);
+        const panel = { id: panelId, name, scope, activationMode, activationTags, audience, fields };
         if (rawPanel.enabled === false) panel.enabled = false;
+        if (typeof rawPanel.sourceLibraryId === 'string' && rawPanel.sourceLibraryId.trim()) {
+            panel.sourceLibraryId = rawPanel.sourceLibraryId.trim();
+        }
+        if (typeof rawPanel.sourceLibraryName === 'string' && rawPanel.sourceLibraryName.trim()) {
+            panel.sourceLibraryName = rawPanel.sourceLibraryName.trim().slice(0, CUSTOM_PANEL_LIMITS.name);
+        }
         cleanPanels.push(panel);
     }
 
@@ -480,6 +567,10 @@ export function validateImportedConfigSettings(raw) {
                 if (!['json', 'native'].includes(value)) errors.push('promptMode must be "json" or "native"');
                 else settingsPatch[key] = value;
                 break;
+            case 'panelActivationStrategy':
+                if (!PANEL_ACTIVATION_STRATEGIES.includes(value)) errors.push('panelActivationStrategy must be "manual" or "automatic"');
+                else settingsPatch[key] = value;
+                break;
             case 'embedRole':
                 if (!['system', 'user', 'assistant'].includes(value)) errors.push('embedRole must be system, user, or assistant');
                 else settingsPatch[key] = value;
@@ -500,6 +591,9 @@ export function validateImportedConfigSettings(raw) {
             case 'maxRetries':
                 if (!Number.isInteger(value) || value < 0 || value > 5) errors.push('maxRetries must be an integer between 0 and 5');
                 else settingsPatch[key] = value;
+                break;
+            case 'parallelMaxConcurrent':
+                settingsPatch[key] = normalizeParallelMaxConcurrent(value);
                 break;
             case 'embedSnapshots':
                 if (!Number.isInteger(value) || value < 0 || value > 5) errors.push('embedSnapshots must be an integer between 0 and 5');

@@ -9,6 +9,9 @@
 .sp-tour-card {
     position: fixed; z-index: 10002; pointer-events: auto;
     width: 340px; max-width: 90vw;
+    max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+    overflow-y: auto; overscroll-behavior: contain; box-sizing: border-box;
     background: linear-gradient(180deg, #22242c 0%, #1a1c22 100%);
     border: 1px solid rgba(77,184,164,0.25); border-radius: 12px;
     box-shadow: 0 16px 48px rgba(0,0,0,0.5), 0 0 24px rgba(77,184,164,0.08);
@@ -69,4 +72,13 @@
 @keyframes sp-finale-glow {
     0% { opacity: 0.5; text-shadow: none; }
     100% { opacity: 1; text-shadow: 0 0 12px rgba(77,184,164,0.4); }
+}
+
+@media (hover: none), (pointer: coarse), (max-width: 600px) {
+    .sp-tour-card {
+        width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 24px) !important;
+        max-width: 360px;
+    }
+    .sp-tour-btn { min-height: 44px; padding: 8px 12px; }
+    .sp-tour-btn-end { min-height: 44px; }
 }

@@ -1,6 +1,7 @@
 // ── engine.js — Generation engine: preset management, profile switching, tracker generation ──
 
 import { log, warn, err } from '../logger.js';
+import { normalizeParallelMaxConcurrent } from '../constants.js';
 import {
     generating, genNonce, genMeta, lastGenSource,
     setGenerating, setCancelRequested, setGenNonce, setGenMeta,
@@ -20,18 +21,22 @@ import { record as recordNetwork } from '../network-log.js';
 import {
     getSettings, getActiveSchema, getActivePrompt, getTrackerData,
     getLatestSnapshot, getLatestSnapshotEntry, getPrevSnapshot, getActiveSwipeId, saveSnapshot, getTrustedSnapshotFor, ensureChatSaved,
-    getConnectionProfiles, getChatPresets, shouldUseDelta, clearForceFullState, rearmForceFullAfterFailedFullRun,
+    getConnectionProfiles, getChatPresets, getResolvedConnectionProfileId, shouldUseDelta, clearForceFullState, rearmForceFullAfterFailedFullRun,
     hasStaleSnapshotBefore, buildProfileView,
-    canGenerateScene, captureCharacterCustomFieldSpecs, getActivePanels, sanitizeCharacterCustomFields
+    canGenerateScene, captureCharacterCustomFieldSpecs, getActivePanels, getLanguage, getPanelActivationStrategy, sanitizeCharacterCustomFields
 } from '../settings.js';
 import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
 import { customPanelScope, customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
 import { normalizeTracker } from '../normalize.js';
 import { parseTrackerCandidate, normalizeProviderResponse, recordExtractionFailure } from './extraction.js';
 import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
-import { validateExtraction } from './validation.js';
+import { validateCharacterAudienceRequirements, validateExtraction } from './validation.js';
 import { buildRequestSchema, SECTION_FIELDS } from '../schema.js';
 import { buildRecentContext, classifyRequestError, computeResponseLength, correctiveInstruction, requestTracker } from './request.js';
+import { createBuildTiming } from './build-timing.js';
+import { runParallelDeltaBuild, runParallelFullBuild, shouldUseParallelDeltaBuild } from './parallel-build.js';
+import { hasAutomaticPanels } from '../panel-activation-policy.js';
+import { assemblePrompt } from '../prompts/assembler.js';
 import { spSetGenerating, spPostGenShow } from '../ui/mobile.js';
 import { updatePanel } from '../ui/update-panel.js';
 import { cleanupGenUI } from '../ui/loading.js';
@@ -40,6 +45,9 @@ import { renderEmptyState } from '../ui/empty-state.js';
 import { stopStreamingHider } from './streaming.js';
 import { isOperationCurrent, getActiveSceneBuilds, cancelSceneBuild } from './scene-build-controller.js';
 import { t } from '../i18n.js';
+
+let activeRequestAbort=null;
+let activeProfileBoundParallel=false;
 
 async function _changeAndWait(ctx,element,value,eventName,label){
     if(!element)return false;
@@ -104,9 +112,11 @@ export async function withProfileAndPreset(pid,pre,fn){
 // Cancel: synchronous, instant. Restores UI immediately AND aborts ST's in-flight HTTP request.
 export function cancelGeneration(){
     if(!generating)return;
+    const cancelUsesProfileBound=activeProfileBoundParallel;
     try{
         for(const op of getActiveSceneBuilds())cancelSceneBuild(op.operationId,'cancelGeneration');
     }catch{}
+    try{activeRequestAbort?.abort(new DOMException('ScenePulse generation cancelled','AbortError'))}catch{}
     const oldNonce=genNonce;
     setGenNonce(genNonce+1); // invalidate in-flight generation
     setCancelRequested(true);
@@ -133,7 +143,10 @@ export function cancelGeneration(){
     try{
         const ctx=SillyTavern.getContext();
         let aborted=false,handled=false;
-        if(typeof ctx.stopGeneration==='function'){
+        if(cancelUsesProfileBound){
+            handled=true;aborted=true;
+            log('CANCEL: profile-bound lanes stopped through their parent AbortSignal');
+        }else if(typeof ctx.stopGeneration==='function'){
             handled=true;aborted=ctx.stopGeneration()!==false;
             log(aborted?'CANCEL: stopped through SillyTavern context API':'CANCEL: no active SillyTavern request to abort');
         }
@@ -168,8 +181,19 @@ export async function generateTracker(mesIdx,partKey,opts){
     const operationOwner=captureOperationOwner(mesIdx,targetSwipeId);
     const baseSnapshot=partKey?(getTrustedSnapshotFor(mesIdx,targetSwipeId)||getPrevSnapshot(mesIdx)):getPrevSnapshot(mesIdx);
     const rootSettings=getSettings();
-    const settings=buildProfileView(rootSettings,getActiveProfile(rootSettings));
+    const frozenProfile=structuredClone(getActiveProfile(rootSettings));
+    const settings=buildProfileView(rootSettings,frozenProfile);
+    const frozenPromptView=structuredClone(settings);
+    frozenPromptView.runtimeLanguage=getLanguage();
+    const frozenCustomPanels=structuredClone(getActivePanels(settings));
     const characterCustomFieldSpecs=captureCharacterCustomFieldSpecs();
+    const automaticPanelRoutingRequested=settings.parallelFullGeneration===true
+        &&settings.injectionMethod==='separate'
+        &&getPanelActivationStrategy(settings)==='automatic'
+        &&hasAutomaticPanels(frozenCustomPanels);
+    // Delta eligibility is independent from Automatic panel routing. When
+    // Automatic routing is enabled, the parallel Delta Core lane performs the
+    // same-turn router step before character/global lanes are planned.
     const useDelta=!hasStaleSnapshotBefore(mesIdx)&&shouldUseDelta(baseSnapshot);
     // Section regen must not consume a pending whole-tracker force-full.
     const consumeForceFull=!partKey;
@@ -177,7 +201,7 @@ export async function generateTracker(mesIdx,partKey,opts){
     const rearmOnFail=()=>{if(consumeForceFull)rearmForceFullAfterFailedFullRun(useDelta)};
     let requestFields=partKey?(SECTION_FIELDS[partKey]||[]):[];
     if(partKey?.startsWith('custom_')){
-        const panel=getActivePanels(settings).find(item=>
+        const panel=frozenCustomPanels.find(item=>
             customPanelScope(item)==='global'&&customPanelSectionKey(item?.name)===partKey
         );
         requestFields=(Array.isArray(panel?.fields)?panel.fields:[])
@@ -185,8 +209,48 @@ export async function generateTracker(mesIdx,partKey,opts){
             .map(field=>field.key);
     }
     const requestMode=partKey?'section':(useDelta?'delta':'full');
-    const schema=buildRequestSchema(getActiveSchema(),{mode:requestMode,fields:requestFields});
-    const sysPr=getActivePrompt({ hasPrevState: !!baseSnapshot, isDelta: useDelta });
+    // Profile-bound parallel generation is opt-in and Separate-only.
+    // Full always uses the fan-out when enabled. Delta keeps the proven
+    // monolithic path for small workloads, but automatically partitions large
+    // casts/schemas and every Automatic-panel turn so routing stays same-turn.
+    const useParallelFull=settings.parallelFullGeneration===true
+        &&settings.injectionMethod==='separate'
+        &&requestMode==='full'
+        &&!partKey;
+    const frozenFullSchema=structuredClone(getActiveSchema());
+    const schema=buildRequestSchema(frozenFullSchema,{mode:requestMode,fields:requestFields});
+    const useParallelDelta=settings.parallelFullGeneration===true
+        &&settings.injectionMethod==='separate'
+        &&requestMode==='delta'
+        &&!partKey
+        &&shouldUseParallelDeltaBuild({
+            fullSchema:frozenFullSchema,
+            previousSnapshot:baseSnapshot,
+            automaticRouting:automaticPanelRoutingRequested,
+        });
+    const useProfileBoundParallel=useParallelFull||useParallelDelta;
+    const sceneOpId=opts?.sceneBuildOperationId||opts?.operationId||null;
+    const buildTiming=createBuildTiming({
+        generationId:sceneOpId||`separate-${myNonce}`,
+        chatKey:operationOwner.chatKey,
+        messageId:mesIdx,
+        swipeId:targetSwipeId,
+        mode:requestMode,
+        partKey:partKey||null,
+        source:lastGenSource||'unknown',
+        transport:useParallelDelta?'profile-bound-parallel-delta':(useParallelFull?'profile-bound-parallel':'legacy-global-profile'),
+    });
+    const prepareTimingStage=buildTiming.startStage('prepare');
+    let buildTimingLogged=false;
+    const finishBuildTiming=(status,extra={})=>{
+        buildTiming.finishStage(prepareTimingStage,status==='ok'?'ok':'incomplete');
+        const timing=buildTiming.finish(status,extra);
+        if(!buildTimingLogged){buildTimingLogged=true;log('BUILD TIMING',JSON.stringify(timing))}
+        return timing;
+    };
+    const promptOptions={hasPrevState:!!baseSnapshot,isDelta:useDelta,runtimeCustomPanels:frozenCustomPanels};
+    const dynamicPanelRouting=useProfileBoundParallel&&automaticPanelRoutingRequested;
+    const sysPr=getActivePrompt(dynamicPanelRouting?{...promptOptions,runtimeActivePanelIds:[]}:promptOptions);
     let profileOverride=opts?.profile||settings.connectionProfile;
     let presetOverride=opts?.preset||settings.chatPreset;
     log('=== GENERATION START === mesIdx=',mesIdx,'partKey=',partKey||'(full)','nonce=',myNonce,'source=',lastGenSource||'unknown','profile=',profileOverride||'(current)');
@@ -208,6 +272,7 @@ export async function generateTracker(mesIdx,partKey,opts){
     let terminalFailure=null;
     let successfulRequestMeta=null;
     let successfulValidationWarnings=[];
+    let parallelBuildMeta=null;
     const requestAbort=new AbortController();
     const externalSignal=opts?.signal;
     const stopStOnAbort=opts?.stopStOnAbort!==false;
@@ -215,11 +280,13 @@ export async function generateTracker(mesIdx,partKey,opts){
         if(externalSignal.aborted){
             setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setBrandState('idle');
             rearmOnFail();
+            finishBuildTiming('cancelled',{reason:'parent_aborted_before_request'});
             return null;
         }
         externalSignal.addEventListener('abort',()=>{try{requestAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
     }
-    const sceneOpId=opts?.sceneBuildOperationId||opts?.operationId||null;
+    activeRequestAbort=requestAbort;
+    activeProfileBoundParallel=useProfileBoundParallel;
     const doGen=async()=>{
         const stContext=SillyTavern.getContext();
         const{chat}=stContext;
@@ -243,23 +310,29 @@ export async function generateTracker(mesIdx,partKey,opts){
         if(partKey)prompt+=`\n\nFOCUS: Return ONLY these requested fields: ${requestFields.join(', ')}. Do not copy unrelated fields.`;
         let lastErrorCode='';let validationErrors=[];let attemptPromptMode=settings.promptMode==='native'?'native':'json';
         let totalPromptTokens=0,totalCompletionTokens=0;
+        buildTiming.finishStage(prepareTimingStage);
         for(let a=0;a<=settings.maxRetries;a++){
-            let raw;let rawStr='';let finishReason='';let strategy='';
+            let raw;let rawStr='';let finishReason='';let strategy='';let attemptTiming=null;
             const responseLength=computeResponseLength({mode:requestMode,previousSnapshot:lastSnap,attempt:a,lastErrorCode});
             const attemptPrompt=a?`${prompt}\n\nCORRECTION AFTER ATTEMPT ${a}: ${correctiveInstruction(lastErrorCode,validationErrors)}`:prompt;
-            totalPromptTokens+=Math.round((sysPr.length+attemptPrompt.length)/4);
+            const attemptPromptTokens=Math.round((sysPr.length+attemptPrompt.length)/4);
+            totalPromptTokens+=attemptPromptTokens;
             // Nonce check at every opportunity — if cancelled, bail immediately
             if(myNonce!==genNonce){log('STALE nonce',myNonce,'(current',genNonce+') \u2014 discarding silently');return null}
             try{if(a>0){log(`Retry ${a}/${settings.maxRetries}`);await new Promise(r=>setTimeout(r,1000*a));if(myNonce!==genNonce){log('Retry cancelled during backoff');return null}}
                 log('Attempt',a+1,': mode=',attemptPromptMode,'outputBudget=',responseLength,'nonce=',myNonce);
+                attemptTiming=buildTiming.startAttempt({attempt:a+1,promptMode:attemptPromptMode,responseBudget:responseLength,inputTokensEstimate:attemptPromptTokens});
                 let quietError=null;
                 try{
                     const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true,stopStOnAbort});
                     raw=response.value;strategy=response.strategy;
                 }catch(e){quietError=e}
+                const requestLatencyMs=buildTiming.markAttemptResponse(attemptTiming,{strategy});
                 if(quietError){
-                    if(myNonce!==genNonce){log('STALE after request error, nonce',myNonce);return null}
+                    if(myNonce!==genNonce){buildTiming.finishAttempt(attemptTiming,'discarded',{failureCode:'STALE'});log('STALE after request error, nonce',myNonce);return null}
                     const info=classifyRequestError(quietError);
+                    buildTiming.finishAttempt(attemptTiming,'request_failed',{failureCode:info.kind});
+                    try{recordNetwork({label:'generate',method:'POST',url:'(SillyTavern generate)',status:null,latencyMs:requestLatencyMs,reqBytes:attemptPrompt.length,respBytes:0,errorKind:info.kind==='network'?'transport':'http',errorMessage:info.kind})}catch{}
                     warn('API error:',info.message);
                     terminalFailure=recordExtractionFailure('API_ERROR',info.message,'',mesIdx,{stage:'provider',retryable:info.retryable,owner:operationOwner,attempt:a+1,strategy,responseLength});
                     if(!info.retryable){
@@ -271,11 +344,12 @@ export async function generateTracker(mesIdx,partKey,opts){
                     continue;
                 }
                 // Check nonce AFTER API returns — this is the critical discard point
-                if(myNonce!==genNonce){log('STALE after API return, nonce',myNonce,'(current',genNonce+') \u2014 discarding response');return null}
+                if(myNonce!==genNonce){buildTiming.finishAttempt(attemptTiming,'discarded',{failureCode:'STALE'});log('STALE after API return, nonce',myNonce,'(current',genNonce+') \u2014 discarding response');return null}
                 const provider=normalizeProviderResponse(raw);rawStr=provider.text;finishReason=provider.finishReason;
                 if(!rawStr||rawStr.trim()==='{}'){
                     lastErrorCode='NO_JSON_OBJECT';
                     if(attemptPromptMode==='native'){attemptPromptMode='json';warn('Native structured output was empty; retrying in JSON-only mode')}
+                    buildTiming.finishAttempt(attemptTiming,'empty_response',{failureCode:lastErrorCode,finishReason});
                     terminalFailure=recordExtractionFailure(lastErrorCode,'Provider returned an empty response',rawStr,mesIdx,{stage:'provider',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});continue
                 }
                 const finishLow=finishReason.toLowerCase();
@@ -294,7 +368,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                         method: 'POST',
                         url: '(SillyTavern generate)',
                         status: 200, // we got a response; HTTP-level errors short-circuit earlier
-                        latencyMs: (Date.now() - genStartMs),
+                        latencyMs: requestLatencyMs,
                         reqBytes: attemptPrompt.length,
                         respBytes: rawStr.length,
                         pairId: _capturedPair?.id || null,
@@ -308,6 +382,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                         if(errObj.error){
                             const errMsg=typeof errObj.error==='string'?errObj.error:(errObj.error.message||JSON.stringify(errObj.error));
                             err('API returned error object:',errMsg);
+                            buildTiming.finishAttempt(attemptTiming,'request_failed',{failureCode:'PROVIDER_ERROR',finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4)});
                             terminalFailure=recordExtractionFailure('API_ERROR',errMsg,rawStr,mesIdx,{stage:'provider',finishReason,owner:operationOwner});
                             toastr.error(t('API Error: {error}',{error:errMsg.substring(0,100)}),t('Generation stopped'));
                             return null;
@@ -325,13 +400,21 @@ export async function generateTracker(mesIdx,partKey,opts){
                 const parsed=parseTrackerCandidate(rawStr,{mode:requestMode,knownKeys:Object.keys(schema.value.properties||{})});
                 if(!Object.hasOwn(schema.value.properties||{},'plotBranches'))delete parsed.plotBranches;
                 const validation=validateExtraction(parsed,{schema:schema.value});
-                if(!validation.valid){
-                    lastErrorCode='SEMANTIC_INVALID';validationErrors=validation.errors;
+                const audienceValidation=validateCharacterAudienceRequirements(parsed,{
+                    schema:schema.value,
+                    customFieldSpecs:characterCustomFieldSpecs,
+                    mode:requestMode,
+                });
+                const combinedErrors=[...validation.errors,...audienceValidation.errors];
+                const combinedWarnings=[...validation.warnings,...audienceValidation.warnings];
+                if(combinedErrors.length){
+                    lastErrorCode='SEMANTIC_INVALID';validationErrors=combinedErrors;
+                    buildTiming.finishAttempt(attemptTiming,'schema_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationErrors:combinedErrors.slice(0,6)});
                     terminalFailure=recordExtractionFailure(lastErrorCode,'Tracker JSON failed schema validation',rawStr,mesIdx,{stage:'validate',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength,validationErrors});
-                    try{markLastPairParseFailed(validation.errors.join('; '))}catch{}
+                    try{markLastPairParseFailed(combinedErrors.join('; '))}catch{}
                     continue;
                 }
-                successfulValidationWarnings=validation.warnings;
+                successfulValidationWarnings=combinedWarnings;
                 successfulRequestMeta={strategy,responseLength,attempt:a+1,promptMode:attemptPromptMode};
                 // Delta merge: combine delta response with previous snapshot.
                 // v6.8.50: use the shared shouldUseDelta() helper which
@@ -346,7 +429,9 @@ export async function generateTracker(mesIdx,partKey,opts){
                     // Estimate delta savings: compare output tokens to typical full output
                     const fullEstimate=Math.round(JSON.stringify(lastSnap).length/4);
                     if(fullEstimate>0){const savings=Math.max(0,Math.round((1-(meta.completionTokens/fullEstimate))*100));setLastDeltaSavings(savings)}
-                    return mergeDelta(lastSnap, parsed);
+                    const merged=mergeDelta(lastSnap, parsed);
+                    buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationWarnings:validation.warnings.length});
+                    return merged;
                 }
                 setLastDeltaPayload(null);
                 setLastDeltaSavings(0);
@@ -356,8 +441,9 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // in the current scene, but we must keep accumulated data for
                 // characters who left (for wiki, returning-character support).
                 preserveOffSceneEntities(parsed,lastSnap);
+                buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationWarnings:validation.warnings.length});
                 return parsed;
-            }catch(e){lastErrorCode=e?.code||'MALFORMED_JSON';err(`Parse fail (${a+1}):`,e?.message||String(e));terminalFailure=recordExtractionFailure(lastErrorCode,e?.message||String(e),rawStr,mesIdx,{stage:'parse',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
+            }catch(e){lastErrorCode=e?.code||'MALFORMED_JSON';buildTiming.finishAttempt(attemptTiming,lastErrorCode==='TRUNCATED'?'truncated':'parse_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawStr.length,outputTokensEstimate:Math.round(rawStr.length/4)});err(`Parse fail (${a+1}):`,e?.message||String(e));terminalFailure=recordExtractionFailure(lastErrorCode,e?.message||String(e),rawStr,mesIdx,{stage:'parse',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
         }
         warn('All',settings.maxRetries+1,'attempts exhausted, returning null');
         toastr.error(t('All retry attempts failed — open the Debug Inspector for details'),t('Generation failed'));
@@ -371,13 +457,88 @@ export async function generateTracker(mesIdx,partKey,opts){
     // own API-error toast but the promise neither resolves nor rejects.
     // 180s is generous (Claude Opus 4.7 effort=high tops out around 90-
     // 120s on complex prompts) while still catching hung connections.
-    // On timeout the catch below logs and result stays undefined; the
-    // cleanup at line 432 then runs normally and the UI unlocks.
-    const ENGINE_TIMEOUT_MS = 180000;
+    // On timeout the catch below records a failed result and the cleanup
+    // then runs normally so the UI unlocks.
+    // Parallel Full can legitimately spend one full lane timeout and then
+    // retry only that lane. A 90s outer watchdog aborted the parent build
+    // before the lane-local retry could start on slower providers (observed
+    // with a single characters lane returning HTTP 504 while its siblings
+    // completed). Keep the transport watchdog large enough for that retry;
+    // each lane still has its own shorter timeout in parallel-build.js.
+    const ENGINE_TIMEOUT_MS = useProfileBoundParallel
+        ? Math.min(600000, Math.max(180000,
+            (automaticPanelRoutingRequested ? 45000 : 20000)
+            + Math.ceil(8 / Math.max(1, normalizeParallelMaxConcurrent(settings.parallelMaxConcurrent))) * (60000 + Math.max(0, Number(settings.maxRetries) || 0) * 1500)
+            + 20000))
+        : 180000;
     let engineTimeoutId=null;
+    const transportTimingStage=buildTiming.startStage('profileAndGeneration');
+    let transportTimingStatus='ok';
     try{
+        const generationPromise=useProfileBoundParallel?(async()=>{
+            const stContext=SillyTavern.getContext();
+            const profileRef=profileOverride||getResolvedConnectionProfileId(settings,stContext);
+            if(!profileRef)throw Object.assign(new Error('Parallel generation requires a Connection Manager profile'),{code:'PARALLEL_PROFILE_REQUIRED'});
+            if(presetOverride)warn('Parallel generation uses the preset stored in the selected Connection Manager profile; the legacy chat preset override is not applied');
+            const{text:ctxText}=buildRecentContext(stContext.chat,settings.contextMessages,mesIdx);
+            buildTiming.finishStage(prepareTimingStage);
+            const commonParallelOptions={
+                fullSchema:frozenFullSchema,
+                systemPrompt:sysPr,
+                contextText:ctxText,
+                previousSnapshot:baseSnapshot,
+                profileId:profileRef,
+                promptMode:settings.promptMode,
+                maxRetries:settings.maxRetries,
+                maxConcurrent:normalizeParallelMaxConcurrent(settings.parallelMaxConcurrent),
+                signal:requestAbort.signal,
+                stContext,
+                timing:buildTiming,
+                characterCustomFieldSpecs,
+                panels:dynamicPanelRouting?frozenCustomPanels:(useParallelDelta?frozenCustomPanels:[]),
+                automaticRouting:dynamicPanelRouting,
+                systemPromptForActivePanels:dynamicPanelRouting
+                    ?activePanelIds=>assemblePrompt({
+                        ...frozenPromptView,
+                        runtimeCustomPanels:frozenCustomPanels,
+                        runtimeActivePanelIds:[...activePanelIds],
+                    },frozenProfile,promptOptions)
+                    :null,
+            };
+            const built=useParallelDelta
+                ?await runParallelDeltaBuild({...commonParallelOptions,maxCharacterBatchSize:2})
+                :await runParallelFullBuild({...commonParallelOptions,characterBatchSize:2});
+            parallelBuildMeta=built.meta;
+            if(built.meta.activation){
+                buildTiming.timing.activeTags=[...built.meta.activation.activeTags];
+                buildTiming.timing.activePanels=[...built.meta.activation.activePanelIds];
+            }
+            successfulValidationWarnings=built.warnings;
+            successfulRequestMeta={
+                strategy:useParallelDelta?'connection-profile-parallel-delta':'connection-profile-parallel',
+                laneCount:built.meta.lanes.length,
+                promptMode:settings.promptMode==='native'?'native':'json',
+            };
+            const meta=genMeta;
+            meta.promptTokens=built.meta.promptTokens;
+            meta.completionTokens=built.meta.completionTokens;
+            meta.elapsed=((Date.now()-genStartMs)/1000);
+            setGenMeta(meta);
+            setLastRawResponse(JSON.stringify(useParallelDelta?built.delta:built.value));
+            if(useParallelDelta){
+                setLastDeltaPayload(built.delta);
+                const fullEstimate=Math.round(JSON.stringify(baseSnapshot||{}).length/4);
+                setLastDeltaSavings(fullEstimate>0?Math.max(0,Math.round((1-(meta.completionTokens/fullEstimate))*100)):0);
+            }else{
+                setLastDeltaPayload(null);
+                setLastDeltaSavings(0);
+                preserveOffSceneEntities(built.value,baseSnapshot);
+            }
+            log(useParallelDelta?'Parallel delta build:':'Parallel full build:',JSON.stringify(built.meta));
+            return built.value;
+        })():withProfileAndPreset(profileOverride,presetOverride,doGen);
         result = await Promise.race([
-            withProfileAndPreset(profileOverride,presetOverride,doGen),
+            generationPromise,
             new Promise((_, reject) => {engineTimeoutId=setTimeout(()=>{
                 const timeoutError=new Error('TIMEOUT: tracker generation exceeded '+(ENGINE_TIMEOUT_MS/1000)+'s with no completion (network drop or upstream hang?)');
                 requestAbort.abort(timeoutError);reject(timeoutError);
@@ -385,27 +546,39 @@ export async function generateTracker(mesIdx,partKey,opts){
         ]);
     }
     catch(e){
+        transportTimingStatus='failed';
+        result=null;
         err('Gen:',e);
         terminalFailure=recordExtractionFailure('API_ERROR',e?.message||String(e),'',mesIdx,{stage:'provider',retryable:true,owner:operationOwner});
         if (e?.message?.startsWith('TIMEOUT')) {
             try { toastr.warning(e.message + ' UI unlocked.', 'ScenePulse'); } catch {}
         }
-    }finally{if(engineTimeoutId)clearTimeout(engineTimeoutId)}
+        if (e?.code==='PARALLEL_PROFILE_REQUIRED') {
+            try { toastr.error(t('Parallel builds need a Connection Manager profile. Pick one below, or keep a profile selected in SillyTavern.'), t('Generation failed')); } catch {}
+        }
+    }finally{
+        if(engineTimeoutId)clearTimeout(engineTimeoutId);
+        if(activeRequestAbort===requestAbort){activeRequestAbort=null;activeProfileBoundParallel=false}
+        buildTiming.finishStage(transportTimingStage,transportTimingStatus,{aborted:requestAbort.signal.aborted});
+    }
     // Only the CURRENT generation is allowed to touch state
     if(myNonce!==genNonce){
         log('POST-GEN: stale nonce',myNonce,'(current',genNonce+') \u2014 result discarded, state untouched');
+        finishBuildTiming('discarded',{reason:'stale_nonce'});
         return null; // Don't reset generating — the newer cancel/gen already did
     }
     if(sceneOpId&&!isOperationCurrent(sceneOpId)){
         log('POST-GEN: scene build not current',sceneOpId,'— result discarded');
         setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         rearmOnFail();
+        finishBuildTiming('discarded',{reason:'scene_operation_superseded'});
         return null;
     }
     if(getActiveSwipeId(mesIdx)!==targetSwipeId){
         log('POST-GEN: active swipe changed for message',mesIdx,'— result discarded');
         setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         rearmOnFail();
+        finishBuildTiming('discarded',{reason:'swipe_changed'});
         return null;
     }
     const ownerCheck=validateOperationOwner(operationOwner,{requireSource:true});
@@ -414,10 +587,12 @@ export async function generateTracker(mesIdx,partKey,opts){
         setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
         try{toastr.info(t('Chat changed while ScenePulse was working. Run the tracker again.'),'ScenePulse')}catch{}
         rearmOnFail();
+        finishBuildTiming('discarded',{reason:ownerCheck.code||'owner_changed'});
         return null;
     }
     setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState(result?'idle':'error');
     if(result){
+        const postprocessTimingStage=buildTiming.startStage('postprocess');
         terminalFailure=null;
         setLastExtractionFailure(null);
         log('Raw output keys:',Object.keys(result).join(', '));
@@ -447,7 +622,14 @@ export async function generateTracker(mesIdx,partKey,opts){
                                 for(const newE of result[f]){
                                     const nk=(newE[keyField]||'').toLowerCase().trim();
                                     const existIdx=merged[f].findIndex(e=>(e[keyField]||'').toLowerCase().trim()===nk);
-                                    if(existIdx>=0)merged[f][existIdx]=newE;
+                                    if(existIdx>=0){
+                                        const prevE=merged[f][existIdx];
+                                        const next={...prevE};
+                                        for(const [fk,fv] of Object.entries(newE||{})){
+                                            if(fv!==undefined&&fv!==null&&fv!=='')next[fk]=fv;
+                                        }
+                                        merged[f][existIdx]=next;
+                                    }
                                     else merged[f].push(newE);
                                 }
                                 log('Section merge: entity-merged',f,'(',result[f].length,'new,',merged[f].length,'total)');
@@ -482,6 +664,7 @@ export async function generateTracker(mesIdx,partKey,opts){
         if(result.characters?.length){for(const ch of result.characters)log('  char:',ch.name,'role=',ch.role?'\u2713':'\u2717','thought=',ch.innerThought?'\u2713':'\u2717','hair=',ch.hair?'\u2713':'\u2717')}
         if(result.relationships?.length){for(const r of result.relationships)log('  rel:',r.name,'aff=',r.affection,'trust=',r.trust,'desire=',r.desire,'compat=',r.compatibility)}
         setCurrentSnapshotMesIdx(mesIdx);
+        buildTiming.finishStage(postprocessTimingStage);
         // Embed generation metadata into snapshot for persistence
         // v6.8.50: deltaTurnsSinceFull tracks how many consecutive delta
         // turns have elapsed since the last full-state generation. When
@@ -493,6 +676,9 @@ export async function generateTracker(mesIdx,partKey,opts){
         const _prevCounter = (baseSnapshot?._spMeta?.deltaTurnsSinceFull ?? 0);
         result._spMeta={promptTokens:genMeta.promptTokens,completionTokens:genMeta.completionTokens,elapsed:genMeta.elapsed,source:lastGenSource,injectionMethod:getSettings().injectionMethod||'inline',deltaMode:_wasDelta,deltaTurnsSinceFull:_wasDelta?_prevCounter+1:0};
         if(successfulRequestMeta)result._spMeta.request=successfulRequestMeta;
+        if(parallelBuildMeta)result._spMeta.parallel=parallelBuildMeta;
+        if(parallelBuildMeta?.activation)result._spMeta.panelActivation=parallelBuildMeta.activation;
+        else if(baseSnapshot?._spMeta?.panelActivation)result._spMeta.panelActivation=structuredClone(baseSnapshot._spMeta.panelActivation);
         // Together Tier-2 fallback: attach lore trace finished from the original
         // inline generation (passed via runManualSceneBuild extraOpts).
         if(opts?.sceneSourceTrace)result._spMeta.sceneSourceTrace=opts.sceneSourceTrace;
@@ -500,12 +686,29 @@ export async function generateTracker(mesIdx,partKey,opts){
         // first snapshot in the chat, show a welcome toast so the user
         // knows ScenePulse is working.
         const _isFirstSnap = Object.keys(getTrackerData().snapshots || {}).length === 0;
-        saveSnapshot(mesIdx,result,targetSwipeId);log('Snapshot saved for mesIdx=',mesIdx,'swipe=',targetSwipeId,'keys=',Object.keys(result).length,'elapsed=',genMeta.elapsed.toFixed(1)+'s','~tokens:',genMeta.promptTokens+genMeta.completionTokens);
+        const saveTimingStage=buildTiming.startStage('save');
+        saveSnapshot(mesIdx,result,targetSwipeId);
+        buildTiming.finishStage(saveTimingStage);
+        const finalTiming=finishBuildTiming('ok',{
+            validationWarnings:successfulValidationWarnings.length,
+            ...(parallelBuildMeta?{
+                laneCount:parallelBuildMeta.lanes?.length||0,
+                laneWallMs:parallelBuildMeta.wallMs||0,
+                laneSumMs:parallelBuildMeta.sumLaneMs||0,
+                parallelGain:parallelBuildMeta.parallelGain||0,
+            }:{}),
+        });
+        // The in-memory timing ring keeps chatKey for current-chat filtering.
+        // A snapshot already belongs to one chat, so persisting that key is
+        // redundant and would expose an internal chat identifier on export.
+        const {chatKey:_timingChatKey,...snapshotTiming}=finalTiming;
+        result._spMeta.timing=snapshotTiming;
+        log('Snapshot saved for mesIdx=',mesIdx,'swipe=',targetSwipeId,'keys=',Object.keys(result).length,'elapsed=',genMeta.elapsed.toFixed(1)+'s','wall=',(finalTiming.wallMs/1000).toFixed(1)+'s','~tokens:',genMeta.promptTokens+genMeta.completionTokens);
         if (_isFirstSnap) {
             const _charCount = (result.characters || []).length;
             toastr.success(
-                `Scene tracked: ${_charCount} character${_charCount !== 1 ? 's' : ''} detected. The panel is live.`,
-                'ScenePulse Active'
+                `${t('Scene tracked')}: ${_charCount}. ${t('The panel is live.')}`,
+                t('ScenePulse Active')
             );
         }
         updatePanel(result);
@@ -519,6 +722,7 @@ export async function generateTracker(mesIdx,partKey,opts){
         if(terminalFailure){try{const{showJsonRecovery}=await import('../ui/json-recovery.js');showJsonRecovery({mesIdx,failure:terminalFailure,stripInline:false,onRetry:async()=>{setLastGenSource('manual:recovery');await generateTracker(mesIdx,partKey,opts)}})}catch(e){warn('Recovery UI:',e?.message)}}
         warn('Generation returned null for',mesIdx);
         rearmOnFail();
+        finishBuildTiming(requestAbort.signal.aborted?'cancelled':'failed',{failureCode:terminalFailure?.code||'NO_RESULT'});
     }
     return result;
 }

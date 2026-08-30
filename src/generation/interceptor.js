@@ -504,9 +504,10 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         // SEPARATE MODE: clear any leftover Together extension prompts, then
         // optionally embed previous snapshot data for context.
         try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
+        if(s.parallelFullGeneration===true)return;
         if(!s.embedSnapshots)return;
         const snap=getLatestSnapshot();if(!snap){log('Interceptor: no snapshot to embed');return}
-        const snapJson=JSON.stringify(snap,null,2);
+        const snapJson=JSON.stringify(snap);
         chat.splice(Math.max(0,chat.length-1),0,{
             is_user:s.embedRole==='user',is_system:s.embedRole==='system',
             name:s.embedRole==='system'?'System':'ScenePulse',

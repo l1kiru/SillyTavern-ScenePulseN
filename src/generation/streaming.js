@@ -15,19 +15,27 @@ let _lockFromStreamEvent=null;
 // STREAM_TOKEN_RECEIVED supplies cumulative text before SillyTavern paints it.
 // Return the start of a complete marker, a marker prefix at the stream tail,
 // or a raw tracker object that starts on a new line.
+let _findCacheText='';
+let _findCacheAt=-1;
+let _capRaf=0;
 export function findTrackerPayloadStart(value){
     const text=String(value||'');
+    if(text===_findCacheText)return _findCacheAt;
+    let found=-1;
     for(const marker of TRACKER_STARTS){
         const full=text.indexOf(marker);
-        if(full!==-1)return full;
+        if(full!==-1){found=full;break;}
         for(let n=marker.length-1;n>=2;n--){
-            if(text.endsWith(marker.slice(0,n)))return text.length-n;
+            if(text.endsWith(marker.slice(0,n))){found=text.length-n;break;}
         }
+        if(found!==-1)break;
     }
-    const lineStart=text.lastIndexOf('\n')+1;
-    const tail=text.slice(lineStart).trimStart().replace(/[ \t]+/g,'');
-    if(['{','{"','{"t','{"ti','{"tim','{"time','{"time"','{"time":'].includes(tail)||/^\{"time"\s*:/.test(tail))return lineStart;
-    return -1;
+    if(found===-1){
+        const lineStart=text.lastIndexOf('\n')+1;
+        const tail=text.slice(lineStart).trimStart().replace(/[ \t]+/g,'');
+        if(['{','{"','{"t','{"ti','{"tim','{"time','{"time"','{"time":'].includes(tail)||/^\{"time"\s*:/.test(tail))found=lineStart;
+    }
+    _findCacheText=text;_findCacheAt=found;return found;
 }
 
 export function noteStreamingText(text){
@@ -156,20 +164,24 @@ export function startStreamingHider(){
             log('StreamHider: LOCKED at',capPx+'px mesid='+_mesId);
             return;
         }
-        // No JSON detected this tick — safe to remeasure. Snapshot the
-        // current cap, swap to no-cap to read true height, then restore.
-        // (CSS recompute happens synchronously inside scrollHeight read.)
-        const prevCap=currentStyleEl.textContent;
-        currentStyleEl.textContent='';
-        const trueH=_lastMes.scrollHeight;
-        // Restore PREVIOUS cap immediately, before computing the new one,
-        // so any ongoing paint sees a capped element. Without this restore
-        // the brief uncap leaks any not-yet-detected tracker prefix on
-        // very fast streams.
-        if(prevCap) currentStyleEl.textContent=prevCap;
-        if(trueH>_safeH)_safeH=trueH;
-        const capPx=Math.ceil(_safeH+22);
-        currentStyleEl.textContent=`${_sel()}{max-height:${capPx}px!important;overflow:hidden!important}`;
+        if(_capRaf)return;
+        _capRaf=requestAnimationFrame(()=>{
+            _capRaf=0;
+            if(_locked||!_lastMes||!_streamHiderStyleEl)return;
+            const liveStyle=_streamHiderStyleEl;
+            if(_hasJson(_lastMes.textContent||'',_lastMes)){
+                _locked=true;
+                liveStyle.textContent=`${_sel()}{max-height:${Math.max(0,Math.ceil(_safeH))}px!important;overflow:hidden!important}`;
+                _lastMes.dataset.spHasTracker='true';
+                return;
+            }
+            const prevCap=liveStyle.textContent;
+            liveStyle.textContent='';
+            const trueH=_lastMes.scrollHeight;
+            if(prevCap) liveStyle.textContent=prevCap;
+            if(trueH>_safeH)_safeH=trueH;
+            liveStyle.textContent=`${_sel()}{max-height:${Math.ceil(_safeH+22)}px!important;overflow:hidden!important}`;
+        });
     };
 
     // MutationObserver: fires on every DOM change to last message.
@@ -241,6 +253,7 @@ function _removeStreamingHiderStyle(styleElRef){
  */
 export function stopStreamingHider({abort=false}={}){
     _lockFromStreamEvent=null;
+    if(_capRaf){cancelAnimationFrame(_capRaf);_capRaf=0;}
     if(_streamHiderInterval){
         const elapsed=_streamHiderStart?Math.round((Date.now()-_streamHiderStart)/1000):0;
         log('StreamHider: stopped after',elapsed+'s',abort?'(abort)':'');

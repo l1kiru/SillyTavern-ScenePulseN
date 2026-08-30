@@ -2,8 +2,8 @@
 .sp-chat-banner {
     display: flex; align-items: center; gap: 10px;
     padding: 6px 14px;
-    background: linear-gradient(90deg, rgba(77,184,164,0.08), rgba(77,184,164,0.03));
-    border-bottom: 1px solid rgba(77,184,164,0.15);
+    background: linear-gradient(90deg, color-mix(in srgb, var(--sp-accent) 8%, transparent), color-mix(in srgb, var(--sp-accent) 3%, transparent));
+    border-bottom: 1px solid color-mix(in srgb, var(--sp-accent) 15%, transparent);
     font-family: var(--sp-font);
     font-size: var(--sp-fs-xs); color: var(--sp-accent);
     animation: sp-glass-in 0.3s ease-out;
@@ -21,7 +21,7 @@
        (issue #12). Keep its intrinsic content height; the max-height cap
        below + overflow-y handle long custom-panel lists. */
     flex-shrink: 0;
-    max-height: calc(100vh - 140px); overflow-y: auto; overflow-x: hidden;
+    max-height: calc(100vh - 140px); max-height: calc(100dvh - 140px); overflow-y: auto; overflow-x: hidden;
     opacity: 1; transform: translateY(0);
     transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
                 opacity 0.25s ease,
@@ -29,7 +29,22 @@
                 padding 0.3s ease, margin 0.3s ease;
 }
 .sp-panel-mgr::-webkit-scrollbar { width: 4px; }
-.sp-panel-mgr::-webkit-scrollbar-thumb { background: rgba(100,110,130,0.3); border-radius: 2px; }
+.sp-panel-mgr::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--sp-text-dim) 35%, transparent); border-radius: 2px; }
+/* Panel Manager lives outside #scenepulse-settings, so the settings-scoped
+   .sp-btn baseline does not reach it. Keep every manager button on the active
+   ScenePulse theme instead of falling back to the browser's white button UI. */
+.sp-panel-mgr .sp-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 4px;
+    box-sizing: border-box; font-family: var(--sp-font); line-height: 1.2;
+    background: var(--sp-surface); border: 1px solid var(--sp-border-strong);
+    color: var(--sp-text); border-radius: var(--sp-radius);
+    cursor: pointer; transition: background var(--sp-transition), border-color var(--sp-transition), color var(--sp-transition);
+}
+.sp-panel-mgr .sp-btn:hover:not(:disabled) {
+    background: var(--sp-surface-hover); border-color: var(--sp-accent); color: var(--sp-text-bright);
+}
+.sp-panel-mgr .sp-btn:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+.sp-panel-mgr .sp-btn:disabled { cursor: not-allowed; opacity: 0.45; }
 .sp-panel-mgr.sp-mgr-closing {
     max-height: 0 !important; opacity: 0 !important;
     transform: translateY(-6px); padding-top: 0; padding-bottom: 0;
@@ -74,7 +89,7 @@
     font-size: var(--sp-fs-xs); font-weight: 700; text-transform: uppercase;
     letter-spacing: 0.05em; color: var(--sp-accent); opacity: 0.7;
     margin-top: 10px; margin-bottom: 6px; padding-bottom: 3px;
-    border-bottom: 1px solid rgba(77,184,164,0.15);
+    border-bottom: 1px solid color-mix(in srgb, var(--sp-accent) 15%, transparent);
 }
 
 /* ── Section show/hide — asymmetric timing for smooth expand/collapse ── */
@@ -129,11 +144,14 @@
     font-size: var(--sp-fs-xs); font-weight: 700; font-family: var(--sp-font);
     transition: background 0.2s ease; border-radius: 3px;
 }
-.sp-cp-name:focus { outline: none; background: rgba(77,184,164,0.08); }
+.sp-cp-name:focus { outline: none; background: color-mix(in srgb, var(--sp-accent) 8%, transparent); }
 /* v6.9.11: enable/disable toggle */
-.sp-cp-toggle { width: 14px; height: 14px; accent-color: var(--sp-accent); cursor: pointer; flex-shrink: 0; }
-.sp-cp-disabled { opacity: 0.4; }
-.sp-cp-disabled .sp-cp-body { display: none !important; }
+.sp-cp-toggle-hit { display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; }
+.sp-cp-toggle { width: 14px; height: 14px; accent-color: var(--sp-accent); cursor: pointer; flex-shrink: 0; margin: 0; }
+/* Disabled means excluded from generation, not locked from editing. Keep the
+   header visibly muted while allowing an opened card to be inspected/edited
+   without temporarily enabling it and changing the request contract. */
+.sp-cp-disabled .sp-cp-header { opacity: 0.48; }
 /* v6.9.11: duplicate button — matches delete button styling */
 .sp-cp-dup {
     background: var(--sp-surface) !important;
@@ -144,14 +162,15 @@
 .sp-cp-dup:hover { color: var(--sp-accent) !important; border-color: var(--sp-accent) !important; background: var(--sp-surface-hover) !important; }
 /* v6.9.13: per-field toggle — smaller than the panel-level toggle,
    centered in its 22px grid column between handle and key */
-.sp-cp-field-toggle { width: 9px; height: 9px; accent-color: var(--sp-accent); cursor: pointer; justify-self: center; margin: 0; padding: 0; vertical-align: middle; }
+.sp-cp-field-toggle-hit { display: inline-flex; align-items: center; justify-content: center; justify-self: center; cursor: pointer; }
+.sp-cp-field-toggle { width: 9px; height: 9px; accent-color: var(--sp-accent); cursor: pointer; margin: 0; padding: 0; vertical-align: middle; }
 .sp-cp-field-disabled { opacity: 0.35; }
-.sp-cp-field-disabled input, .sp-cp-field-disabled select { pointer-events: none; }
+.sp-cp-field-disabled input:not(.sp-cp-field-toggle), .sp-cp-field-disabled select, .sp-cp-field-disabled textarea { pointer-events: none; }
 /* Scope indicator row — always visible when custom panels exist */
 .sp-cp-scope-row {
     display: flex; align-items: center; gap: 6px; margin-bottom: 8px;
     padding: 5px 8px; border-radius: 4px;
-    background: rgba(77,184,164,0.04); border: 1px solid rgba(77,184,164,0.12);
+    background: color-mix(in srgb, var(--sp-accent) 4%, transparent); border: 1px solid color-mix(in srgb, var(--sp-accent) 12%, transparent);
 }
 .sp-cp-scope-icon { font-size: var(--sp-fs-xs); color: var(--sp-accent); opacity: 0.6; flex-shrink: 0; }
 .sp-cp-scope-text { font-size: var(--sp-fs-xs); color: var(--sp-text-dim); flex: 1; line-height: 1.4; }
@@ -161,10 +180,10 @@
 .sp-cp-del {
     color: var(--sp-text-dim) !important; border-color: var(--sp-border) !important;
     font-size: var(--sp-fs-xs) !important; padding: 2px 6px !important;
-    transition: all 0.15s ease; background: #181a20 !important;
+    transition: all 0.15s ease; background: var(--sp-surface) !important;
     opacity: 1;
 }
-.sp-cp-del:hover { color: #f07070 !important; border-color: rgba(212,80,80,0.5) !important; background: rgba(212,80,80,0.2) !important; }
+.sp-cp-del:hover:not(:disabled) { color: #f07070 !important; border-color: rgba(212,80,80,0.5) !important; background: rgba(212,80,80,0.2) !important; }
 .sp-cp-fields { display: flex; flex-direction: column; gap: 0; }
 /* 7 columns — handle, toggle, key, label, type, desc, remove */
 .sp-cp-field-row {
@@ -179,14 +198,19 @@
 .sp-cp-drag-handle:hover { opacity: 0.7; }
 .sp-cp-field-key, .sp-cp-field-label, .sp-cp-field-desc {
     background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.14);
-    color: var(--sp-text); border-radius: 3px; padding: 0 5px; margin: 0;
-    font-size: var(--sp-fs-xs); font-family: var(--sp-font); height: 22px; line-height: 1;
-    box-sizing: border-box;
+    color: var(--sp-text); border-radius: 3px; margin: 0;
+    font-size: var(--sp-fs-xs); font-family: var(--sp-font);
+    box-sizing: border-box; min-width: 0;
     transition: border-color 0.15s ease, background 0.15s ease;
+}
+.sp-cp-field-key, .sp-cp-field-label { padding: 0 5px; height: 22px; line-height: 1; }
+.sp-cp-field-desc {
+    width: 100%; min-height: 22px; max-height: 160px; padding: 3px 5px;
+    line-height: 1.35; resize: vertical; overflow-y: auto;
 }
 .sp-cp-field-key::placeholder, .sp-cp-field-label::placeholder, .sp-cp-field-desc::placeholder { color: var(--sp-text-dim); opacity: 0.35; }
 .sp-cp-field-key:focus, .sp-cp-field-label:focus, .sp-cp-field-desc:focus {
-    outline: none; border-color: var(--sp-accent); background: rgba(77,184,164,0.05);
+    outline: none; border-color: var(--sp-accent); background: color-mix(in srgb, var(--sp-accent) 5%, transparent);
 }
 .sp-cp-field-key { font-family: var(--sp-font-mono); color: var(--sp-accent); font-weight: 600; }
 .sp-cp-field-type {
@@ -210,6 +234,9 @@
     border-radius: 3px; transition: all 0.15s ease; cursor: pointer;
 }
 .sp-cp-field-rm:hover { color: #f07070 !important; background: rgba(212,80,80,0.12) !important; border-color: rgba(212,80,80,0.3) !important; }
+/* Touch reorder fallback; hidden on desktop where drag/drop remains available. */
+.sp-cp-move-controls { display: none; }
+.sp-cp-field-move { min-width: 44px; min-height: 44px; padding: 0 !important; }
 .sp-cp-field-opt-row {
     grid-column: 1 / -1; padding: 2px 0 2px 82px;
 }
@@ -220,7 +247,7 @@
     transition: border-color 0.15s ease;
 }
 .sp-cp-field-opt-row input::placeholder { color: var(--sp-text-dim); opacity: 0.3; }
-.sp-cp-field-opt-row input:focus { outline: none; border-color: var(--sp-accent); background: rgba(77,184,164,0.05); }
+.sp-cp-field-opt-row input:focus { outline: none; border-color: var(--sp-accent); background: color-mix(in srgb, var(--sp-accent) 5%, transparent); }
 /* Match the 7-column grid of .sp-cp-field-row */
 .sp-cp-field-labels {
     display: grid; grid-template-columns: 10px 16px 62px 68px 56px 1fr 24px;
@@ -233,11 +260,11 @@
 .sp-cp-add-field {
     width: 100%; margin-top: 6px; font-size: var(--sp-fs-xs) !important;
     padding: 4px 0 !important;
-    background: rgba(77,184,164,0.05) !important; border: 1px dashed rgba(77,184,164,0.45) !important;
-    color: rgba(77,184,164,0.85) !important;
+    background: color-mix(in srgb, var(--sp-accent) 5%, transparent) !important; border: 1px dashed color-mix(in srgb, var(--sp-accent) 45%, transparent) !important;
+    color: color-mix(in srgb, var(--sp-accent) 85%, transparent) !important;
     transition: all 0.15s ease;
 }
-.sp-cp-add-field:hover { border-color: var(--sp-accent) !important; color: var(--sp-accent) !important; background: rgba(77,184,164,0.1) !important; }
+.sp-cp-add-field:hover { border-color: var(--sp-accent) !important; color: var(--sp-accent) !important; background: color-mix(in srgb, var(--sp-accent) 10%, transparent) !important; }
 .sp-cp-warn {
     display: flex; align-items: flex-start; gap: 5px; margin-top: 6px; padding: 5px 8px;
     background: rgba(245,158,11,0.06); border: 1px solid rgba(245,158,11,0.15); border-radius: 4px;
@@ -250,14 +277,14 @@
     color: var(--sp-text-dim); font-size: var(--sp-fs-xs); font-weight: 700; cursor: pointer;
     background: transparent; transition: all 0.15s ease; flex-shrink: 0;
 }
-.sp-cp-info-btn:hover { background: rgba(77,184,164,0.1); border-color: var(--sp-accent); color: var(--sp-accent); }
+.sp-cp-info-btn:hover { background: color-mix(in srgb, var(--sp-accent) 10%, transparent); border-color: var(--sp-accent); color: var(--sp-accent); }
 .sp-cp-info-popup {
-    display: none; background: #1e2028; border: 1px solid var(--sp-border-strong);
+    display: none; background: var(--sp-surface); border: 1px solid var(--sp-border-strong);
     border-radius: var(--sp-radius); padding: 10px 12px; margin-top: 6px;
     font-size: var(--sp-fs-xs); color: var(--sp-text); line-height: 1.6;
 }
 .sp-cp-info-popup.sp-visible { display: block; }
-.sp-cp-info-popup code { background: rgba(77,184,164,0.1); color: var(--sp-accent); padding: 1px 4px; border-radius: 3px; font-family: var(--sp-font-mono); font-size: var(--sp-fs-xs); }
+.sp-cp-info-popup code { background: color-mix(in srgb, var(--sp-accent) 10%, transparent); color: var(--sp-accent); padding: 1px 4px; border-radius: 3px; font-family: var(--sp-font-mono); font-size: var(--sp-fs-xs); }
 .sp-cp-empty {
     text-align: center; padding: 12px 0; font-size: var(--sp-fs-xs);
     color: var(--sp-text-dim); opacity: 0.4;
@@ -265,12 +292,28 @@
 .sp-mgr-add-panel {
     width: 100%; margin-top: 8px; font-size: var(--sp-fs-xs) !important;
     padding: 6px 0 !important;
-    background: rgba(77,184,164,0.06) !important;
-    border: 1px solid rgba(77,184,164,0.2) !important;
+    background: var(--sp-accent-dim) !important;
+    border: 1px solid color-mix(in srgb, var(--sp-accent) 35%, transparent) !important;
     color: var(--sp-accent) !important; font-weight: 600;
     transition: all 0.15s ease;
 }
-.sp-mgr-add-panel:hover { background: rgba(77,184,164,0.12) !important; border-color: rgba(77,184,164,0.35) !important; }
+.sp-mgr-add-panel:hover { background: color-mix(in srgb, var(--sp-accent) 22%, transparent) !important; border-color: color-mix(in srgb, var(--sp-accent) 60%, transparent) !important; }
+
+/* Primary Custom Panel actions stay above the panel list so a long/expanded
+   editor cannot push Add / Clear All several screens below the header. */
+.sp-cp-manager-quick-actions {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+    gap: 6px; margin: 0 0 8px;
+}
+.sp-cp-manager-quick-actions .sp-mgr-add-panel { margin-top: 0; }
+.sp-cp-manager-quick-actions .sp-cp-danger-action {
+    min-width: 120px; padding: 6px 10px !important; border-radius: 4px;
+    background: color-mix(in srgb, var(--sp-red) 8%, transparent) !important; cursor: pointer;
+}
+.sp-cp-manager-quick-actions .sp-cp-danger-action:hover {
+    background: color-mix(in srgb, var(--sp-red) 18%, transparent) !important;
+    border-color: color-mix(in srgb, var(--sp-red) 70%, transparent) !important;
+}
 
 /* v6.9.11: action buttons row (export, import, template) */
 .sp-cp-actions {
@@ -294,21 +337,120 @@
     position: fixed; z-index: 100010;
     background: var(--sp-bg-solid, #12141a); border: 1px solid var(--sp-border);
     border-radius: 6px; box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-    min-width: 200px; max-height: 320px; overflow-y: auto;
+    min-width: min(200px, calc(100vw - 16px));
+    max-width: calc(100vw - 16px); max-height: min(320px, calc(100dvh - 16px));
+    overflow-y: auto; box-sizing: border-box;
     animation: sp-glass-in 0.12s ease-out;
 }
 .sp-cp-tmpl-menu::-webkit-scrollbar { width: 4px; }
 .sp-cp-tmpl-menu::-webkit-scrollbar-thumb { background: rgba(100,110,130,0.4); border-radius: 2px; }
 .sp-cp-tmpl-item {
-    padding: 8px 12px; font-size: var(--sp-fs-xs); color: var(--sp-text);
+    padding: 8px 12px; min-height: 44px; box-sizing: border-box;
+    display: flex; align-items: center;
+    font-size: var(--sp-fs-xs); color: var(--sp-text);
     cursor: pointer; transition: background 0.1s;
 }
-.sp-cp-tmpl-item:hover { background: rgba(77,184,164,0.1); color: var(--sp-text-bright); }
+.sp-cp-tmpl-item:hover { background: var(--sp-accent-dim); color: var(--sp-text-bright); }
+
+
+
+/* Reusable Custom Panel sets stored in local browser storage. */
+.sp-cp-library {
+    margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--sp-border);
+}
+.sp-cp-library-header {
+    width: 100%; min-height: 38px; margin: 0 0 6px; padding: 5px 7px;
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    box-sizing: border-box; appearance: none; -webkit-appearance: none;
+    font: 700 var(--sp-fs-xs)/1.2 var(--sp-font); color: var(--sp-text-dim);
+    background: var(--sp-surface); border: 1px solid var(--sp-border);
+    border-radius: var(--sp-radius); cursor: pointer; text-align: left;
+    transition: background var(--sp-transition), border-color var(--sp-transition), color var(--sp-transition);
+}
+.sp-cp-library-header:hover {
+    background: var(--sp-surface-hover); border-color: var(--sp-border-strong); color: var(--sp-text);
+}
+.sp-cp-library-header:focus-visible { outline: 2px solid var(--sp-accent); outline-offset: 2px; }
+.sp-cp-library-heading { display: inline-flex; align-items: center; gap: 7px; min-width: 0; }
+.sp-cp-library-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-cp-library-chevron {
+    width: 14px; flex: 0 0 14px; text-align: center; color: var(--sp-accent);
+    font-size: 17px; line-height: 1; transform: rotate(90deg); transition: transform var(--sp-transition);
+}
+.sp-cp-library-collapsed .sp-cp-library-chevron { transform: rotate(0deg); }
+.sp-cp-library-count {
+    min-width: 24px; min-height: 22px; padding: 1px 7px; box-sizing: border-box;
+    display: inline-flex; align-items: center; justify-content: center;
+    border-radius: 999px; text-align: center;
+    color: var(--sp-accent); background: var(--sp-accent-dim);
+    border: 1px solid color-mix(in srgb, var(--sp-accent) 35%, transparent);
+}
+.sp-cp-library-content { min-width: 0; }
+.sp-cp-library-collapsed .sp-cp-library-content { display: none; }
+.sp-cp-library-collapsed .sp-cp-library-header { margin-bottom: 0; }
+.sp-cp-library-empty {
+    padding: 9px; text-align: center; color: var(--sp-text-dim);
+    font-size: var(--sp-fs-xs); opacity: 0.7;
+    border: 1px dashed var(--sp-border); border-radius: var(--sp-radius);
+    background: color-mix(in srgb, var(--sp-surface) 70%, transparent);
+}
+.sp-cp-library-list {
+    display: flex; flex-direction: column; gap: 6px;
+    max-height: min(220px, 32dvh); overflow-y: auto; overscroll-behavior: contain;
+    scrollbar-gutter: stable; padding-right: 2px;
+}
+.sp-cp-library-list::-webkit-scrollbar { width: 4px; }
+.sp-cp-library-list::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--sp-text-dim) 35%, transparent); border-radius: 2px; }
+.sp-cp-library-item {
+    display: flex; align-items: center; gap: 7px; min-width: 0;
+    padding: 7px; border: 1px solid var(--sp-border); border-radius: var(--sp-radius);
+    background: color-mix(in srgb, var(--sp-surface-hover) 58%, var(--sp-surface));
+}
+.sp-cp-library-item-on {
+    border-color: color-mix(in srgb, var(--sp-accent) 42%, var(--sp-border));
+    background: color-mix(in srgb, var(--sp-accent) 8%, var(--sp-surface));
+}
+.sp-cp-library-on {
+    color: var(--sp-accent) !important;
+    border-color: color-mix(in srgb, var(--sp-accent) 50%, var(--sp-border-strong)) !important;
+}
+.sp-cp-library-badge {
+    flex: 0 0 auto; padding: 2px 6px; border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--sp-accent) 35%, transparent);
+    color: var(--sp-accent); font-size: 8px; font-weight: 700; white-space: nowrap;
+}
+.sp-cp-library-meta { flex: 1; min-width: 0; }
+.sp-cp-library-name {
+    color: var(--sp-text); font-size: var(--sp-fs-xs); font-weight: 650;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.sp-cp-library-sub { color: var(--sp-text-dim); font-size: var(--sp-fs-xs); opacity: 0.72; margin-top: 2px; }
+.sp-cp-library-actions { display: flex; gap: 5px; flex-wrap: wrap; justify-content: flex-end; }
+.sp-cp-library-actions .sp-btn {
+    min-width: 0; min-height: 32px; padding: 5px 9px !important; font-size: var(--sp-fs-xs) !important;
+    background: var(--sp-surface) !important; color: var(--sp-text) !important;
+    border: 1px solid var(--sp-border-strong) !important;
+}
+.sp-cp-library-actions .sp-btn:hover:not(:disabled) {
+    background: var(--sp-surface-hover) !important; color: var(--sp-text-bright) !important;
+    border-color: var(--sp-accent) !important;
+}
+.sp-cp-library-delete {
+    min-width: 34px !important; color: var(--sp-red) !important;
+    background: color-mix(in srgb, var(--sp-red) 7%, var(--sp-surface)) !important;
+    border-color: color-mix(in srgb, var(--sp-red) 35%, var(--sp-border)) !important;
+}
+.sp-cp-library-delete:hover:not(:disabled) {
+    color: var(--sp-text-bright) !important;
+    background: color-mix(in srgb, var(--sp-red) 22%, var(--sp-surface)) !important;
+    border-color: color-mix(in srgb, var(--sp-red) 65%, var(--sp-border)) !important;
+}
+.sp-cp-danger-action { color: var(--sp-red) !important; border-color: color-mix(in srgb, var(--sp-red) 45%, var(--sp-border)) !important; }
 
 /* ═══ CUSTOM PANEL FIELD RENDERING v6.9.12 ═══ */
 
 /* ── Section differentiator: teal left border on custom panels ── */
-.sp-section.sp-section-custom { border-left: 2px solid rgba(77,184,164,0.25); }
+.sp-section.sp-section-custom { border-left: 2px solid color-mix(in srgb, var(--sp-accent) 42%, transparent); }
 
 /* ── Meter: threshold-based colors with danger glow ── */
 .sp-cp-meter-wrap { display: flex; align-items: center; gap: 6px; }
@@ -351,7 +493,7 @@
     border: 1px solid; white-space: nowrap; line-height: 1.6;
     display: inline-block; text-transform: capitalize;
 }
-.sp-cp-enum-chip[data-severity="0"] { color: var(--sp-accent); border-color: rgba(77,184,164,0.4); background: rgba(77,184,164,0.08); }
+.sp-cp-enum-chip[data-severity="0"] { color: var(--sp-accent); border-color: color-mix(in srgb, var(--sp-accent) 40%, transparent); background: color-mix(in srgb, var(--sp-accent) 8%, transparent); }
 .sp-cp-enum-chip[data-severity="1"] { color: var(--sp-tension-moderate, #facc15); border-color: rgba(250,204,21,0.4); background: rgba(250,204,21,0.07); }
 .sp-cp-enum-chip[data-severity="2"] { color: var(--sp-tension-high, #fb923c); border-color: rgba(251,146,60,0.4); background: rgba(251,146,60,0.07); }
 .sp-cp-enum-chip[data-severity="3"] { color: var(--sp-tension-critical, #ef4444); border-color: rgba(239,68,68,0.4); background: rgba(239,68,68,0.08); }
@@ -380,13 +522,24 @@
    rendered behind them and were unclickable. 100200 leaves headroom
    above any inspector-style overlay we ship. */
 .sp-confirm-overlay {
-    position: fixed; inset: 0; z-index: 100200;
+    /* Critical geometry is intentionally strong here. On Android Chromium a
+       nested/scrolling ScenePulse manager can otherwise leave only the action
+       row visible at the top of the viewport. The confirm must always own the
+       complete visual viewport. */
+    position: fixed !important; inset: 0 !important; z-index: 2147483000 !important;
+    width: 100vw !important; height: 100vh !important; height: 100dvh !important;
     /* v6.25.1: bumped 0.7 → 0.92 + dropped backdrop-filter. The 30% alpha
        was letting ST chat hover states bleed through (same v6.23.x family
        of bug as the Configure Prompts blue-bleed). 0.92 is opaque enough
        that no chat content is legible behind the dialog. */
-    background: rgba(0,0,0,0.92);
-    display: flex; align-items: center; justify-content: center;
+    background: rgba(0,0,0,0.92) !important;
+    display: flex !important; align-items: center !important; justify-content: center !important;
+    box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain;
+    padding:
+        max(12px, env(safe-area-inset-top, 0px))
+        max(12px, env(safe-area-inset-right, 0px))
+        max(12px, env(safe-area-inset-bottom, 0px))
+        max(12px, env(safe-area-inset-left, 0px));
     opacity: 0; transition: opacity 0.15s ease;
 }
 .sp-confirm-overlay.sp-confirm-visible { opacity: 1; }
@@ -394,7 +547,11 @@
 .sp-confirm-dialog {
     background: var(--sp-surface, #1a1a2e);
     border: 1px solid var(--sp-border-strong, #444);
-    border-radius: 8px; padding: 18px 22px; min-width: 300px; max-width: 380px;
+    border-radius: 8px; padding: 18px 22px;
+    width: min(380px, 100%); min-width: 0; max-width: 380px;
+    max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+    max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+    overflow-y: auto; box-sizing: border-box; margin: 0;
     box-shadow: 0 16px 48px rgba(0,0,0,0.6);
     transform: scale(0.95); transition: transform 0.2s cubic-bezier(0.4,0,0.2,1);
 }
@@ -432,12 +589,12 @@
 .sp-confirm-ok:hover { background: rgba(212,80,80,0.35); color: #ff8888; }
 /* v6.13.2: non-destructive OK variant for spPrompt + safe spConfirm calls */
 .sp-confirm-ok-safe {
-    background: rgba(77,184,164,0.18); border-color: rgba(77,184,164,0.5);
+    background: color-mix(in srgb, var(--sp-accent) 18%, transparent); border-color: color-mix(in srgb, var(--sp-accent) 50%, transparent);
     color: var(--sp-accent);
 }
-.sp-confirm-ok-safe:hover { background: rgba(77,184,164,0.32); color: var(--sp-text-bright); }
+.sp-confirm-ok-safe:hover { background: color-mix(in srgb, var(--sp-accent) 32%, transparent); color: var(--sp-text-bright); }
 /* v6.13.2: spPrompt — text input dialog */
-.sp-prompt-dialog { min-width: 340px; max-width: 440px; }
+.sp-prompt-dialog { width: min(440px, 100%); min-width: 0; max-width: 440px; }
 .sp-prompt-input {
     width: 100%; box-sizing: border-box;
     background: var(--sp-surface, #1a1a2e); color: var(--sp-text, #eee);
@@ -455,6 +612,7 @@
 /* ── Collapsible Built-in Toggles ── */
 .sp-mgr-collapsible { margin-bottom: 4px; }
 .sp-mgr-collapse-header {
+    width: 100%; border: 0; background: transparent; color: inherit; font: inherit; text-align: left;
     display: flex; align-items: center; gap: 6px;
     cursor: pointer; padding: 4px 2px; border-radius: 4px;
     transition: background 0.15s ease; user-select: none;
@@ -487,7 +645,7 @@
 .sp-mgr-sub-toggles {
     display: flex; flex-wrap: wrap; gap: 2px 6px;
     padding: 3px 0 5px 22px;
-    border-left: 2px solid rgba(77,184,164,0.1);
+    border-left: 2px solid color-mix(in srgb, var(--sp-accent) 10%, transparent);
     margin-left: 8px; margin-bottom: 2px;
 }
 .sp-mgr-sub-toggle {
@@ -503,6 +661,18 @@
     opacity: 0.25; pointer-events: none;
 }
 .sp-mgr-sub-toggles.sp-mgr-sub-disabled input { accent-color: unset; }
+.sp-mgr-sub-head {
+    display: flex; align-items: center; gap: 6px;
+    width: 100%; margin: 0 0 2px; padding: 2px 4px;
+    border: 0; background: transparent; color: var(--sp-text-dim);
+    font-size: var(--sp-fs-xs); cursor: pointer; text-align: left;
+}
+.sp-mgr-sub-head:hover { color: var(--sp-text); }
+.sp-mgr-sub-arrow { font-size: 9px; opacity: 0.7; }
+.sp-mgr-sub-toggles.sp-mgr-sub-collapsed {
+    padding-bottom: 2px;
+}
+.sp-mgr-sub-toggles.sp-mgr-sub-collapsed > :not(.sp-mgr-sub-head) { display: none; }
 
 /* ── Hint tips (weather, thoughts) ── */
 .sp-mgr-hint-tip {
@@ -515,7 +685,7 @@
 
 /* ── Toolbar button glow (on hint hover) ── */
 .sp-tb-glow {
-    box-shadow: 0 0 8px 2px var(--sp-accent), 0 0 16px 4px rgba(77,184,164,0.3) !important;
+    box-shadow: 0 0 8px 2px var(--sp-accent), 0 0 16px 4px color-mix(in srgb, var(--sp-accent) 30%, transparent) !important;
     border-color: var(--sp-accent) !important;
     transition: box-shadow 0.2s ease, border-color 0.2s ease;
 }
@@ -528,13 +698,13 @@
     display: flex; gap: 6px;
 }
 .sp-mgr-enable-btn {
-    flex: 1; padding: 5px 8px; border: 1px dashed rgba(77,184,164,0.3);
-    background: rgba(77,184,164,0.06); color: var(--sp-accent);
+    flex: 1; padding: 5px 8px; border: 1px dashed color-mix(in srgb, var(--sp-accent) 30%, transparent);
+    background: color-mix(in srgb, var(--sp-accent) 6%, transparent); color: var(--sp-accent);
     border-radius: 4px; font-size: var(--sp-fs-xs); font-weight: 600; cursor: pointer;
     font-family: var(--sp-font); text-transform: uppercase; letter-spacing: 0.5px;
     transition: background 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
 }
-.sp-mgr-enable-btn:hover:not(:disabled) { background: rgba(77,184,164,0.12); border-color: rgba(77,184,164,0.5); }
+.sp-mgr-enable-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--sp-accent) 12%, transparent); border-color: color-mix(in srgb, var(--sp-accent) 50%, transparent); }
 .sp-mgr-btn-disable {
     border-color: rgba(255,100,100,0.2); background: rgba(255,100,100,0.04); color: rgba(255,130,130,0.7);
 }
@@ -555,8 +725,8 @@
 .sp-cp-target-row {
     display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
     align-items: center; gap: 8px; margin: 0 0 8px;
-    padding: 6px 8px; border: 1px solid rgba(77,184,164,0.14);
-    border-radius: 4px; background: rgba(77,184,164,0.035);
+    padding: 6px 8px; border: 1px solid color-mix(in srgb, var(--sp-accent) 14%, transparent);
+    border-radius: 4px; background: color-mix(in srgb, var(--sp-accent) 3.5%, transparent);
 }
 .sp-cp-target-label {
     font-size: var(--sp-fs-xs); font-weight: 700; color: var(--sp-text-dim);
@@ -570,12 +740,252 @@
 }
 .sp-cp-target-select:focus { outline: 1px solid var(--sp-accent); border-color: var(--sp-accent); }
 
+.sp-cp-control-row {
+    display: grid; grid-template-columns: minmax(90px,auto) minmax(0,1fr);
+    align-items: center; gap: 8px; margin: 0 0 4px; padding: 7px 8px;
+    border: 1px solid color-mix(in srgb, var(--sp-accent) 24%, transparent); border-radius: 4px;
+    background: color-mix(in srgb, var(--sp-accent) 5.5%, transparent);
+}
+.sp-cp-control-hint {
+    margin: 0 2px 7px; color: var(--sp-text-dim); font-size: var(--sp-fs-xs);
+}
+.sp-cp-activation-select:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.sp-cp-activation-row {
+    display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr) auto;
+    align-items: center; gap: 8px; margin: 0 0 6px;
+    padding: 6px 8px; border: 1px solid rgba(91,156,196,0.16);
+    border-radius: 4px; background: rgba(91,156,196,0.035);
+}
+.sp-cp-activation-badge {
+    padding: 2px 6px; border: 1px solid var(--sp-border); border-radius: 999px;
+    color: var(--sp-text-dim); font-size: 8px; font-weight: 700; white-space: nowrap;
+}
+.sp-cp-activation-badge[data-state="active"] { color: var(--sp-accent); border-color: color-mix(in srgb, var(--sp-accent) 38%, transparent); background: color-mix(in srgb, var(--sp-accent) 8%, transparent); }
+.sp-cp-activation-badge[data-state="inactive"] { opacity: 0.55; }
+.sp-cp-activation-badge[data-state="pending"] { color: #d4a855; border-color: rgba(212,168,85,0.32); }
+.sp-cp-activation-tags-wrap {
+    margin: 0 0 8px;
+    padding: 4px 8px 6px;
+    border: 1px solid rgba(91,156,196,0.16);
+    border-radius: 4px;
+    background: rgba(91,156,196,0.03);
+}
+.sp-cp-activation-tags-summary {
+    cursor: pointer;
+    color: var(--sp-text-dim);
+    font-size: var(--sp-fs-xs);
+    list-style: none;
+}
+.sp-cp-activation-tags-summary::-webkit-details-marker { display: none; }
+.sp-cp-activation-tags-wrap[open] .sp-cp-activation-tags-summary { margin-bottom: 6px; color: var(--sp-text); }
+.sp-cp-activation-tags {
+    display: flex; flex-wrap: wrap; gap: 5px; margin: 0; padding: 0;
+    border: 0;
+}
+.sp-cp-activation-tag {
+    display: inline-flex; align-items: center; gap: 4px; padding: 3px 6px;
+    border: 1px solid var(--sp-border); border-radius: 999px;
+    color: var(--sp-text-dim); font-size: var(--sp-fs-xs); cursor: pointer;
+}
+.sp-cp-activation-tag:has(input:checked) { color: var(--sp-accent); border-color: color-mix(in srgb, var(--sp-accent) 42%, transparent); background: color-mix(in srgb, var(--sp-accent) 8%, transparent); }
+.sp-cp-activation-tag input { width: 12px; height: 12px; margin: 0; accent-color: var(--sp-accent); }
+
+.sp-cp-audience {
+    margin: 0 0 8px; padding: 6px 8px;
+    border: 1px solid color-mix(in srgb, var(--sp-accent) 18%, transparent); border-radius: 4px;
+    background: color-mix(in srgb, var(--sp-accent) 4%, transparent);
+}
+.sp-cp-audience-hint {
+    margin: 0 0 6px; color: var(--sp-text-dim); font-size: var(--sp-fs-xs);
+}
+.sp-cp-audience-row {
+    display: grid; grid-template-columns: minmax(70px, auto) minmax(0, 1fr);
+    align-items: center; gap: 8px; margin: 0 0 6px;
+}
+.sp-cp-audience-input {
+    width: 100%; min-width: 0; padding: 4px 6px;
+    border: 1px solid var(--sp-border); border-radius: 4px;
+    background: color-mix(in srgb, var(--sp-bg, #1a1a1a) 88%, transparent);
+    color: inherit; font: inherit; font-size: var(--sp-fs-xs);
+}
+
 .sp-mgr-add-character-field {
     width: 100%; margin-top: 3px; padding: 4px 7px;
-    border: 1px dashed rgba(77,184,164,0.28); border-radius: 4px;
-    background: rgba(77,184,164,0.04); color: var(--sp-accent);
+    border: 1px dashed color-mix(in srgb, var(--sp-accent) 28%, transparent); border-radius: 4px;
+    background: color-mix(in srgb, var(--sp-accent) 4%, transparent); color: var(--sp-accent);
     font: inherit; font-size: var(--sp-fs-xs); text-align: left; cursor: pointer;
 }
 .sp-mgr-add-character-field:hover {
-    background: rgba(77,184,164,0.1); border-color: rgba(77,184,164,0.48);
+    background: color-mix(in srgb, var(--sp-accent) 10%, transparent); border-color: color-mix(in srgb, var(--sp-accent) 48%, transparent);
+}
+
+
+/* Library-pinned panels are source-owned. They remain visible in the editor,
+   but local mutation controls are locked; Duplicate creates an editable local
+   copy with fresh keys so the user never edits something that will silently be
+   overwritten by the next library sync. */
+.sp-cp-library-readonly { border-color: color-mix(in srgb, var(--sp-accent) 32%, var(--sp-border)); }
+.sp-cp-library-readonly-note { border-color: color-mix(in srgb, #60a5fa 22%, transparent); background: color-mix(in srgb, #60a5fa 6%, transparent); }
+.sp-cp-library-readonly .sp-cp-body input:disabled,
+.sp-cp-library-readonly .sp-cp-body select:disabled,
+.sp-cp-library-readonly .sp-cp-body textarea:read-only,
+.sp-cp-library-readonly .sp-cp-body input:read-only { opacity: 0.7; cursor: not-allowed; }
+
+/* Mobile-safe Custom Panels editor and body-appended dialogs. */
+@media (max-width: 640px), (pointer: coarse) {
+    /* Keep #sp-panel-body as the single page scroll surface on phones. The
+       manager and its library list must not trap touch scroll inside nested
+       overflow containers. */
+    #sp-panel.sp-mode-mobile .sp-panel-mgr,
+    #sp-panel.sp-mode-tablet .sp-panel-mgr { max-height: none; overflow-y: visible; }
+    #sp-panel.sp-mode-mobile .sp-cp-library-list,
+    #sp-panel.sp-mode-tablet .sp-cp-library-list { max-height: none; overflow-y: visible; scrollbar-gutter: auto; }
+    .sp-cp-header {
+        display: grid; grid-template-columns: 24px 44px minmax(0,1fr) 44px 44px;
+        gap: 6px; padding: 8px;
+    }
+    .sp-cp-header > .sp-cp-chevron { grid-column: 1; grid-row: 1; }
+    .sp-cp-header > .sp-cp-toggle-hit { grid-column: 2; grid-row: 1; }
+    .sp-cp-header > .sp-cp-name { grid-column: 3; grid-row: 1; }
+    .sp-cp-header > .sp-cp-dup { grid-column: 4; grid-row: 1; }
+    .sp-cp-header > .sp-cp-del { grid-column: 5; grid-row: 1; }
+    .sp-cp-header > .sp-cp-library-badge { grid-column: 3 / 6; grid-row: 2; justify-self: start; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+    .sp-cp-name { min-width: 0; width: 100%; min-height: 44px; font-size: 16px; }
+    .sp-cp-toggle-hit { width: 44px; height: 44px; justify-self: center; }
+    .sp-cp-toggle { width: 20px; height: 20px; }
+    .sp-cp-dup, .sp-cp-del {
+        min-width: 44px; min-height: 44px; padding: 0 !important;
+        display: inline-flex; align-items: center; justify-content: center;
+    }
+    .sp-cp-body { padding: 0 8px 8px; }
+    .sp-cp-field-labels { display: none; }
+    .sp-cp-field-row {
+        grid-template-columns: 44px 44px minmax(0,1fr) 44px;
+        grid-template-areas:
+            "drag toggle key remove"
+            "label label label label"
+            "type type type type"
+            "desc desc desc desc"
+            "move move move move";
+        gap: 7px; align-items: center; padding: 10px 0;
+    }
+    .sp-cp-drag-handle {
+        grid-area: drag; width: 44px; min-height: 44px; display: flex;
+        align-items: center; justify-content: center;
+    }
+    .sp-cp-field-toggle-hit { grid-area: toggle; width: 44px; height: 44px; }
+    .sp-cp-field-toggle { width: 20px; height: 20px; }
+    .sp-cp-field-key { grid-area: key; }
+    .sp-cp-field-label { grid-area: label; }
+    .sp-cp-field-type { grid-area: type; }
+    .sp-cp-field-desc { grid-area: desc; min-height: 88px !important; max-height: 240px; resize: vertical; }
+    .sp-cp-field-rm { grid-area: remove; width: 44px !important; height: 44px !important; }
+    .sp-cp-move-controls { grid-area: move; display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .sp-cp-field-move { width: 100%; }
+    .sp-cp-field-key, .sp-cp-field-label, .sp-cp-field-type {
+        width: 100%; min-width: 0; height: 44px !important; font-size: 16px;
+    }
+    .sp-cp-field-opt-row { padding: 4px 0; }
+    .sp-cp-field-opt-row input { min-height: 44px; box-sizing: border-box; font-size: 16px; }
+    .sp-cp-target-row { flex-wrap: wrap; }
+    .sp-cp-target-select { min-height: 44px; min-width: 0; flex: 1 1 180px; font-size: 16px; }
+    .sp-cp-control-row { grid-template-columns: 1fr; }
+    .sp-cp-control-select { min-height: 44px; font-size: 16px; }
+    .sp-cp-activation-row { grid-template-columns: 1fr; }
+    .sp-cp-activation-select { min-height: 44px; font-size: 16px; }
+    .sp-cp-activation-badge { justify-self: start; font-size: 10px; }
+    .sp-cp-audience-row { grid-template-columns: minmax(0,1fr); gap: 4px; }
+    .sp-cp-audience-input { min-height: 44px; font-size: 16px; box-sizing: border-box; }
+    .sp-cp-activation-tags { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 7px; }
+    .sp-cp-activation-tag { min-height: 44px; box-sizing: border-box; }
+    .sp-cp-activation-tag input { width: 20px; height: 20px; }
+    .sp-cp-actions .sp-btn { flex: 1 1 calc(50% - 3px); min-width: 0; min-height: 44px; }
+    .sp-cp-manager-quick-actions { grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 8px; }
+    .sp-cp-manager-quick-actions .sp-mgr-add-panel,
+    .sp-cp-manager-quick-actions .sp-cp-danger-action { min-width: 0; min-height: 44px; }
+    .sp-mgr-add-panel, .sp-cp-add-field { min-height: 44px; }
+    .sp-cp-library-header { min-height: 44px; margin-bottom: 7px; padding: 7px 9px; }
+    .sp-cp-library-item { align-items: stretch; flex-direction: column; padding: 8px; }
+    .sp-cp-library-actions { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 7px; }
+    .sp-cp-library-actions .sp-btn { min-width: 0; min-height: 44px; padding-left: 6px !important; padding-right: 6px !important; }
+
+    /* Character-scoped custom fields need the same label-over-value layout as
+       standalone custom panels. Their desktop two-column grid can otherwise
+       let a long localized label collapse the value column on phones. */
+    #sp-panel.sp-mode-mobile .sp-char-custom-row,
+    #sp-panel.sp-mode-tablet .sp-char-custom-row {
+        grid-template-columns: minmax(0,1fr); gap: 5px; padding: 6px 0;
+    }
+    #sp-panel.sp-mode-mobile .sp-char-custom-row .sp-row-label,
+    #sp-panel.sp-mode-tablet .sp-char-custom-row .sp-row-label {
+        width: 100%; max-width: 100%; text-align: left; overflow-wrap: anywhere;
+    }
+    #sp-panel.sp-mode-mobile .sp-char-custom-row .sp-row-value,
+    #sp-panel.sp-mode-tablet .sp-char-custom-row .sp-row-value { width: 100%; max-width: 100%; box-sizing: border-box; }
+
+    /* Panel Manager controls: labels are the hit targets for compact checkboxes. */
+    .sp-mgr-close, .sp-cp-info-btn { width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; display: inline-flex; align-items: center; justify-content: center; }
+    .sp-mgr-collapse-header, .sp-mgr-toggle, .sp-mgr-sub-toggle { min-height: 44px; box-sizing: border-box; }
+    .sp-mgr-toggle, .sp-mgr-sub-toggle { padding-top: 8px; padding-bottom: 8px; }
+    .sp-mgr-enable-btn, .sp-mgr-add-character-field { min-height: 44px; }
+    .sp-cp-toggle-hit, .sp-cp-field-toggle-hit { width: 44px; height: 44px; min-width: 44px; min-height: 44px; }
+    .sp-cp-toggle { width: 20px; height: 20px; }
+    .sp-cp-field-toggle { width: 20px; height: 20px; }
+    .sp-cp-tmpl-item { min-height: 44px; display: flex; align-items: center; }
+
+    .sp-confirm-dialog, .sp-prompt-dialog {
+        width: 100%; max-width: 100%; padding: 16px;
+        max-height: calc(100vh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 24px);
+    }
+    .sp-confirm-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .sp-confirm-btn { min-height: 44px; padding: 8px 12px; font-size: var(--sp-fs-sm); }
+    .sp-prompt-input { min-height: 44px; font-size: 16px; }
+}
+
+
+/* v7.1.14-r5: runtime custom-panel rows on phones.
+   Base .sp-row is horizontal and .sp-row-label has flex-shrink:0. Long custom
+   labels can therefore consume almost the full viewport and squeeze values
+   into a one-word-wide strip at the right edge. Runtime custom rows are
+   explicitly marked .sp-cp-display-row; only those rows stack on mobile. */
+#sp-panel.sp-mode-mobile .sp-section-custom .sp-cp-display-row,
+#sp-panel.sp-mode-tablet .sp-section-custom .sp-cp-display-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 5px;
+    align-items: start;
+    padding: 8px 12px;
+}
+#sp-panel.sp-mode-mobile .sp-section-custom .sp-cp-display-row > .sp-row-label,
+#sp-panel.sp-mode-tablet .sp-section-custom .sp-cp-display-row > .sp-row-label {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    text-align: left;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+    word-break: normal;
+}
+#sp-panel.sp-mode-mobile .sp-section-custom .sp-cp-display-row > .sp-row-value,
+#sp-panel.sp-mode-tablet .sp-section-custom .sp-cp-display-row > .sp-row-value {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+}
+#sp-panel.sp-mode-mobile .sp-section-custom .sp-cp-display-row > .sp-cp-meter-wrap,
+#sp-panel.sp-mode-tablet .sp-section-custom .sp-cp-display-row > .sp-cp-meter-wrap {
+    width: 100%;
+}
+#sp-panel.sp-mode-mobile .sp-section-custom .sp-cp-display-row .sp-cp-enum-chip,
+#sp-panel.sp-mode-mobile .sp-section-custom .sp-cp-display-row .sp-cp-list-chip,
+#sp-panel.sp-mode-tablet .sp-section-custom .sp-cp-display-row .sp-cp-enum-chip,
+#sp-panel.sp-mode-tablet .sp-section-custom .sp-cp-display-row .sp-cp-list-chip {
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }

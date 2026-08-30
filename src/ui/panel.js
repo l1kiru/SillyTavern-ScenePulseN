@@ -1,11 +1,12 @@
 // src/ui/panel.js — Side Panel Creation, Show/Hide, Toolbar Event Handling
 import { log, warn, err } from '../logger.js';
-import { esc, str } from '../utils.js';
+import { esc, str, spConfirm, spPrompt } from '../utils.js';
 import { t } from '../i18n.js';
 import { MASCOT_SVG, DEFAULTS, VERSION, BUILTIN_PANELS } from '../constants.js';
-import { captureTrackerStructure, getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView, canGenerateScene, getLastAssistantMessageIndex, getLatestSnapshot, getTrustedSnapshotFor, reconcileTrackerStructureChange } from '../settings.js';
+import { captureTrackerStructure, getSettings, saveSettings, ensureChatPanels, saveChatPanels, getActivePanels, buildProfileView, canGenerateScene, getLastAssistantMessageIndex, getLatestSnapshot, getTrustedSnapshotFor, reconcileTrackerStructureChange, forceFullStateRefresh, syncPinnedLibraryIntoChat } from '../settings.js';
 import { buildDynamicSchema } from '../schema.js';
 import { customPanelScope, customPanelSectionKey, getActiveProfile, validateCustomPanels } from '../profiles.js';
+import { normalizePanelActivationMode } from '../panel-activation-policy.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
@@ -24,6 +25,7 @@ import { updatePanel } from './update-panel.js';
 import { closeDiffViewer } from './diff-viewer.js';
 import { updateThoughts } from './thoughts.js';
 import { renderCustomPanelsMgr } from '../settings-ui/custom-panels.js';
+import { detachLibraryPanels, loadPanelLibrary, panelSetNameFromFilename, removePanelSet, savePanelLibrary, setPanelSetEnabled, stripPanelLibraryProvenance, upsertPanelSet } from '../panel-library.js';
 import { mkSection } from './section.js';
 import { renderEmptyState } from './empty-state.js';
 
@@ -249,6 +251,12 @@ export function createPanel(){
             showThoughtLoading(t('Generating Scene'),t('Analyzing context'));
         }
         const preNonce=genNonce;
+        // The toolbar promises a complete rebuild. Without arming the shared
+        // force-full flag, an existing snapshot makes generateTracker choose
+        // delta mode despite the "manual:full" source label. That prevents
+        // newly introduced narrative characters from receiving character
+        // lanes and leaves the old roster in place.
+        forceFullStateRefresh();
         const result=await runManualSceneBuild(mesIdx,'manual:full');
         // If nonce changed beyond our generation, cancel already handled UI -- bail
         if(genNonce>preNonce+1){log('Toolbar regen: stale caller, cancel handled UI');return}
@@ -355,7 +363,7 @@ export function createPanel(){
         mgr.querySelector('.sp-mgr-close').addEventListener('click',closeMgr);
         // Built-in panel toggles -- collapsible
         const builtinWrap=document.createElement('div');builtinWrap.className='sp-mgr-collapsible';
-        const builtinHeader=document.createElement('div');builtinHeader.className='sp-mgr-collapse-header';
+        const builtinHeader=document.createElement('button');builtinHeader.type='button';builtinHeader.className='sp-mgr-collapse-header';
         builtinHeader.innerHTML=`<span class="sp-mgr-collapse-arrow">\u25B8</span><span class="sp-mgr-collapse-label">Built-in Panels</span><span class="sp-mgr-collapse-count">${Object.values({...DEFAULTS.panels,...profileSettings.panels}).filter(v=>v!==false).length}/${Object.keys(BUILTIN_PANELS).length}</span>`;
         const togglesDiv=document.createElement('div');togglesDiv.className='sp-mgr-toggles sp-mgr-collapsed';
         builtinHeader.addEventListener('click',()=>{
@@ -419,7 +427,8 @@ export function createPanel(){
             // Sub-toggles for fields + subFields in this panel
             const allSubs=[...def.fields.filter(f=>!f.noToggle).map(f=>({...f,isDashCard:!!f.dashCard,isSub:false})),...(def.subFields||[]).map(sf=>({...sf,isDashCard:false,isSub:true}))];
             if(allSubs.length>=1){
-                const subWrap=document.createElement('div');subWrap.className='sp-mgr-sub-toggles';
+                const subWrap=document.createElement('div');subWrap.className='sp-mgr-sub-toggles sp-mgr-sub-collapsed';
+                const subHead=document.createElement('button');subHead.type='button';subHead.className='sp-mgr-sub-head';
                 const dc={...DEFAULTS.dashCards,...profileSettings.dashCards};
                 const ft=profileSettings.fieldToggles||{};
                 for(const f of allSubs){
@@ -502,6 +511,14 @@ export function createPanel(){
                         scb.addEventListener('change',()=>{wxHint.style.display=wxOn()?'':'none'});
                     }
                 }
+                const hiddenCount=allSubs.filter(f=>f.isDashCard?(dc[f.dashCard]===false):(ft[f.key]===false)).length;
+                subHead.innerHTML=`<span class="sp-mgr-sub-arrow">\u25B8</span><span>${esc(t('Fields'))}</span><span class="sp-mgr-collapse-count">${allSubs.length-hiddenCount}/${allSubs.length}</span>`;
+                subHead.addEventListener('click',()=>{
+                    const collapsed=subWrap.classList.toggle('sp-mgr-sub-collapsed');
+                    const arrow=subHead.querySelector('.sp-mgr-sub-arrow');
+                    if(arrow)arrow.textContent=collapsed?'\u25B8':'\u25BE';
+                });
+                subWrap.insertBefore(subHead,subWrap.firstChild);
                 if(id==='characters'){
                     const addCharacterField=document.createElement('button');
                     addCharacterField.type='button';
@@ -509,7 +526,12 @@ export function createPanel(){
                     addCharacterField.textContent='+ '+t('Add custom character field');
                     addCharacterField.addEventListener('click',()=>{
                         const chatPanels=ensureChatPanels();
-                        let target=chatPanels.find(panel=>customPanelScope(panel)==='character'&&panel.enabled!==false);
+                        let target=chatPanels.find(panel=>
+                            customPanelScope(panel)==='character'
+                            &&panel.enabled!==false
+                            &&!panel.sourceLibraryId
+                            &&normalizePanelActivationMode(panel)==='always'
+                        );
                         if(!target){
                             const base=t('Character Custom Fields');
                             const used=new Set(chatPanels.map(panel=>String(panel?.name||'').trim().toLowerCase()));
@@ -517,7 +539,7 @@ export function createPanel(){
                             while(used.has(name.toLowerCase()))name=`${base} ${suffix++}`;
                             target={
                                 id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),
-                                name,scope:'character',enabled:true,fields:[],
+                                name,scope:'character',enabled:true,activationMode:'always',activationTags:[],fields:[],
                             };
                             chatPanels.push(target);
                         }
@@ -644,14 +666,27 @@ export function createPanel(){
         // Custom panels section
         const cpHeader=document.createElement('div');cpHeader.className='sp-mgr-subheader';cpHeader.textContent=t('Custom Panels');
         mgr.appendChild(cpHeader);
+        // Keep the two most common panel-management actions visible above the
+        // potentially very long custom-panel list, especially on mobile.
+        const cpQuickActions=document.createElement('div');cpQuickActions.className='sp-cp-manager-quick-actions';
+        mgr.appendChild(cpQuickActions);
         const cpList=document.createElement('div');cpList.id='sp-panel-mgr-custom';
         mgr.appendChild(cpList);
         renderCustomPanelsMgr(s,cpList,body);
         const addBtn=document.createElement('button');addBtn.className='sp-btn sp-mgr-add-panel';addBtn.textContent=t('+ Add Custom Panel');
         addBtn.addEventListener('click',()=>{
+            const previous=captureTrackerStructure();
             const _chatPanels=ensureChatPanels();
-            const newPanel={id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:'',scope:'global',fields:[{key:'',label:'',type:'text',desc:''}]};
+            const stamp=Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6);
+            const usedNames=new Set(_chatPanels.map(panel=>String(panel?.name||'').trim().toLowerCase()));
+            let draftNumber=1,draftName='';
+            do{draftName=`${t('Untitled')} ${draftNumber++}`}while(usedNames.has(draftName.toLowerCase()));
+            // Keep a newly-created panel valid while the user edits one input
+            // at a time. Empty name + empty key made every first edit fail the
+            // atomic panel validator, so the draft could never be completed.
+            const newPanel={id:'cp_'+stamp,name:draftName,scope:'global',activationMode:'always',activationTags:[],fields:[{key:'custom_field_'+stamp,label:t('Label'),type:'text',desc:t('Describe for AI...')}]};
             _chatPanels.push(newPanel);
+            reconcileTrackerStructureChange(previous);
             saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
             // Insert just the new section -- no full rebuild
             const d=_cachedNormData||{};
@@ -659,7 +694,7 @@ export function createPanel(){
             const newSec=mkSection(cpKey,newPanel.name||'Untitled',null,()=>{
                 const frag=document.createDocumentFragment();
                 for(const f of newPanel.fields){
-                    const r=document.createElement('div');r.className='sp-row';
+                    const r=document.createElement('div');r.className='sp-row sp-cp-display-row';
                     r.innerHTML=`<div class="sp-row-label">${esc(f.label||f.key)}</div>`;
                     const val=document.createElement('div');val.className='sp-row-value';val.textContent=str(d[f.key])||'\u2014';
                     r.appendChild(val);frag.appendChild(r);
@@ -667,6 +702,7 @@ export function createPanel(){
                 return frag;
             },s);
             // Insert before timeline or at end of body
+            newSec.classList.add('sp-section-custom');
             const tl=document.getElementById('sp-timeline');
             if(tl)body.insertBefore(newSec,tl);
             else{const footer=body.querySelector('.sp-gen-footer');if(footer)body.insertBefore(newSec,footer);else body.appendChild(newSec)}
@@ -674,15 +710,135 @@ export function createPanel(){
             requestAnimationFrame(()=>newSec.classList.remove('sp-panel-hidden'));
             toastr.success(t('Panel created'));
         });
-        mgr.appendChild(addBtn);
+        cpQuickActions.appendChild(addBtn);
 
         // v6.9.11: export/import + genre template buttons
         const cpActions=document.createElement('div');cpActions.className='sp-cp-actions';
+        const _clonePanels=(panels)=>typeof structuredClone==='function'?structuredClone(panels):JSON.parse(JSON.stringify(panels));
+        const _freshPanelCopies=(panels)=>stripPanelLibraryProvenance(_clonePanels(panels)).map(p=>({
+            ...p,
+            id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),
+        }));
+        const _refreshCustomPanels=()=>{
+            renderCustomPanelsMgr(s,cpList,body);
+            const snapshot=getLatestSnapshot();
+            if(snapshot)updatePanel(normalizeTracker(snapshot),true);
+            else if(_cachedNormData)updatePanel(_cachedNormData,true);
+            refreshSchemaPreview();
+        };
+        const _replaceChatPanels=(panels)=>{
+            const target=ensureChatPanels();
+            target.splice(0,target.length,..._freshPanelCopies(panels));
+            const synced=syncPinnedLibraryIntoChat(target,{save:false});
+            return {ok:true,finalCount:target.length,pinnedAdded:synced.added,pinnedSkipped:synced.skipped};
+        };
+        const _appendChatPanels=(panels)=>{
+            const target=ensureChatPanels();
+            const existingKeys=new Set(target.flatMap(p=>(Array.isArray(p?.fields)?p.fields:[])
+                .map(f=>customPanelScope(p)+':'+String(f?.key||'').toLowerCase()).filter(k=>!k.endsWith(':'))));
+            const incomingKeys=panels.flatMap(p=>(Array.isArray(p?.fields)?p.fields:[])
+                .map(f=>customPanelScope(p)+':'+String(f?.key||'').toLowerCase()).filter(k=>!k.endsWith(':')));
+            const collisions=[...new Set(incomingKeys.filter(k=>existingKeys.has(k)).map(k=>k.split(':').slice(1).join(':')))];
+            if(collisions.length)return{ok:false,error:`Custom field keys already exist: ${collisions.join(', ')}`};
+            const usedNames=new Set(target.map(p=>String(p?.name||'').trim().toLowerCase()).filter(Boolean));
+            for(const p of _freshPanelCopies(panels)){
+                const base=p.name||'Untitled';let candidate=base;let suffix=2;
+                while(usedNames.has(candidate.toLowerCase()))candidate=`${base} (imported ${suffix++})`;
+                p.name=candidate;usedNames.add(candidate.toLowerCase());target.push(p);
+            }
+            return{ok:true,finalCount:target.length,pinnedAdded:0,pinnedSkipped:0};
+        };
+        const _commitPanelSet=(panels,mode)=>{
+            const previous=captureTrackerStructure();
+            const result=mode==='append'?_appendChatPanels(panels):_replaceChatPanels(panels);
+            if(!result.ok)return result;
+            reconcileTrackerStructureChange(previous);
+            saveChatPanels();_refreshCustomPanels();
+            return result;
+        };
+        const libraryWrap=document.createElement('div');libraryWrap.className='sp-cp-library sp-cp-library-collapsed';
+        let libraryCollapsed=true;
+        const renderPanelLibrary=()=>{
+            libraryWrap.innerHTML='';
+            libraryWrap.classList.toggle('sp-cp-library-collapsed',libraryCollapsed);
+            const library=loadPanelLibrary();
+            const header=document.createElement('button');header.type='button';header.className='sp-cp-library-header';
+            header.setAttribute('aria-expanded',String(!libraryCollapsed));
+            header.setAttribute('aria-label',t('Panel Library'));
+            const heading=document.createElement('span');heading.className='sp-cp-library-heading';
+            const chevron=document.createElement('span');chevron.className='sp-cp-library-chevron';chevron.textContent='›';chevron.setAttribute('aria-hidden','true');
+            const title=document.createElement('span');title.className='sp-cp-library-title';title.textContent=t('Panel Library');
+            const count=document.createElement('span');count.className='sp-cp-library-count';count.textContent=String(library.length);
+            heading.appendChild(chevron);heading.appendChild(title);header.appendChild(heading);header.appendChild(count);libraryWrap.appendChild(header);
+            header.addEventListener('click',()=>{libraryCollapsed=!libraryCollapsed;renderPanelLibrary()});
+            const content=document.createElement('div');content.className='sp-cp-library-content';libraryWrap.appendChild(content);
+            if(!library.length){const empty=document.createElement('div');empty.className='sp-cp-library-empty';empty.textContent=t('No saved panel sets yet');content.appendChild(empty);return}
+            const list=document.createElement('div');list.className='sp-cp-library-list';
+            for(const entry of library){
+                const row=document.createElement('div');row.className='sp-cp-library-item'+(entry.enabled?' sp-cp-library-item-on':'');
+                const meta=document.createElement('div');meta.className='sp-cp-library-meta';
+                const name=document.createElement('div');name.className='sp-cp-library-name';name.textContent=entry.name;
+                const sub=document.createElement('div');sub.className='sp-cp-library-sub';sub.textContent=t('{count} panels',{count:entry.panels.length});
+                meta.appendChild(name);meta.appendChild(sub);row.appendChild(meta);
+                const actions=document.createElement('div');actions.className='sp-cp-library-actions';
+                const pinBtn=document.createElement('button');pinBtn.type='button';pinBtn.className='sp-btn sp-btn-sm'+(entry.enabled?' sp-cp-library-on':'');
+                pinBtn.textContent=entry.enabled?t('On'):t('Off');
+                pinBtn.title=entry.enabled?t('Pinned from library until turned off'):t('Pin this set in every chat until turned off');
+                pinBtn.addEventListener('click',()=>{
+                    const previous=captureTrackerStructure();
+                    const toggled=setPanelSetEnabled(loadPanelLibrary(),entry.id,!entry.enabled);
+                    if(!toggled.entry){toastr.error(t('Could not update panel library'));return}
+                    if(!savePanelLibrary(toggled.library)){toastr.error(t('Could not save panel library'));return}
+                    const target=ensureChatPanels();
+                    const synced=syncPinnedLibraryIntoChat(target,{save:true,library:toggled.library});
+                    reconcileTrackerStructureChange(previous);
+                    _refreshCustomPanels();
+                    renderPanelLibrary();
+                    toastr.info(toggled.entry.enabled
+                        ?t('Panel set pinned: {name}',{name:toggled.entry.name})
+                        :t('Panel set unpinned: {name}',{name:toggled.entry.name}));
+                    if(synced.skipped){
+                        toastr.warning(`${t('Panel Keys Already Exist')} (${synced.skipped})`);
+                    }
+                    if(synced.added||synced.removed||synced.skipped)log('Pinned library sync',synced);
+                });
+                const replaceBtn=document.createElement('button');replaceBtn.className='sp-btn sp-btn-sm';replaceBtn.textContent=t('Replace');replaceBtn.disabled=entry.enabled===true;replaceBtn.title=entry.enabled?t('Turn off this pinned set before applying it as a local copy.'):t("Replace this chat's local custom panels with this set");
+                replaceBtn.addEventListener('click',async()=>{
+                    const validation=validateCustomPanels(entry.panels);
+                    if(!validation.ok){toastr.error(t('Panel set is invalid: {error}',{error:validation.errors.join('; ')}));return}
+                    if(!await spConfirm(t('Replace Custom Panels'),t('Replace all custom panels in this chat with "{name}"?',{name:entry.name}),{okLabel:t('Replace'),cancelLabel:t('Cancel')}))return;
+                    const result=_commitPanelSet(validation.panels,'replace');
+                    if(!result.ok){toastr.error(t('Apply failed: {error}',{error:result.error}));return}
+                    toastr.success(t('Panel set applied: {name}',{name:entry.name}));
+                });
+                const appendBtn=document.createElement('button');appendBtn.className='sp-btn sp-btn-sm';appendBtn.textContent=t('Append');appendBtn.disabled=entry.enabled===true;appendBtn.title=entry.enabled?t('This set is already pinned into the chat. Turn it off before appending a local copy.'):t('Append this set as local custom panels');
+                appendBtn.addEventListener('click',()=>{
+                    const validation=validateCustomPanels(entry.panels);
+                    if(!validation.ok){toastr.error(t('Panel set is invalid: {error}',{error:validation.errors.join('; ')}));return}
+                    const result=_commitPanelSet(validation.panels,'append');
+                    if(!result.ok){toastr.error(t('Apply failed: {error}',{error:result.error}));return}
+                    toastr.success(t('Panel set appended: {name}',{name:entry.name}));
+                });
+                const deleteBtn=document.createElement('button');deleteBtn.className='sp-btn sp-btn-sm sp-cp-library-delete';deleteBtn.textContent='\u00d7';deleteBtn.title=t('Remove from library');
+                deleteBtn.addEventListener('click',async()=>{
+                    if(!await spConfirm(t('Remove Panel Set'),t('Remove "{name}" from the local library?',{name:entry.name}),{okLabel:t('Remove'),cancelLabel:t('Cancel')}))return;
+                    const target=ensureChatPanels();
+                    const nextLibrary=removePanelSet(loadPanelLibrary(),entry.id);
+                    if(!savePanelLibrary(nextLibrary)){toastr.error(t('Could not save panel library'));return}
+                    const detached=detachLibraryPanels(target,entry.id);
+                    if(detached){saveChatPanels();_refreshCustomPanels()}
+                    renderPanelLibrary();
+                    if(detached)toastr.info(t('Current chat kept {count} panel(s) as local copies.',{count:detached}));
+                });
+                actions.appendChild(pinBtn);actions.appendChild(replaceBtn);actions.appendChild(appendBtn);actions.appendChild(deleteBtn);row.appendChild(actions);list.appendChild(row);
+            }
+            content.appendChild(list);
+        };
 
         // Export panels
         const exportBtn=document.createElement('button');exportBtn.className='sp-btn sp-btn-sm';exportBtn.textContent='\u2913 '+t('Export Panels');
         exportBtn.addEventListener('click',()=>{
-            const data=JSON.stringify(getActivePanels(s),null,2);
+            const data=JSON.stringify(stripPanelLibraryProvenance(getActivePanels(s)),null,2);
             const blob=new Blob([data],{type:'application/json'});
             const a=document.createElement('a');a.href=URL.createObjectURL(blob);
             a.download='scenepulse-panels.json';a.click();URL.revokeObjectURL(a.href);
@@ -690,7 +846,7 @@ export function createPanel(){
         });
         cpActions.appendChild(exportBtn);
 
-        // Import panels
+        // Import panels — save once to the local library, then apply to this chat.
         const importBtn=document.createElement('button');importBtn.className='sp-btn sp-btn-sm';importBtn.textContent='\u2912 '+t('Import Panels');
         importBtn.addEventListener('click',()=>{
             const input=document.createElement('input');input.type='file';input.accept='.json';
@@ -700,39 +856,71 @@ export function createPanel(){
                     const text=await file.text();
                     const imported=JSON.parse(text);
                     const validation=validateCustomPanels(imported);
-                    if(!validation.ok){
-                        toastr.error(t('Import failed: {error}',{error:validation.errors.join('; ')}));
-                        return;
-                    }
-                    const _chatPanels=ensureChatPanels();
-                    const existingKeys=new Set(_chatPanels.flatMap(p=>(Array.isArray(p?.fields)?p.fields:[])
-                        .map(f=>customPanelScope(p)+':'+String(f?.key||'').toLowerCase()).filter(k=>!k.endsWith(':'))));
-                    const importedKeys=validation.panels.flatMap(p=>p.fields.map(f=>customPanelScope(p)+':'+f.key));
-                    const collisions=importedKeys.filter(k=>existingKeys.has(k)).map(k=>k.split(':').slice(1).join(':'));
-                    if(collisions.length){
-                        toastr.error(t('Import failed: {error}',{error:`Custom field keys already exist: ${[...new Set(collisions)].join(', ')}`}));
-                        return;
-                    }
+                    if(!validation.ok){toastr.error(t('Import failed: {error}',{error:validation.errors.join('; ')}));return}
+                    const suggested=panelSetNameFromFilename(file.name);
+                    const setName=await spPrompt(t('Save Imported Panel Set'),t('Choose a name for this reusable panel set.'),{value:suggested,placeholder:t('Panel set name'),okLabel:t('Save & Apply'),cancelLabel:t('Cancel')});
+                    if(!setName)return;
                     const previous=captureTrackerStructure();
-                    const usedNames=new Set(_chatPanels.map(p=>String(p?.name||'').trim().toLowerCase()).filter(Boolean));
-                    for(const p of validation.panels){
-                        const base=p.name;
-                        let candidate=base;
-                        let suffix=2;
-                        while(usedNames.has(candidate.toLowerCase()))candidate=`${base} (imported ${suffix++})`;
-                        p.name=candidate;
-                        usedNames.add(candidate.toLowerCase());
-                        p.id='cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,8);
-                        _chatPanels.push(p);
+                    const stored=upsertPanelSet(loadPanelLibrary(),{name:setName,panels:validation.panels,sourceFile:file.name});
+                    if(!savePanelLibrary(stored.library)){toastr.error(t('Could not save panel library'));return}
+                    if(stored.entry.enabled===true){
+                        ensureChatPanels();
+                        reconcileTrackerStructureChange(previous);
+                        _refreshCustomPanels();
+                        renderPanelLibrary();
+                        toastr.success(t('Updated pinned panel set: {name}',{name:stored.entry.name}));
+                        return;
                     }
-                    reconcileTrackerStructureChange(previous);
-                    saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
+                    renderPanelLibrary();
+                    let result=_commitPanelSet(validation.panels,'append');
+                    if(!result.ok){
+                        const replace=await spConfirm(t('Panel Keys Already Exist'),t('{error}\n\nReplace the current custom panels with this imported set instead?',{error:result.error}),{okLabel:t('Replace'),cancelLabel:t('Keep Saved Only')});
+                        if(!replace){toastr.info(t('Panel set saved to library: {name}',{name:setName}));return}
+                        result=_commitPanelSet(validation.panels,'replace');
+                    }
+                    if(!result.ok){toastr.error(t('Import failed: {error}',{error:result.error}));return}
                     toastr.success(t('Imported panels: {count}',{count:validation.panels.length}));
                 }catch(e){toastr.error(t('Import failed: {error}',{error:e.message}))}
             });
             input.click();
         });
         cpActions.appendChild(importBtn);
+
+        // Save / clear actions for the current chat.
+        const saveSetBtn=document.createElement('button');saveSetBtn.className='sp-btn sp-btn-sm';saveSetBtn.textContent='\u2605 '+t('Save Current');
+        saveSetBtn.addEventListener('click',async()=>{
+            const validation=validateCustomPanels(getActivePanels(s));
+            if(!validation.ok||!validation.panels.length){toastr.error(t('There are no valid custom panels to save'));return}
+            const name=await spPrompt(t('Save Panel Set'),t('Save the current custom panels to the local library.'),{value:t('My Panel Set'),placeholder:t('Panel set name'),okLabel:t('Save'),cancelLabel:t('Cancel')});
+            if(!name)return;
+            const previous=captureTrackerStructure();
+            const result=upsertPanelSet(loadPanelLibrary(),{name,panels:validation.panels});
+            if(!savePanelLibrary(result.library)){toastr.error(t('Could not save panel library'));return}
+            if(result.entry.enabled===true){
+                ensureChatPanels();
+                reconcileTrackerStructureChange(previous);
+                _refreshCustomPanels();
+            }
+            renderPanelLibrary();
+            toastr.success(result.entry.enabled===true
+                ?t('Pinned panel set updated and synced: {name}',{name})
+                :(result.replaced?t('Panel set updated: {name}',{name}):t('Panel set saved: {name}',{name})));
+        });
+        cpActions.appendChild(saveSetBtn);
+        const clearBtn=document.createElement('button');clearBtn.className='sp-btn sp-btn-sm sp-cp-danger-action';clearBtn.textContent='\u2715 '+t('Clear All');
+        clearBtn.addEventListener('click',async()=>{
+            if(!getActivePanels(s).length){toastr.info(t('No custom panels to clear'));return}
+            const pinnedSets=loadPanelLibrary().filter(entry=>entry?.enabled===true);
+            const confirmMessage=pinnedSets.length
+                ?t('Remove all local custom panels from this chat? Pinned library panels will remain until their source sets are turned off.')
+                :t('Remove all custom panels from this chat?');
+            if(!await spConfirm(t('Clear Custom Panels'),confirmMessage,{okLabel:t('Clear All'),cancelLabel:t('Cancel')}))return;
+            const result=_commitPanelSet([],'replace');
+            if(!result.ok){toastr.error(t('Could not clear custom panels'));return}
+            if(result.finalCount>0)toastr.info(t('Local panels cleared. {count} pinned library panel(s) remain.',{count:result.finalCount}));
+            else toastr.info(t('All custom panels cleared'));
+        });
+        cpQuickActions.appendChild(clearBtn);
 
         // Genre template dropdown
         const tmplBtn=document.createElement('button');tmplBtn.className='sp-btn sp-btn-sm';tmplBtn.textContent='\u2606 '+t('From Template');
@@ -819,20 +1007,20 @@ export function createPanel(){
         tmplBtn.addEventListener('click',()=>{
             // Toggle: if menu already open, close it
             const existing=document.querySelector('.sp-cp-tmpl-menu');
-            if(existing){existing.remove();return}
+            if(existing){existing._spCleanup?.();existing.remove();return}
             // Build dropdown
             const menu=document.createElement('div');menu.className='sp-cp-tmpl-menu';
+            let cleanupPosition=()=>{};
             for(const[name,fields]of Object.entries(_TEMPLATES)){
                 const localizedName=t(name);
-                const item=document.createElement('div');item.className='sp-cp-tmpl-item';item.textContent=localizedName;
+                const item=document.createElement('button');item.type='button';item.className='sp-cp-tmpl-item';item.textContent=localizedName;
                 item.addEventListener('click',()=>{
-                    const previous=captureTrackerStructure();
-                    const _chatPanels=ensureChatPanels();
                     const localizedFields=structuredClone(fields).map(field=>({...field,label:t(field.label)}));
-                    _chatPanels.push({id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:localizedName,scope:'global',enabled:true,fields:localizedFields});
-                    reconcileTrackerStructureChange(previous);
-                    saveChatPanels();renderCustomPanelsMgr(s,cpList,body);
-                    menu.remove();toastr.success(t('Template added: {template}',{template:localizedName}));
+                    const panel={id:'cp_'+Date.now()+'_'+Math.random().toString(36).slice(2,6),name:localizedName,scope:'global',enabled:true,activationMode:'always',activationTags:[],fields:localizedFields};
+                    const validation=validateCustomPanels([panel]);
+                    const result=validation.ok?_commitPanelSet(validation.panels,'append'):{ok:false,error:validation.errors?.[0]||t('Invalid panel template')};
+                    if(!result.ok){toastr.error(t('Template could not be added: {error}',{error:result.error}));return}
+                    cleanupPosition();menu.remove();toastr.success(t('Template added: {template}',{template:localizedName}));
                 });
                 menu.appendChild(item);
             }
@@ -840,20 +1028,54 @@ export function createPanel(){
             // clipped by the Panel Manager's overflow. Place above the
             // button if there's room, otherwise below.
             document.body.appendChild(menu);
-            const _btnRect=tmplBtn.getBoundingClientRect();
-            const _menuH=Math.min(320, Object.keys(_TEMPLATES).length*36+8);
-            if(_btnRect.top-_menuH-4>8){
-                menu.style.bottom=(window.innerHeight-_btnRect.top+4)+'px';
-                menu.style.right=(window.innerWidth-_btnRect.right)+'px';
-            }else{
-                menu.style.top=(_btnRect.bottom+4)+'px';
-                menu.style.right=(window.innerWidth-_btnRect.right)+'px';
-            }
-            const dismiss=e=>{if(!menu.contains(e.target)&&e.target!==tmplBtn){menu.remove();document.removeEventListener('click',dismiss)}};
+            const positionMenu=()=>{
+                const r=tmplBtn.getBoundingClientRect();
+                const vv=window.visualViewport;
+                const vLeft=vv?.offsetLeft||0;
+                const vTop=vv?.offsetTop||0;
+                const vWidth=vv?.width||window.innerWidth;
+                const vHeight=vv?.height||window.innerHeight;
+                const vRight=vLeft+vWidth;
+                const vBottom=vTop+vHeight;
+                const margin=8;
+                menu.style.maxHeight=Math.max(96,Math.min(320,vHeight-margin*2))+'px';
+                menu.style.maxWidth=Math.max(160,vWidth-margin*2)+'px';
+                menu.style.top='0px';menu.style.left='0px';menu.style.right='auto';menu.style.bottom='auto';
+                const mr=menu.getBoundingClientRect();
+                const menuW=Math.min(mr.width,vWidth-margin*2);
+                const menuH=Math.min(mr.height,vHeight-margin*2);
+                const below=vBottom-r.bottom-margin;
+                const above=r.top-vTop-margin;
+                let top=(below>=menuH||below>=above)?r.bottom+4:r.top-menuH-4;
+                top=Math.max(vTop+margin,Math.min(top,vBottom-menuH-margin));
+                let left=r.right-menuW;
+                left=Math.max(vLeft+margin,Math.min(left,vRight-menuW-margin));
+                menu.style.top=Math.round(top)+'px';
+                menu.style.left=Math.round(left)+'px';
+            };
+            positionMenu();
+            const dismiss=e=>{
+                if(!menu.contains(e.target)&&e.target!==tmplBtn){cleanupPosition();menu.remove()}
+            };
+            cleanupPosition=()=>{
+                document.removeEventListener('click',dismiss);
+                window.removeEventListener('resize',positionMenu);
+                window.visualViewport?.removeEventListener('resize',positionMenu);
+                window.visualViewport?.removeEventListener('scroll',positionMenu);
+            };
+            menu._spCleanup=cleanupPosition;
+            window.addEventListener('resize',positionMenu,{passive:true});
+            window.visualViewport?.addEventListener('resize',positionMenu,{passive:true});
+            window.visualViewport?.addEventListener('scroll',positionMenu,{passive:true});
             setTimeout(()=>document.addEventListener('click',dismiss),0);
         });
         cpActions.appendChild(tmplBtn);
-        mgr.appendChild(cpActions);
+        // Keep management tools and the reusable library above the potentially
+        // long/expanded panel editor list. This keeps Import/Save/Clear/Library
+        // discoverable on mobile instead of several screens below the first card.
+        mgr.insertBefore(cpActions,cpList);
+        mgr.insertBefore(libraryWrap,cpList);
+        renderPanelLibrary();
 
         body.insertBefore(mgr,body.firstChild);
         } catch(e) { err('Panel Manager failed to open:', e); btn.classList.remove('sp-tb-active'); return; }
