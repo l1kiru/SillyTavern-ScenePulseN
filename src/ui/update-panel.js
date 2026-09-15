@@ -1,3 +1,4 @@
+import { renderStoryThreads, renderCharacterContinuity, renderRelationshipContinuity, syncContinuityVisibility } from './continuity-view.js';
 // src/ui/update-panel.js — The massive updatePanel function (~960 lines)
 import { log, err } from '../logger.js';
 import { esc, clamp, str, spConfirm } from '../utils.js';
@@ -719,6 +720,9 @@ function _updatePanelInner(d,_force=false){
             mkEditable(sv, () => d.sceneSummary || '', v => { d.sceneSummary = v; const snap = getLatestSnapshot(); if (snap) snap.sceneSummary = v; });
             sr.appendChild(sv); f.appendChild(sr);
         }
+        const continuity=document.createElement('div');
+        continuity.innerHTML=renderStoryThreads(d.storyThreads);
+        if(continuity.innerHTML)f.appendChild(continuity);
         const sceneFields=[[t('Tension'),'sceneTension'],[t('Topic'),'sceneTopic'],[t('Mood'),'sceneMood'],[t('Interaction'),'sceneInteraction'],[t('Elapsed'),'elapsed'],[t('Sounds'),'soundEnvironment']];
         for(const[l,key]of sceneFields){
             const r=document.createElement('div');r.className='sp-row';r.dataset.ft=key;
@@ -901,6 +905,7 @@ function _updatePanelInner(d,_force=false){
 const _phaseFam=relPhaseFamily(rel.relPhase);
 if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${esc(rel.relType)}">${esc(rel.relType)}</span>`;if(rel.relPhase)hh+=`<span class="sp-rel-phase-badge" data-ft="rel_phase" data-family="${esc(_phaseFam)}" title="${esc(rel.relPhase)}">${esc(rel.relPhase)}</span>`;hh+=`</div>`;bl.innerHTML=hh;bl.querySelector('.sp-rel-header').addEventListener('click',(e)=>{if(e.target.closest('.sp-char-portrait'))return;bl.classList.toggle('sp-card-open')});
         const _body=document.createElement('div');_body.className='sp-rel-body';
+        _body.insertAdjacentHTML('beforeend', renderRelationshipContinuity(rel));
         {const meta=document.createElement('div');meta.className='sp-rel-meta';{const ttItem=document.createElement('div');ttItem.className='sp-rel-meta-item';ttItem.dataset.ft='rel_timeknown';ttItem.innerHTML=`<span class="sp-rel-meta-label">${t('Time Known')}</span>`;const ttVal=document.createElement('span');ttVal.textContent=rel.timeTogether||'\u2014';if(!rel.timeTogether){ttItem.classList.add('sp-empty-field');ttVal.dataset.placeholder=t('Time Known')}mkEditable(ttVal,()=>rel.timeTogether||'',v=>{rel.timeTogether=v;const snap=getLatestSnapshot();if(snap){const sr=snap.relationships?.find(r=>r.name===rel.name);if(sr)sr.timeTogether=v}});ttItem.appendChild(ttVal);meta.appendChild(ttItem)}{const msItem=document.createElement('div');msItem.className='sp-rel-meta-item sp-rel-milestone';msItem.dataset.ft='rel_milestone';msItem.innerHTML=`<span class="sp-rel-meta-label">${t('Milestone')}</span>`;const msVal=document.createElement('span');msVal.textContent=rel.milestone||'\u2014';if(!rel.milestone){msItem.classList.add('sp-empty-field');msVal.dataset.placeholder='Milestone'}mkEditable(msVal,()=>rel.milestone||'',v=>{rel.milestone=v;const snap=getLatestSnapshot();if(snap){const sr=snap.relationships?.find(r=>r.name===rel.name);if(sr)sr.milestone=v}});msItem.appendChild(msVal);meta.appendChild(msItem)}_body.appendChild(meta)}
         // Unique per-meter delta icons — emotionally distinct UP and DOWN variants
         const _H='<svg viewBox="0 0 14 14" width="13" height="13">';
@@ -1286,6 +1291,8 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                 _cbody.appendChild(gr);
             }
 
+            _cbody.insertAdjacentHTML('beforeend', renderCharacterContinuity(ch));
+
             // ── FERTILITY: explicit header fixes the pre-v6.8.16 confusion
             // where STATUS/NOTES appeared as orphan fields with no context.
             // Now any user glancing at the card sees "FERTILITY" as a clear
@@ -1648,6 +1655,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
         if(!on&&_forceShowHidden)el.classList.add('sp-ft-force-shown');
         else el.classList.remove('sp-ft-force-shown');
     });
+    syncContinuityVisibility(body);
     log('\u23F1 updatePanel:',((performance.now()-_perfStart)|0)+'ms');
     } catch(_renderErr) {
         // Error boundary: restore previous panel content on failure

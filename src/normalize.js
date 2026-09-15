@@ -1,3 +1,4 @@
+import { normalizeStoryThreads, normalizeCharacterContinuity, normalizeRelationshipContinuity } from './continuity.js';
 // ScenePulse — Normalization Module
 // Extracted from index.js lines 950-1356
 
@@ -176,6 +177,7 @@ export function normalizeTracker(d){
     o.sceneMood=g(['scenemood','mood','emotionaltone','atmosphere','tone','emotion']);
     o.sceneInteraction=g(['sceneinteraction','interaction','interactiontheme','dynamic','interactiontype']);
     o.sceneTension=g(['scenetension','tension','tensionlevel','intensity','stakes']);
+    if (Object.hasOwn(d, 'storyThreads')) o.storyThreads = normalizeStoryThreads(d.storyThreads);
     o.sceneSummary=g(['scenesummary','summary','description','currentsummary','overview']);
     const wit=flat['witnesses'];o.witnesses=Array.isArray(wit)?wit:[];
     // v6.9.10: strip witness names that match any tracked character.
@@ -264,6 +266,7 @@ export function normalizeTracker(d){
         const nr={name:rn};
         nr.relType=r.relType||r.type||'';nr.relPhase=r.relPhase||r.phase||'';
         nr.timeTogether=r.timeTogether||r.duration||r.known||'';
+        normalizeRelationshipContinuity(r, nr);
         nr.milestone=r.milestone||r.nextMilestone||'';
         for(const k of['affection','trust','desire','stress','compatibility']){
             const raw=r[k];let val=0,label='';
@@ -846,6 +849,7 @@ export function normalizeChar(ch){
     }
     o.role=g(['role','identity','who','emotion','title']);
     o.innerThought=g(['innerthought','inner_thought','thought','thinking','monologue']);
+    normalizeCharacterContinuity(ch, o);
     o.immediateNeed=g(['immediateneed','immediate_need','need','doing','trying','urgentaction']);
     o.shortTermGoal=g(['shorttermgoal','short_term_goal','shortterm','neargoal']);
     o.longTermGoal=g(['longtermgoal','long_term_goal','longterm','lifemotivation','overarchinggoal']);

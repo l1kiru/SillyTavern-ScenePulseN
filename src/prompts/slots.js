@@ -120,7 +120,7 @@ const _CRITICAL_RULES = `## CRITICAL RULES
 
 // Template var: ${language}
 const _LANGUAGE = `## LANGUAGE
-All narrative string values MUST be in \${language}. This includes: sceneMood, sceneTopic, sceneSummary, sceneInteraction, soundEnvironment, character innerThought, goals, appearance descriptions, quest names and details, northStar, relationship labels and milestones, plotBranch names and hooks, custom field values.
+All narrative string values MUST be in \${language}. This includes: sceneMood, sceneTopic, sceneSummary, sceneInteraction, soundEnvironment, character innerThought, goals, appearance descriptions, quest names and details, northStar, relationship labels and milestones, plotBranch names and hooks, custom field values, continuity descriptions and sources.
 JSON keys, enum values (critical/high/moderate/low/resolved, calm/low/moderate/high/critical, pristine/neat/casual/etc.), and time/date formats remain in English.`;
 
 const _NAME_AWARENESS = `1. Is the character's CURRENT canonical name a PLACEHOLDER or a REAL NAME?

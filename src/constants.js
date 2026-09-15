@@ -63,6 +63,7 @@ export const BUILTIN_PANELS={
             {key:'sceneInteraction',type:'string',desc:'How characters are engaging.',label:'Interaction'},
             {key:'sceneTension',type:'enum',options:['calm','low','moderate','high','critical'],desc:'Current tension level.',label:'Tension'},
             {key:'sceneSummary',type:'string',desc:'Brief scene summary.',label:'Summary'},
+            {key:'storyThreads',type:'threadArray',optional:true,desc:'Established promises, appointments and unresolved plot threads.',label:'Story Threads'},
             {key:'soundEnvironment',type:'string',desc:'Audible sounds right now.',label:'Sounds'},
             {key:'charactersPresent',type:'array',itemType:'string',desc:'Names of all characters in the scene.',label:'Present'},
             {key:'witnesses',type:'array',itemType:'string',desc:'Background observers without a character card \u2014 bystanders, unnamed staff, security cameras, crowd members who saw or heard what happened. Do NOT include anyone already in characters[]. Empty array [] if the scene is private or unobserved.',label:'Witnesses'}
@@ -84,6 +85,8 @@ export const BUILTIN_PANELS={
         subFields:[
             {key:'rel_type',label:'Type Badge'},{key:'rel_phase',label:'Phase Badge'},
             {key:'rel_timeknown',label:'Time Known'},{key:'rel_milestone',label:'Milestone'},
+            {key:'rel_lastReaction',label:'Current Reaction'},{key:'rel_relationshipBasis',label:'Relationship Basis'},
+            {key:'rel_changeReason',label:'Reason for Change'},{key:'rel_unresolvedConflicts',label:'Unresolved Conflicts'},
             {key:'rel_affection',label:'Affection'},{key:'rel_trust',label:'Trust'},
             {key:'rel_desire',label:'Desire'},{key:'rel_stress',label:'Stress'},
             {key:'rel_compatibility',label:'Compat'},{key:'rel_labels',label:'Meter Labels'}
@@ -97,6 +100,8 @@ export const BUILTIN_PANELS={
             {key:'char_archetype',label:'Archetype'},
             {key:'char_innerThought',label:'Inner Thought'},{key:'char_immediateNeed',label:'Immediate Need'},
             {key:'char_shortTermGoal',label:'Short-Term Goal'},{key:'char_longTermGoal',label:'Long-Term Goal'},
+            {key:'char_innerThoughtBasis',label:'Thought Basis'},{key:'char_currentIntent',label:'Current Intention'},
+            {key:'char_knowledge',label:'Knowledge and Beliefs'},
             {key:'char_hair',label:'Hair'},{key:'char_face',label:'Face'},
             {key:'char_outfit',label:'Outfit'},{key:'char_posture',label:'Posture'},{key:'char_proximity',label:'Proximity'},
             {key:'char_notableDetails',label:'Notable Details'},

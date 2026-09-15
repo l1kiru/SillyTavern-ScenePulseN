@@ -21,6 +21,7 @@ import { updateWeatherOverlay, clearWeatherOverlay } from './weather.js';
 import { updateTimeTint, clearTimeTint } from './time-tint.js';
 import { showLoadingOverlay, clearLoadingOverlay, showStopButton, hideStopButton, startElapsedTimer, stopElapsedTimer, showThoughtLoading, clearThoughtLoading } from './loading.js';
 import { updatePanel } from './update-panel.js';
+import { syncContinuityVisibility } from './continuity-view.js';
 import { closeDiffViewer } from './diff-viewer.js';
 import { updateThoughts } from './thoughts.js';
 import { renderCustomPanelsMgr } from '../settings-ui/custom-panels.js';
@@ -398,6 +399,7 @@ export function createPanel(){
                             const k=el.dataset.ft;
                             if(profileSettings.fieldToggles[k]!==false)el.style.display='';
                         });
+                        syncContinuityVisibility(body);
                         savePanelSettings();
                     } else {
                         nextSub.querySelectorAll('input').forEach(i=>{i.disabled=true});
@@ -424,7 +426,7 @@ export function createPanel(){
                     const fKey=f.key;const fLabel=f.label||f.key;
                     const isOn=f.isDashCard?(dc[f.dashCard]!==false):(ft[fKey]!==false);
                     const sub=document.createElement('label');sub.className='sp-mgr-sub-toggle';
-                    sub.innerHTML=`<input type="checkbox" ${isOn?'checked':''}><span>${esc(fLabel)}</span>`;
+                    sub.innerHTML=`<input type="checkbox" ${isOn?'checked':''}><span>${esc(t(fLabel))}</span>`;
                     const scb=sub.querySelector('input');
                     scb.addEventListener('change',()=>{
                         if(f.isDashCard){
@@ -459,6 +461,7 @@ export function createPanel(){
                             profileSettings.fieldToggles[fKey]=scb.checked;
                             // CSS-only toggle -- zero rebuilds
                             body.querySelectorAll(`[data-ft="${fKey}"]`).forEach(el=>{el.style.display=scb.checked?'':'none'});
+                            syncContinuityVisibility(body);
                             // char_innerThought controls the floating thoughts panel
                             if(fKey==='char_innerThought'){
                                 s.showThoughts=scb.checked;
@@ -542,6 +545,7 @@ export function createPanel(){
             togglesDiv.querySelectorAll('.sp-mgr-sub-toggles').forEach(sw=>{sw.classList.remove('sp-mgr-sub-disabled')});
             body.querySelectorAll('.sp-panel-hidden').forEach(el=>el.classList.remove('sp-panel-hidden'));
             body.querySelectorAll('[data-ft]').forEach(el=>{el.style.display=''});
+            syncContinuityVisibility(body);
             body.querySelectorAll('[data-card]').forEach(el=>{el.style.display=''});
             for(const bid of['sp-tb-weather','sp-tb-timeTint','sp-tb-thoughts','sp-tb-sceneTrans']){
                 const b=document.getElementById(bid);if(b)b.checked=true;
@@ -578,6 +582,7 @@ export function createPanel(){
             const sectionMap={dashboard:'.sp-env-permanent',scene:'[data-key="scene"]',quests:'[data-key="quests"]',relationships:'[data-key="relationships"]',characters:'[data-key="characters"]',storyIdeas:'[data-key="branches"]'};
             for(const sel of Object.values(sectionMap)){const el=body.querySelector(sel);if(el)el.classList.add('sp-panel-hidden')}
             body.querySelectorAll('[data-ft]').forEach(el=>{el.style.display='none'});
+            syncContinuityVisibility(body);
             body.querySelectorAll('[data-card]').forEach(el=>{el.style.display='none'});
             // Disable overlays + toolbar buttons
             clearWeatherOverlay();clearTimeTint();

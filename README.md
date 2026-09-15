@@ -98,6 +98,14 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 - Smart name resolution when models omit the `name` field
 <img width="860" height="326" alt="image" src="https://github.com/user-attachments/assets/cb314a4e-a6d4-449d-96ad-929556564d40" />
 
+### Scene Continuity
+- **Final-state context** — Together and Separate pass the last recorded state into the next response (Separate respects **Embed snapshots**). State provides context; it does not prescribe dialogue, tone, actions, or future outcomes. ScenePulse does not reject or regenerate narrative responses for deviating from prior state.
+- **Character context** — current intention, the evidence or interpretation behind an inner thought, and knowledge/beliefs/secrets with their established sources. Knowing something as the model or player does not establish that an NPC knows it.
+- **Story threads** — a compact record of established promises, appointments, and loose ends, with source and any established time/condition. Resolved threads remain visible for one snapshot. No off-screen ticking or automatic event completion.
+- **Relationship context** — current reaction, enduring relationship basis, reasons for meter changes, and unresolved conflicts. Meters describe the narrative; no fixed progression rules force the story to fit a score.
+- Available in dynamic profiles through the existing **Scene Details**, **Characters**, and **Relationships** field toggles. Inspect the collapsible context sections in the dashboard and character wiki. Explicit custom schemas and full custom prompts remain user-controlled; add the new fields there to opt in.
+- Knowledge, relationship foundations, conflicts, and open threads persist across delta updates and full refreshes. Current intentions, thought explanations, reactions, and change reasons are refreshed rather than treated as new evidence on later turns. States remain tied to their message and swipe.
+
 ### Character Wiki
 - **Full-screen browser** for every character ever encountered, not just those currently in scene
 - Walks all snapshots once on open to aggregate **first seen, last seen, appearance count, last known location**

@@ -1,3 +1,4 @@
+import { prepareSnapshotContext, CONTINUITY_CONTEXT_NOTE } from '../continuity.js';
 // ── interceptor.js — Chat interceptor for inline/together and separate injection modes ──
 //
 // IN-FLIGHT GENERATION TUPLE (load-bearing across the codebase):
@@ -139,37 +140,7 @@ export function buildInlineTrackerPrompt(){
     const snap=inlineGenerationContext?.baseSnapshot??getLatestSnapshot();
     const profile=getActiveProfile(s);
     const panels=(profile?.panels&&Object.keys(profile.panels).length)?profile.panels:(s.panels||DEFAULTS.panels);
-    // Filter resolved quests + legacy activeTasks from embedded snapshot before
-    // sending the previous state back to the LLM. Completed quests don't need
-    // to re-enter the model's context, and activeTasks is a removed tier —
-    // leaking old values of it would re-teach the model to produce them.
-    function _cleanSnap(s){
-        if(!s)return null;
-        const c={...s};
-        for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}
-        delete c.activeTasks;delete c._spMeta;
-        if(panels.storyIdeas===false)delete c.plotBranches;
-        // v6.9.1: prune characters and relationships to only those
-        // currently in charactersPresent (or with no presence data).
-        // This reduces prompt tokens for long-running chats with 10+
-        // historical characters, most of whom aren't in the current
-        // scene. The STORED snapshot retains everyone (wiki needs it);
-        // this pruning is prompt-only so the LLM sees a focused roster.
-        if(Array.isArray(c.charactersPresent)){
-            const presentSet=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));
-            // Keep full details for present characters; preserve off-scene
-            // characters as name+role stubs so the LLM can reference them
-            if(Array.isArray(c.characters)){
-                const present=c.characters.filter(ch=>presentSet.has((ch.name||'').toLowerCase().trim()));
-                const offScene=c.characters.filter(ch=>!presentSet.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));
-                c.characters=present;
-                if(offScene.length)c._offSceneCharacters=offScene;
-            }
-            if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>presentSet.has((r.name||'').toLowerCase().trim()));
-        }
-        return c;
-    }
-    const cleanedSnap=_cleanSnap(snap);
+    const cleanedSnap=prepareSnapshotContext(snap,getActiveSchema().value);
     // v6.8.48: anti-contamination framing. The previous state JSON is
     // wrapped in <scene_pulse_tracker_state> XML tags with a clear
     // instruction that the character names inside are internal tracker
@@ -184,6 +155,8 @@ export function buildInlineTrackerPrompt(){
 <scene_pulse_tracker_state>
 NARRATIVE SEPARATION RULE — read this BEFORE the data below:
 The character names in this tracker state (e.g. "Ponytail Nurse", "Buzzcut", "Hooded Figure") are INTERNAL TRACKING LABELS, not prose vocabulary. In your narrative text, refer to characters naturally — by appearance, role, pronoun, title, or whatever the story has established. Compound placeholder labels must never appear as proper nouns in your prose or dialogue. In the tracker JSON you append at the end, use these exact label names as-is for continuity — the separation is between PROSE (natural descriptions) and JSON (tracker labels).
+
+${CONTINUITY_CONTEXT_NOTE}
 
 PREVIOUS STATE (carry forward unchanged details, update only what changed):
 ${JSON.stringify(cleanedSnap,null,2)}
@@ -490,11 +463,11 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
         if(!s.embedSnapshots)return;
         const snap=getLatestSnapshot();if(!snap){log('Interceptor: no snapshot to embed');return}
-        const snapJson=JSON.stringify(snap,null,2);
+        const snapJson=JSON.stringify(prepareSnapshotContext(snap,getActiveSchema().value),null,2);
         chat.splice(Math.max(0,chat.length-1),0,{
             is_user:s.embedRole==='user',is_system:s.embedRole==='system',
             name:s.embedRole==='system'?'System':'ScenePulse',
-            mes:`[ Scene Tracker ]\n${snapJson}`,
+            mes:`[ Scene Tracker ]\n${CONTINUITY_CONTEXT_NOTE}\n${snapJson}`,
             extra:{isSmallSys:s.embedRole==='system'}
         });
         log('Interceptor [separate]: embedded snapshot as',s.embedRole,'role (~'+Math.round(snapJson.length/4)+' tokens)');

@@ -10,6 +10,7 @@ import { DEFAULTS, BUILTIN_PANELS, BUILTIN_SCHEMA } from './constants.js';
 import { getActivePanels } from './settings.js';
 import { isValidCustomFieldKey } from './profiles.js';
 import { assemblePrompt } from './prompts/assembler.js';
+import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS } from './continuity.js';
 
 // ── Sub-field toggle → schema property mappings ──
 // v6.8.15: schema trim dropped 6 fertility sub-fields (reason/phase/day/window/
@@ -43,10 +44,12 @@ const REL_SUBFIELD_MAP={
     rel_compatibility:['compatibility','compatibilityLabel']
 };
 const BRANCH_TYPES=['dramatic','intense','comedic','twist','exploratory'];
+for (const [key, field] of Object.entries(CHARACTER_CONTINUITY_FIELDS)) CHAR_SUBFIELD_MAP[field.toggle] = [key];
+for (const [key, field] of Object.entries(RELATIONSHIP_CONTINUITY_FIELDS)) REL_SUBFIELD_MAP[field.toggle] = [key];
 
 export const SECTION_FIELDS=Object.freeze({
     dashboard:['time','date','location','weather','temperature'],
-    scene:['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent','witnesses'],
+    scene:['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent','witnesses','storyThreads'],
     quests:['northStar','mainQuests','sideQuests'],
     relationships:['relationships'],
     characters:['characters'],
@@ -129,6 +132,8 @@ export function buildDynamicSchema(s){
                 props[f.key]={type:'string',enum:f.options,description:f.desc};
             } else if(f.type==='array'){
                 props[f.key]={type:'array',items:{type:f.itemType||'string'},description:f.desc};
+            } else if(f.type==='threadArray'){
+                props[f.key]=structuredClone(BUILTIN_SCHEMA.value.properties.storyThreads);
             } else if(f.type==='questArray'){
                 props[f.key]={type:'array',description:f.desc,items:{type:'object',properties:{name:{type:'string'},urgency:{type:'string',enum:['critical','high','moderate','low','resolved']},detail:{type:'string'}},required:['name','urgency','detail']}};
             } else if(f.type==='relationshipArray'){
@@ -146,7 +151,7 @@ export function buildDynamicSchema(s){
                 }
                 props[f.key]=clone;
             }
-            required.push(f.key);
+            if (!f.optional) required.push(f.key);
         }
     }
     // Custom panels: add their fields (v6.9.14: per-chat definitions)
