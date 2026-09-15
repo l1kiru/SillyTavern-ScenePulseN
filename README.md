@@ -411,7 +411,15 @@ ScenePulse operates in **Together mode** by default:
 If the AI omits the tracker, ScenePulse can **automatically fall back** to a separate API call using a dedicated connection profile. Prompt size / integrity failures do **not** trigger that fallback — they stop before the network request.
 
 ### Separate Mode
-Alternatively, ScenePulse can run a completely separate quiet API call after each message — useful for models that struggle with inline instructions.
+
+Separate extraction prefers SillyTavern's raw generation API, sending the selected
+recent messages, previous state and character background explicitly. Quiet generation
+is a fallback for hosts without that API. Extraction does not activate World Info
+or Author's Note; facts already present in the scene or saved state remain available.
+JSON and Native requests both include the exact tracker structure; Native additionally
+sends the provider's JSON schema option. Provider compliance and response time still
+vary, so Native does not guarantee a valid result on the first attempt.
+This dedicated extraction runs after each message and is useful for models that struggle with inline instructions.
 
 **Parallel requests** is optional and off by default. With it enabled, Core identifies the
 current scene, then character groups and global state are extracted with a concurrency
@@ -608,9 +616,9 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest release: v7.1.15.2** - Descriptive continuity with toggleable character plans, story hooks, physical conditions, items and ownership, world facts, knowledge provenance, emotional state and established traits. Includes RU/EN labels and parallel extraction support.
+**Latest release: v7.1.16** - Reliable scene-state extraction with schema-derived JSON contracts, raw API requests, wrapper-safe context filtering, consistent section updates and preservation of confirmed records on repeat extraction.
 
-**Previous release: v7.1.15** - Selectable parallel lanes for Separate mode, character audience filters, the pinnable Panel Library, automatic scene-based panel selection, and mobile/layout improvements.
+**Previous release: v7.1.15.2** - Descriptive continuity with toggleable character plans, story hooks, physical conditions, items and ownership, world facts, knowledge provenance, emotional state and established traits. Includes RU/EN labels and parallel extraction support.
 
 ## Contributing
 

@@ -2,6 +2,20 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.1.16]
+
+- Canonicalized provider envelopes before validation and historical context projection,
+  preventing lost scene records and disabled fields leaking through nested wrappers.
+- Added schema-derived JSON contracts to tracker requests and inline instructions.
+  Separate prefers raw generation with explicit scene and character reference context;
+  quiet generation remains a compatibility fallback.
+- Section refresh now shares alias-aware continuity merging, clears omitted transient
+  character state and preserves other sections, durable records and item ownership.
+  Full re-extraction preserves omitted durable records already confirmed for the
+  same unchanged reply/swipe without applying elapsed time twice.
+- Isolated post-save panel errors from extraction failure and made UI-path tests
+  deterministic, including debounce and rendering-failure regressions.
+
 ### [7.1.15.2]
 
 - Added six independently toggleable descriptive facets with RU/EN labels: physical

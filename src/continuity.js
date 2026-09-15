@@ -2,6 +2,7 @@
 // This module never generates, grades, or rewrites narrative responses.
 
 import { CHARACTER_STATE_FIELDS, SCENE_STATE_FIELDS, KNOWLEDGE_PROVENANCE_FIELDS, KNOWLEDGE_PROVENANCE_RULE, normalizeStateRecords, normalizeKnowledgeProvenance } from './state-records.js';
+import { canonicalizeTracker, projectSchemaFields } from './tracker-shape.js';
 
 const text = description => ({ type: 'string', description });
 
@@ -146,7 +147,7 @@ export function carryContinuityFields(current, previous, keys) {
 // knowledge/goals as last-known data, without simulating their advancement.
 export function prepareSnapshotContext(snapshot, schema) {
     if (!snapshot) return null;
-    const out = structuredClone(snapshot);
+    const out = canonicalizeTracker(structuredClone(snapshot), schema);
     const props = schema?.value?.properties || schema?.properties || {};
     for (const key of ['mainQuests', 'sideQuests']) if (Array.isArray(out[key])) out[key] = out[key].filter(item => item.urgency !== 'resolved');
     delete out.activeTasks;
@@ -177,7 +178,8 @@ export function prepareSnapshotContext(snapshot, schema) {
         const isPresent = entry => present.has(String(entry.name).trim().toLowerCase());
         if (Array.isArray(out.characters)) {
             out._offSceneCharacters = out.characters.filter(entry => !isPresent(entry)).map(entry => {
-                const stub = { name: entry.name, role: entry.role || '', aliases: entry.aliases || [] };
+                const stub = { name: entry.name };
+                for (const key of ['role', 'aliases']) if (props.characters?.items?.properties?.[key] && Object.hasOwn(entry, key)) stub[key] = entry[key];
                 for (const key of ['shortTermGoal', 'longTermGoal', 'knowledge', 'activityPlans', 'conditions', 'establishedTraits']) if (props.characters?.items?.properties?.[key] && Object.hasOwn(entry, key)) stub[key] = entry[key];
                 return stub;
             });
@@ -194,5 +196,8 @@ export function prepareSnapshotContext(snapshot, schema) {
             if (!out._offSceneRelationships.length) delete out._offSceneRelationships;
         }
     }
-    return out;
+    const projected = projectSchemaFields(out, { properties: props });
+    if (props.characters && out._offSceneCharacters) projected._offSceneCharacters = out._offSceneCharacters.map(entry => projectSchemaFields(entry, props.characters.items));
+    if (props.relationships && out._offSceneRelationships) projected._offSceneRelationships = out._offSceneRelationships.map(entry => projectSchemaFields(entry, props.relationships.items));
+    return projected;
 }

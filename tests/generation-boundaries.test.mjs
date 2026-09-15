@@ -93,12 +93,11 @@ const stContext={
     async generateQuietPrompt(args){quietArgs=args;return tracker},
 };
 const response=await requestTracker({stContext,systemPrompt:'SYSTEM',prompt:'USER',responseLength:4096,jsonSchema:full,promptMode:'native'});
-eq('quiet transport has priority',response.strategy,'quiet');
-eq('raw-data path is not duplicated',rawDataCalls,0);
-eq('quiet prompt carries system text',quietArgs.quietPrompt.includes('SYSTEM'),true);
-eq('quiet prompt carries user text',quietArgs.quietPrompt.includes('USER'),true);
-eq('quiet native schema is forwarded',quietArgs.jsonSchema?.returnInvalid,true);
-eq('quiet response budget is forwarded',quietArgs.responseLength,4096);
+eq('raw transport has priority',response.strategy,'raw-data');
+eq('raw-data path is not duplicated',rawDataCalls,1);
+eq('quiet transport is not also called',quietArgs,null);
+eq('raw prompt carries user text',rawDataArgs.prompt.includes('USER'),true);
+eq('raw prompt carries structural contract',rawDataArgs.prompt.includes('TRACKER JSON CONTRACT'),true);
 await requestTracker({stContext:{async generateRawData(args){rawDataArgs=args;return tracker}},systemPrompt:'SYSTEM',prompt:'USER',responseLength:4096,jsonSchema:full,promptMode:'native'});
 eq('system prompt is passed separately',rawDataArgs.systemPrompt,'SYSTEM');
 eq('native schema is forwarded',rawDataArgs.jsonSchema?.returnInvalid,true);

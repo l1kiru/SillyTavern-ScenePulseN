@@ -1,5 +1,7 @@
 import { normalizeStoryThreads, normalizeNarrativeHooks, normalizeCharacterContinuity, normalizeRelationshipContinuity } from './continuity.js';
 import { SCENE_STATE_FIELDS, normalizeStateRecords } from './state-records.js';
+import { canonicalizeTracker } from './tracker-shape.js';
+import { getActiveSchema } from './settings.js';
 // ScenePulse — Normalization Module
 // Extracted from index.js lines 950-1356
 
@@ -98,28 +100,16 @@ export function isUserName(name) {
 }
 
 // ── Normalization ──
-export function normalizeTracker(d){
+export function normalizeTracker(d,{schema}={}){
     if(!d||typeof d!=='object')return d;
+    // UI reads use the active schema; in-flight saves supply their frozen contract.
+    if(!schema){try{schema=getActiveSchema()}catch{}}
+    d=canonicalizeTracker({...d},schema);
     const _verbose=!_isTimelineScrub; // Suppress verbose logging during rapid scrubbing
 
     // ── GLM-5 Unwrapper: flatten nested object structures ──
     // GLM-5 often wraps fields in parent objects: {environment:{time,date...}, characters:{CharA:{...}}, questJournal:{mainQuests:[...]}}
     // Unwrap these to the flat structure the rest of the normalizer expects
-    if(d.environment&&typeof d.environment==='object'&&!Array.isArray(d.environment)){
-        log('Unwrap: environment object \u2192 top-level fields');
-        for(const[k,v]of Object.entries(d.environment)){if(!d[k])d[k]=v}
-    }
-    // Scene fields may be nested under scene/sceneDetails
-    for(const sk of['scene','sceneDetails','sceneInfo']){
-        if(d[sk]&&typeof d[sk]==='object'&&!Array.isArray(d[sk])){
-            log('Unwrap:',sk,'object \u2192 top-level fields');
-            for(const[k,v]of Object.entries(d[sk])){if(!d[k])d[k]=v}
-        }
-    }
-    if(d.questJournal&&typeof d.questJournal==='object'&&!Array.isArray(d.questJournal)){
-        log('Unwrap: questJournal object \u2192 top-level fields');
-        for(const[k,v]of Object.entries(d.questJournal)){if(!d[k])d[k]=v}
-    }
     // Characters: convert object-of-objects to array  {CharA:{...}, CharB:{...}} -> [{name:"CharA",...}, {name:"CharB",...}]
     if(d.characters&&typeof d.characters==='object'&&!Array.isArray(d.characters)){
         const vals=Object.entries(d.characters);
@@ -561,7 +551,7 @@ export function normalizeTracker(d){
     }
     // Pass through custom panel fields (any key on d not already in o)
     const knownKeys=new Set(Object.keys(o));
-    knownKeys.add('_spMeta');knownKeys.add('environment');knownKeys.add('scene');knownKeys.add('sceneDetails');knownKeys.add('sceneInfo');knownKeys.add('questJournal');
+    knownKeys.add('_spMeta');
     for(const k of Object.keys(d)){
         if(!knownKeys.has(k))o[k]=d[k];
     }

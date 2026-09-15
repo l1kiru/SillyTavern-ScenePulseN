@@ -34,6 +34,7 @@ import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
 import { validateCharacterAudienceRequirements, validateExtraction } from './validation.js';
 import { buildRequestSchema, SECTION_FIELDS } from '../schema.js';
 import { buildRecentContext, classifyRequestError, computeResponseLength, correctiveInstruction, requestTracker } from './request.js';
+import { extractionReferenceContext } from './tracker-contract.js';
 import { createBuildTiming } from './build-timing.js';
 import { runParallelDeltaBuild, runParallelFullBuild, shouldUseParallelDeltaBuild } from './parallel-build.js';
 import { hasAutomaticPanels } from '../panel-activation-policy.js';
@@ -185,6 +186,10 @@ export async function generateTracker(mesIdx,partKey,opts){
     const targetSwipeId=getActiveSwipeId(mesIdx);
     const operationOwner=captureOperationOwner(mesIdx,targetSwipeId);
     const baseSnapshot=structuredClone(partKey?(getTrustedSnapshotFor(mesIdx,targetSwipeId)||getPrevSnapshot(mesIdx)):getPrevSnapshot(mesIdx));
+    // Re-extracting the same unchanged reply must not erase confirmed durable
+    // records merely because an optional field was omitted. Temporal calculation
+    // still uses the preceding message, so elapsed time is never applied twice.
+    const continuitySnapshot=structuredClone(getTrustedSnapshotFor(mesIdx,targetSwipeId)||baseSnapshot);
     const rootSettings=getSettings();
     const frozenProfile=structuredClone(getActiveProfile(rootSettings));
     const settings=buildProfileView(rootSettings,frozenProfile);
@@ -313,7 +318,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             }
         }
         log('Gen context: msgs=',recent.length,'snapshotCopies=',lastSnap?1:0,'snapCtxLen~',snapCtx.length);
-        let prompt=`RECENT SCENE CONTEXT:\n${ctxText}${snapCtx}\n\nGenerate the updated ScenePulse tracker as one JSON object.`;
+        let prompt=`${extractionReferenceContext(stContext)}RECENT SCENE CONTEXT:\n${ctxText}${snapCtx}\n\nGenerate the updated ScenePulse tracker as one JSON object.`;
         if(partKey)prompt+=`\n\nFOCUS: Return ONLY these requested fields: ${requestFields.join(', ')}. Do not copy unrelated fields.`;
         let lastErrorCode='';let validationErrors=[];let attemptPromptMode=settings.promptMode==='native'?'native':'json';
         let totalPromptTokens=0,totalCompletionTokens=0;
@@ -331,7 +336,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 attemptTiming=buildTiming.startAttempt({attempt:a+1,promptMode:attemptPromptMode,responseBudget:responseLength,inputTokensEstimate:attemptPromptTokens});
                 let quietError=null;
                 try{
-                    const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true,stopStOnAbort});
+                    const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true,stopStOnAbort,promptRole:frozenPromptRole});
                     raw=response.value;strategy=response.strategy;
                 }catch(e){quietError=e}
                 const requestLatencyMs=buildTiming.markAttemptResponse(attemptTiming,{strategy});
@@ -430,6 +435,11 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // false and the interceptor would have already sent a full-
                 // state prompt, so the parsed response is a complete snapshot
                 // — we should NOT merge it, just use it as-is.
+                if(partKey){
+                    const merged=mergeDelta(lastSnap||{},parsed,{sectionFields:requestFields});
+                    buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationWarnings:validation.warnings.length});
+                    return merged;
+                }
                 if(useDelta && lastSnap){
                     log('Delta mode: merging',Object.keys(parsed).length,'delta keys with previous');
                     setLastDeltaPayload(parsed);
@@ -447,7 +457,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // from the previous snapshot. The LLM only returns characters
                 // in the current scene, but we must keep accumulated data for
                 // characters who left (for wiki, returning-character support).
-                preserveOffSceneEntities(parsed,lastSnap);
+                preserveOffSceneEntities(parsed,continuitySnapshot);
                 buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationWarnings:validation.warnings.length});
                 return parsed;
             }catch(e){lastErrorCode=e?.code||'MALFORMED_JSON';buildTiming.finishAttempt(attemptTiming,lastErrorCode==='TRUNCATED'?'truncated':'parse_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawStr.length,outputTokensEstimate:Math.round(rawStr.length/4)});err(`Parse fail (${a+1}):`,e?.message||String(e));terminalFailure=recordExtractionFailure(lastErrorCode,e?.message||String(e),rawStr,mesIdx,{stage:'parse',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
@@ -492,7 +502,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             const commonParallelOptions={
                 fullSchema:frozenFullSchema,
                 systemPrompt:sysPr,
-                contextText:ctxText,
+                contextText:extractionReferenceContext(stContext)+ctxText,
                 previousSnapshot:baseSnapshot,
                 profileId:profileRef,
                 promptMode:settings.promptMode,
@@ -541,7 +551,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             }else{
                 setLastDeltaPayload(null);
                 setLastDeltaSavings(0);
-                preserveOffSceneEntities(built.value,baseSnapshot);
+                preserveOffSceneEntities(built.value,continuitySnapshot);
             }
             log(useParallelDelta?'Parallel delta build:':'Parallel full build:',JSON.stringify(built.meta));
             return built.value;
@@ -612,59 +622,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             customFieldSpecs:characterCustomFieldSpecs,
             preserveAliases:true,
         });
-        result=normalizeTracker(result);
-        // ── SECTION MERGE: Only accept fields belonging to the requested section ──
-        if(partKey){
-            const allowedFields=SECTION_FIELDS[partKey];
-            if(allowedFields||partKey.startsWith('custom_')){
-                const existingSnap=getTrustedSnapshotFor(mesIdx)||getLatestSnapshot();
-                if(existingSnap){
-                    const merged=normalizeTracker(existingSnap);
-                    if(allowedFields){
-                        const _entityArrays={characters:'name',relationships:'name',mainQuests:'name',sideQuests:'name'};
-                        for(const f of allowedFields){
-                            if(result[f]===undefined)continue;
-                            // Entity arrays: merge per-entity to preserve entries
-                            // not in the new response (e.g. off-scene characters)
-                            if(_entityArrays[f]&&Array.isArray(result[f])&&Array.isArray(merged[f])){
-                                const keyField=_entityArrays[f];
-                                // Update/add entities from result
-                                for(const newE of result[f]){
-                                    const nk=(newE[keyField]||'').toLowerCase().trim();
-                                    const existIdx=merged[f].findIndex(e=>(e[keyField]||'').toLowerCase().trim()===nk);
-                                    if(existIdx>=0){
-                                        const prevE=merged[f][existIdx];
-                                        const next={...prevE};
-                                        for(const [fk,fv] of Object.entries(newE||{})){
-                                            if(fv!==undefined&&fv!==null)next[fk]=fv;
-                                        }
-                                        merged[f][existIdx]=next;
-                                    }
-                                    else merged[f].push(newE);
-                                }
-                                log('Section merge: entity-merged',f,'(',result[f].length,'new,',merged[f].length,'total)');
-                            }else{
-                                merged[f]=result[f];
-                            }
-                        }
-                        log('Section merge: partKey=',partKey,'accepted fields:',allowedFields.join(','));
-                    } else {
-                        // Custom panel — accept only its field keys
-                        const root=getSettings();
-                        const s=buildProfileView(root,getActiveProfile(root));
-                        const cp=getActivePanels(s).find(c=>
-                            customPanelScope(c)==='global'&&customPanelSectionKey(c?.name)===partKey
-                        );
-                        if(Array.isArray(cp?.fields)){
-                            const cpFields=cp.fields.filter(f=>isValidCustomFieldKey(f?.key)).map(f=>f.key);
-                            for(const f of cpFields){if(result[f]!==undefined)merged[f]=result[f]}
-                            log('Section merge (custom): partKey=',partKey,'accepted fields:',cpFields.join(','));
-                        }
-                    }
-                    result=merged;
-                }
-            }
-        }
+        result=normalizeTracker(result,{schema:frozenFullSchema});
         if(successfulValidationWarnings.length)result._validationWarnings=successfulValidationWarnings;
         log('=== POST-NORMALIZE SUMMARY === source=',lastGenSource);
         log('  chars:',result.characters?.length||0,'rels:',result.relationships?.length||0);
@@ -721,8 +679,10 @@ export async function generateTracker(mesIdx,partKey,opts){
                 t('ScenePulse Active')
             );
         }
-        updatePanel(result);
-        spPostGenShow(); // mobile: banner instead of panel popup
+        try {
+            updatePanel(result);
+            spPostGenShow(); // mobile: banner instead of panel popup
+        } catch (e) { warn('Snapshot saved, panel update failed:', e?.message || e); }
     }else{
         // Keep the last trusted scene visible; the recovery card is additive.
         const body=document.getElementById('sp-panel-body');
@@ -790,8 +750,7 @@ export async function continuationReprompt(narrativeText, opts){
     const presetOverride=opts?.preset||settings.chatPreset;
     log('=== CONTINUATION START === narrativeLen=',narrativeText.length,'nonce=',myNonce,'source=',lastGenSource||'auto:together:continuation','profile=',profileOverride||'(current)');
     // Build the continuation prompt — just the narrative + a focused JSON-only instruction.
-    // We deliberately do NOT inject the full schema again; the model already saw it on
-    // the original turn. Asking only for the missing piece is what makes this cheap.
+    // This is an independent request, so it receives the same explicit contract.
     const lastSnap=Object.hasOwn(opts||{},'baseSnapshot')?opts.baseSnapshot:(opts?.mesIdx!=null?getPrevSnapshot(opts.mesIdx):getLatestSnapshot());
     const isDelta=!hasStaleSnapshotBefore(opts?.mesIdx??SillyTavern.getContext().chat?.length)&&shouldUseDelta(lastSnap)&&!!lastSnap;
     const sysPr=getActivePrompt({hasPrevState:!!lastSnap,isDelta});
@@ -810,8 +769,7 @@ export async function continuationReprompt(narrativeText, opts){
     const sceneOpId=opts?.sceneBuildOperationId||opts?.operationId||null;
     let prevStateJson=null;
     if(lastSnap){
-        const _cleanSnap=(s)=>{const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(settings.panels?.storyIdeas===false)delete c.plotBranches;if(Array.isArray(c.charactersPresent)){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c};
-        prevStateJson=_cleanSnap(lastSnap);
+        prevStateJson=prepareSnapshotContext(lastSnap,continuationSchema);
     }
     // v6.9.1: use the shared shouldUseDelta() helper to respect the
     // periodic refresh counter and the forceFullNextTurn flag.
@@ -819,7 +777,7 @@ export async function continuationReprompt(narrativeText, opts){
     const deltaInstruction=isDelta
         ?`\n\nDELTA MODE: Include ONLY fields that changed since the previous state. Always include ${deltaAlways}. Include a full character entry for every present NPC and recompute innerThought and immediateNeed from this narrative. Use [] when nobody is present or witnessed the scene. Omit other unchanged fields.`
         :'';
-    const prompt=buildContinuationRecoveryPrompt({narrativeText,deltaInstruction,prevStateJson});
+    const prompt=extractionReferenceContext(SillyTavern.getContext())+buildContinuationRecoveryPrompt({narrativeText,deltaInstruction,prevStateJson});
     log('Continuation prompt length:',prompt.length,'chars (~',Math.round(prompt.length/4),'tokens)');
     let continuationPromptTokens=0,continuationCompletionTokens=0,continuationStrategy='';
     const doGen=async()=>{

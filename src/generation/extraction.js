@@ -137,7 +137,8 @@ export function normalizeProviderResponse(value){
     let text=value.text??value.output_text??value.content??value.response
         ??value.choices?.[0]?.message?.content??value.choices?.[0]?.text
         ??value.results?.[0]?.text??value.generations?.[0]?.text??value.data?.response
-        ??value.candidates?.[0]?.content?.parts??value.message?.content??value.output?.[0]?.content??'';
+        ??value.candidates?.[0]?.content?.parts??value.message?.content
+        ??(typeof value.output==='string'?value.output:value.output?.[0]?.content)??value[0]?.content??'';
     if(Array.isArray(text))text=text.map(part=>typeof part==='string'?part:(part?.text??part?.content??part?.output_text??'')).join('');
     return{text:typeof text==='string'?text:JSON.stringify(text??''),finishReason:String(finishReason||'')};
 }

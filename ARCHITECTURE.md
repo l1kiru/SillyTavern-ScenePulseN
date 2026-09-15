@@ -135,6 +135,34 @@ from the call site:
 
 ## Descriptive scene continuity
 
+`tracker-shape.js` canonicalizes known provider envelopes before validation and
+on a copy of historical data for prompt projection. Explicit root values win,
+including empty arrays and zero; invalid roots still fail validation. Consumed
+envelopes are removed, while names explicitly declared by a custom schema remain
+custom data. Prompt projection allows only schema fields, plus deliberate
+off-scene summaries; hidden operational presence still controls those summaries.
+Historical snapshots are not rewritten by projection.
+
+`generation/tracker-contract.js` derives a compact structural JSON contract from
+the frozen request schema. Ordinary JSON, Native, parallel lanes and inline
+tracker instructions carry it; Native also sends the provider schema. Separate
+prefers `generateRawData`, then `generateRaw`, with quiet generation only when
+neither raw API exists. A provider error does not trigger an extra transport call.
+Raw requests explicitly include the chosen recent messages, projected previous
+state and character description/personality/scenario/persona as background data.
+Extraction does not activate World Info or Author's Note (the quiet fallback still
+uses `skipWIAN`). Connection Manager keeps its selected profile/preset behavior.
+
+Section refresh uses the same alias-aware entity merge as Delta, restricted to
+its frozen requested fields and base snapshot before normalization. Only updated
+sections clear omitted transient state; other sections retain their values.
+Character renames still reconcile roster, relationships and item ownership.
+Full re-extraction also preserves omitted durable records from an existing trusted
+snapshot of the same unchanged reply/swipe. Elapsed-time calculation continues to
+use the preceding message; explicit empty lists still clear records.
+UI rendering failure after saving is logged separately and does not invalidate
+the extraction or cause a provider retry.
+
 `src/continuity.js` owns additive continuity field schemas, extraction rules,
 normalizers, and the shared prompt projection. Dynamic profiles expose
 `storyThreads`, character `innerThoughtBasis` / `currentIntent` / `knowledge`,

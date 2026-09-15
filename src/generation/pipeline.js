@@ -158,7 +158,7 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         customFieldSpecs:opts.frozenCharacterCustomFieldSpecs,
         preserveAliases:true,
     });
-    const norm = normalizeTracker(extracted);
+    const norm = normalizeTracker(extracted,{schema:requestSchema});
     setCurrentSnapshotMesIdx(mesIdx);
 
     // Attach validation warnings for Inspector
@@ -252,8 +252,11 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
     setLastExtractionFailure(null);
 
     // Update panel
-    updatePanel(norm);
-    spPostGenShow();
+    // Presentation failure must not invalidate a saved extraction or trigger recovery.
+    try {
+        updatePanel(norm);
+        spPostGenShow();
+    } catch (e) { warn('Pipeline: snapshot saved, panel update failed:', e?.message || e); }
 
     if (opts.stopHider) stopStreamingHider();
     if (opts.unlockGen) spSetGenerating(false);

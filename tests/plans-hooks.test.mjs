@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { installThoughtDom } from './helpers/thought-dom.mjs';
 
 const ctx = {
     name1: 'User', name2: 'Alice', chatId: 'plans', characterId: 0,
@@ -15,6 +16,8 @@ globalThis.document = {
     querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
 };
 globalThis.window = { innerWidth: 1280, addEventListener() {} };
+installThoughtDom();
+Object.defineProperty(performance, 'now', { configurable: true, value: () => 1000 });
 
 const { getSettings, getActiveSchema, getActivePrompt, saveSnapshot, getSnapshotFor } = await import('../src/settings.js');
 const { getActiveProfile } = await import('../src/profiles.js');
@@ -121,4 +124,5 @@ assert.ok(!renderCharacterContinuity(prior.characters[0], { char_activityPlans: 
 assert.equal(renderNarrativeHooks([hook], { narrativeHooks: false }), '');
 assert.ok(!renderNarrativeHooks([{ ...hook, detail: '<img src=x onerror=alert(1)>' }]).includes('<img'));
 assert.ok(!renderCharacterContinuity({ activityPlans: [{ ...plan, source: '<script>bad()</script>' }] }).includes('<script>'));
+assert.ok(!(await import('../src/logger.js')).debugLog.some(line => line.includes('panel update failed')), 'ordinary extraction renders without UI errors');
 console.log('PASS plans/hooks schema, switches, lifecycle, context, persistence, lanes and escaping');
