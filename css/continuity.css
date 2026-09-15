@@ -1,0 +1,15 @@
+.sp-continuity {
+    margin: 8px 0;
+    border: 1px solid var(--sp-border, rgba(128, 128, 128, .25));
+    border-radius: 6px;
+    font-size: .9em;
+    overflow-wrap: anywhere;
+}
+.sp-continuity > summary { padding: 8px 10px; cursor: pointer; font-weight: 600; }
+.sp-continuity[hidden] { display: none; }
+.sp-continuity-content { padding: 0 10px 10px; }
+.sp-continuity-entry + .sp-continuity-entry { border-top: 1px solid var(--sp-border, rgba(128, 128, 128, .25)); margin-top: 8px; padding-top: 8px; }
+.sp-continuity-row { display: grid; grid-template-columns: minmax(80px, 30%) minmax(0, 1fr); gap: 8px; margin-top: 6px; white-space: pre-wrap; }
+.sp-continuity-label { opacity: .7; }
+.sp-continuity-status { margin-left: 8px; opacity: .7; font-size: .85em; }
+.sp-continuity ul { margin: 6px 0; padding-left: 20px; }

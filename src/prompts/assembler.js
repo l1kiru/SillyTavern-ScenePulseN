@@ -24,6 +24,7 @@ import { DEFAULTS } from '../constants.js';
 import { getLanguage, getActivePanels } from '../settings.js';
 import { isValidCustomFieldKey } from '../profiles.js';
 import { getSlotText } from './slots.js';
+import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS, STORY_THREADS_SCHEMA, CONTINUITY_RULES, continuityFieldSpecs } from '../continuity.js';
 
 const BRANCH_TYPES = ['dramatic', 'intense', 'comedic', 'twist', 'exploratory'];
 
@@ -55,6 +56,7 @@ function _sceneFields(s) {
     if (ft.sceneSummary !== false) fields.push('- sceneSummary: 2-3 sentence factual summary of what is currently happening.');
     if (ft.soundEnvironment !== false) fields.push('- soundEnvironment: What is audible right now.');
     if (ft.charactersPresent !== false) fields.push('- charactersPresent: Array of character names PHYSICALLY PRESENT in the current beat with {{user}}. Only include characters who are in the same location RIGHT NOW, close enough to interact or observe. EXCLUDE anyone {{user}} is merely thinking about, remembering, dreaming of, reading about, or who is in a different location. SOLO SCENES ARE REAL: if {{user}} is alone (walking, hiding, internal monologue, sleeping, meditating, travelling alone), emit an EMPTY array []. An empty charactersPresent is valid and expected for solitude beats. NEVER carry forward the previous scene\'s roster out of habit — re-verify presence from THIS turn\'s narration every time.');
+    if (ft.storyThreads !== false) fields.push(`- storyThreads: ${STORY_THREADS_SCHEMA.description} Each entry: id, summary, status (open/resolved), condition, source.`);
     if (!fields.length) return '';
     return '\n### Scene Analysis (REQUIRED)\n' + fields.join('\n') + '\n';
 }
@@ -67,7 +69,7 @@ function _characterFields(s) {
     ];
     if (ft.char_archetype !== false) fields.push('- archetype: ONE dominant narrative role. ally=actively supports current goals | friend=platonic bond, no active quest required | rival=competitive, not hostile | mentor=teaches/trains {{user}} (skill/wisdom transfer) | authority=institutional power over {{user}} (boss/cop/judge/commander — power asymmetry is the defining feature, NOT teaching) | antagonist=actively opposes | family=blood/legal kin | lover=romantic partner or interest (emotional bond) | lust=purely sexual, no romance | pet=non-human companion | background=minor NPC with no story weight. Empty string if unclassified. A teacher running a lesson is mentor; the same teacher in a disciplinary meeting is authority — archetype is turn-to-turn mutable.');
     fields.push('- role: WHO this person IS — their identity/title/relationship. NOT feelings.');
-    if (ft.char_innerThought !== false) fields.push("- innerThought: The exact sentence in their head, first-person, in their voice. 1-3 sentences. BE them for a sentence. Not a list of emotion labels.");
+    if (ft.char_innerThought !== false) fields.push("- innerThought: A first-person thought in their voice, 1-3 sentences. Use explicitly narrated thoughts when available; otherwise a qualified interpretation grounded in this turn's behavior, not privileged access to hidden facts. Not a list of emotion labels. Empty if unsupported.");
     if (ft.char_immediateNeed !== false) fields.push('- immediateNeed: What they urgently need RIGHT NOW in this scene.');
     if (ft.char_shortTermGoal !== false) fields.push('- shortTermGoal: What THEY want in the coming hours/days, from their perspective.');
     if (ft.char_longTermGoal !== false) fields.push("- longTermGoal: Their overarching life motivation. NOT the same as {{user}}'s quest journal — a character's goal does not automatically become a quest.");
@@ -82,6 +84,7 @@ function _characterFields(s) {
         fields.push('- fertStatus: "active" ONLY when pregnancy/cycle is narratively relevant. "N/A" for children, men, non-humans, and any scenario where fertility isn\'t part of the story.');
         fields.push('- fertNotes: Free-text details (cycle day, pregnancy week, etc) when fertStatus is "active". Empty or "N/A" otherwise.');
     }
+    fields.push(...continuityFieldSpecs(CHARACTER_CONTINUITY_FIELDS, ft));
     return '\n### Characters (all EXCEPT {{user}}) — MAX 5 entries, named NPCs only\n' + fields.join('\n') + '\n';
 }
 
@@ -115,6 +118,7 @@ function _relationshipFields(s) {
     if (ft.rel_compatibility !== false) meters.push('compatibility');
     if (meters.length) fields.push('- Meters (0-100): ' + meters.join(', ') + '. Each meter takes a {meter}Label string. MAX 3 words per label. No commas, no em-dashes, no chained clauses. Title Case. RIGHT: "Warm" / "Building trust" / "Quiet devotion" / "Oil and water". WRONG: "deeply moved, finds him utterly compelling and trustworthy" / "growing sense of shared perspective" / "openly inviting, her hand on his chest, leading him forward".');
     if (ft.rel_desire !== false) fields.push('- desire: 0 for anyone without established sexual interest (family, strangers, minors)');
+    fields.push(...continuityFieldSpecs(RELATIONSHIP_CONTINUITY_FIELDS, ft));
     return '\n### Relationships (how characters perceive {{user}})\n' + fields.join('\n') + '\n';
 }
 
@@ -212,6 +216,8 @@ export function assemblePrompt(s, profile, opts = {}) {
     if (panels.relationships) prompt += _relationshipFields(s);
     if (panels.storyIdeas)    prompt += _storyIdeaFields(s);
     prompt += _customPanelFields(s);
+    // Below FIELD SPECIFICATIONS so Together retains this contract too.
+    prompt += '\n' + CONTINUITY_RULES + '\n';
 
     // ── Closing section: delta mode (only if applicable) ───────────────
     if (isDelta) {

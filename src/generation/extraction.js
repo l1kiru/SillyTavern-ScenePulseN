@@ -8,7 +8,7 @@ import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '.
 
 export const SP_MARKER_START='<!--SP_TRACKER_START-->';
 export const SP_MARKER_END='<!--SP_TRACKER_END-->';
-export const KNOWN_KEYS=['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','characters','relationships','northStar','plotBranches','mainQuests','sideQuests'];
+export const KNOWN_KEYS=['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','characters','relationships','northStar','plotBranches','mainQuests','sideQuests','storyThreads'];
 const KNOWN_WRAPPER_KEYS=['environment','scene','sceneDetails','sceneInfo','sceneAnalysis','questJournal','quests'];
 const _ALT_TRACKER_MARKERS=[
     [SP_MARKER_START,SP_MARKER_END],

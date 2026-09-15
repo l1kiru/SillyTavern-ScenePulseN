@@ -64,6 +64,29 @@ from the call site:
    tries to slip the user persona in. Multiple normalize.js paths and
    schema descriptions guard against it.
 
+## Descriptive scene continuity
+
+`src/continuity.js` owns additive continuity field schemas, extraction rules,
+normalizers, and the shared prompt projection. Dynamic profiles expose
+`storyThreads`, character `innerThoughtBasis` / `currentIntent` / `knowledge`,
+and relationship `lastReaction` / `relationshipBasis` / `changeReason` /
+`unresolvedConflicts`. Optional additions preserve compatibility with older
+snapshots; explicit custom schemas and full prompt overrides remain unchanged.
+
+Continuity describes the final scene, never a required next action. The
+narrative is authoritative; there is no narrative conformance check or rewrite.
+The shared rule block lives below `FIELD SPECIFICATIONS`, so both Separate and
+Together receive it. `prepareSnapshotContext` filters disabled continuity fields
+and resolved threads without mutating stored history. Off-scene context includes
+last-known knowledge/goals and relationship foundations/conflicts, not simulated
+progress or fresh thoughts.
+
+Delta arrays for knowledge, conflicts and threads replace their entire field:
+omission preserves durable information, `[]` clears it. Full refreshes also
+preserve omitted durable continuity fields on identity matches. Reactions,
+intentions and thought evidence are turn-local; resolved threads have one
+snapshot of visibility. Existing snapshot ownership handles swipes and edits.
+
 ## In-flight generation contract
 
 Inline tracker generation has a two-flag in-flight tuple:

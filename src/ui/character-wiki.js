@@ -1,3 +1,4 @@
+import { renderCharacterContinuity, renderRelationshipContinuity } from './continuity-view.js';
 // src/ui/character-wiki.js — Character Wiki: historical character browser overlay
 import { log } from '../logger.js';
 import { t } from '../i18n.js';
@@ -561,6 +562,9 @@ function _renderEntry(e, viewMode) {
         for (const [label, val] of goalFields) { if (val) bodyHtml += `<div class="sp-wiki-field">${esc(t(label))}</div><div class="sp-wiki-val">${esc(val)}</div>`; }
         bodyHtml += '</div>';
     }
+
+    bodyHtml += renderCharacterContinuity(ch);
+    bodyHtml += renderRelationshipContinuity(rel);
 
     // Fertility — v6.8.15 trimmed schema: fertStatus + fertNotes only
     if (ch.fertStatus && ch.fertStatus !== 'N/A') {

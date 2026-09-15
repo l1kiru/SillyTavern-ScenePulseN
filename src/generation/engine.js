@@ -1,3 +1,4 @@
+import { prepareSnapshotContext, CONTINUITY_CONTEXT_NOTE } from '../continuity.js';
 // ── engine.js — Generation engine: preset management, profile switching, tracker generation ──
 
 import { log, warn, err } from '../logger.js';
@@ -219,11 +220,10 @@ export async function generateTracker(mesIdx,partKey,opts){
         const{recent,text:ctxText}=buildRecentContext(chat,settings.contextMessages,mesIdx);
         const lastSnap=baseSnapshot;
         // Filter resolved quests from snapshot before embedding in prompt
-        function _cleanSnapForPrompt(s){const c={...s};for(const k of['mainQuests','sideQuests']){if(Array.isArray(c[k]))c[k]=c[k].filter(q=>q.urgency!=='resolved')}delete c.activeTasks;delete c._spMeta;if(settings.panels?.storyIdeas===false)delete c.plotBranches;if(Array.isArray(c.charactersPresent)){const ps=new Set(c.charactersPresent.map(n=>(n||'').toLowerCase().trim()));if(Array.isArray(c.characters)){const present=c.characters.filter(ch=>ps.has((ch.name||'').toLowerCase().trim()));const offScene=c.characters.filter(ch=>!ps.has((ch.name||'').toLowerCase().trim())).map(ch=>({name:ch.name,role:ch.role||'',aliases:ch.aliases||[]}));c.characters=present;if(offScene.length)c._offSceneCharacters=offScene}if(Array.isArray(c.relationships))c.relationships=c.relationships.filter(r=>ps.has((r.name||'').toLowerCase().trim()))}return c}
         let snapCtx='';
         if(lastSnap){
             const hasEmptyChars=!lastSnap.characters||!lastSnap.characters.length;
-            snapCtx=`\n\nPREVIOUS STATE (carry forward unchanged facts; update only what the recent narrative changed):\n${JSON.stringify(_cleanSnapForPrompt(lastSnap),null,2)}`;
+            snapCtx=`\n\n${CONTINUITY_CONTEXT_NOTE}\nPREVIOUS STATE (carry forward unchanged facts; update only what the recent narrative changed):\n${JSON.stringify(prepareSnapshotContext(lastSnap,getActiveSchema().value),null,2)}`;
             snapCtx+=settings.panels?.quests!==false?`\n\nIMPORTANT: Quest Journal must be from {{user}}'s perspective. If {{char}} is hostile, {{user}}'s quests OPPOSE {{char}}'s goals. If {{char}} is an ally, {{user}}'s quests SUPPORT them \u2014 but framed as {{user}}'s action. NEVER write what {{char}} is doing \u2014 write what {{user}} is doing about it. NEVER drop unresolved quests.`:`\n\nIMPORTANT: Carry forward unchanged details. Only update what changed in the story.`;
             if(hasEmptyChars){
                 snapCtx+=`\n\nWARNING: The previous state has EMPTY characters. This is a bug \u2014 you MUST generate full character details for ALL characters present in the scene.`;

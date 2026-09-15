@@ -1,5 +1,6 @@
 // ScenePulse — Delta Merge Module
 // Merges a delta JSON response (only changed fields) with a previous full snapshot
+import { carryContinuityFields } from '../continuity.js';
 
 import { log, warn } from '../logger.js';
 import { getSettings, saveSettings } from '../settings.js';
@@ -48,6 +49,9 @@ const INTERNAL_META_KEYS = new Set(['_spMeta', '_validationWarnings', '_temporal
 // character/relationship records for the wiki and returning NPCs.
 export function preserveOffSceneEntities(current, previous) {
     if (!current || !previous) return current;
+    if (!Object.hasOwn(current, 'storyThreads') && Array.isArray(previous.storyThreads)) {
+        current.storyThreads = structuredClone(previous.storyThreads.filter(thread => thread.status !== 'resolved'));
+    }
     if (Array.isArray(current.characters) && Array.isArray(previous.characters)) {
         for (const prior of previous.characters) {
             const priorKey = characterNameKey(prior?.name);
@@ -64,6 +68,7 @@ export function preserveOffSceneEntities(current, previous) {
                 continue;
             }
             const oldCurrentName = match.name;
+            carryContinuityFields(match, prior, ['knowledge']);
             if (staleName && !exact && !reveal) match.name = prior.name;
             const aliases = [...(Array.isArray(prior.aliases) ? prior.aliases : []),
                 ...(Array.isArray(match.aliases) ? match.aliases : [])];
@@ -85,7 +90,12 @@ export function preserveOffSceneEntities(current, previous) {
         for (const prior of previous.relationships) {
             const canonical = resolve(prior?.name);
             const key = characterNameKey(canonical);
-            if (!key || currentNames.has(key)) continue;
+            if (!key) continue;
+            if (currentNames.has(key)) {
+                const match = current.relationships.find(rel => characterNameKey(rel?.name) === key);
+                carryContinuityFields(match, prior, ['relationshipBasis', 'unresolvedConflicts']);
+                continue;
+            }
             current.relationships.push({ ...structuredClone(prior), name: canonical });
             currentNames.add(key);
             log('Full-state: preserved off-scene entity:', prior.name, 'in relationships');
@@ -227,6 +237,7 @@ export function mergeDelta(prev, delta) {
     // is removed as of v6.8.9 — silently strip on merge so it stops leaking into
     // delta prompts as context.
     delete merged.activeTasks;
+    if (Array.isArray(merged.storyThreads)) merged.storyThreads = merged.storyThreads.filter(thread => thread.status !== 'resolved');
 
     // 2. Apply delta overrides
     const deltaKeys = [];
@@ -299,10 +310,31 @@ export function mergeDelta(prev, delta) {
         }
         for (const ch of merged.characters) {
             const key = characterNameKey(ch?.name);
-            if (!present.has(key)) continue;
             const fresh = freshByName.get(key);
+            // The legacy entity merge ignores empty strings. Continuity
+            // explicitly permits clearing a completed intent or interpretation.
+            for (const field of ['innerThoughtBasis', 'currentIntent', 'knowledge']) {
+                if (fresh && Object.hasOwn(fresh, field)) ch[field] = structuredClone(fresh[field]);
+                else if (field !== 'knowledge' && present.has(key) && Object.hasOwn(ch, field)) ch[field] = '';
+            }
+            if (!present.has(key)) continue;
             if (!fresh || !String(fresh.innerThought || '').trim()) ch.innerThought = '';
             if (!fresh || !String(fresh.immediateNeed || '').trim()) ch.immediateNeed = '';
+        }
+    }
+
+    // Reactions and reasons describe this turn, unlike durable relationship
+    // foundations/conflicts. Alias resolution follows the same identity map.
+    const continuityNames = buildCharacterNameMap(merged.characters);
+    const continuityKey = name => characterNameKey(continuityNames.get(characterNameKey(name)) || name);
+    const freshRelationships = new Map((Array.isArray(delta.relationships) ? delta.relationships : []).map(rel => [continuityKey(rel?.name), rel]));
+    for (const rel of merged.relationships || []) {
+        const fresh = freshRelationships.get(continuityKey(rel?.name));
+        // Apply after identity reconciliation: the prior relationship may
+        // otherwise win consolidation when Stranger becomes Alice this turn.
+        for (const field of ['lastReaction', 'changeReason', 'relationshipBasis', 'unresolvedConflicts']) {
+            if (fresh && Object.hasOwn(fresh, field)) rel[field] = structuredClone(fresh[field]);
+            else if (['lastReaction', 'changeReason'].includes(field) && Object.hasOwn(rel, field)) rel[field] = '';
         }
     }
 
