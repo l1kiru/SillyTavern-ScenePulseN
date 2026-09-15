@@ -25,7 +25,8 @@ import {
 import {
     getSettings, anyPanelsActive,
     getLatestSnapshot, getLatestSnapshotEntry, getActiveSwipeId, getTrustedSnapshotFor,
-    ensureChatSaved, invalidateSettingsCache, forceFullStateRefresh
+    ensureChatSaved, invalidateSettingsCache, forceFullStateRefresh,
+    syncPinnedLibraryIntoChat
 } from './src/settings.js';
 import { normalizeTracker, clearNormCache } from './src/normalize.js';
 import { resetColorMap } from './src/color.js';
@@ -508,6 +509,7 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
     const hadInline = inlineGenStartMs > 0 || pendingInlineIdx >= 0;
     const hadEngine = generating;
     setCancelRequested(true);
+    discardTogetherSceneBuild(inlineGenerationContext, 'reply-stopped');
     try { cancelTogetherSceneBuilds(integrityAbort ? 'prompt-integrity' : 'reply-stopped'); } catch {}
 
     if (hadEngine) {
@@ -544,6 +546,9 @@ eventSource.on(event_types.GENERATION_STOPPED, () => {
 });
 
 eventSource.on(event_types.CHAT_CHANGED, async () => {
+    // Together streams do not set the Separate engine's generating flag.
+    // Restore the old chat's Full ticket before any await or context reset.
+    discardTogetherSceneBuild(inlineGenerationContext, 'chat-changed');
     // Wipe old-chat scene-build ops before any await (ensureChatSaved / dynamic imports).
     try {
         const oldKey = _lastSceneBuildChatKey;
@@ -584,6 +589,10 @@ eventSource.on(event_types.CHAT_CHANGED, async () => {
     // effective panel set may have changed between chats (different
     // per-chat overrides → different schema → delta would be wrong).
     try { const { forceFullStateRefresh } = await import('./src/settings.js'); forceFullStateRefresh(); } catch {}
+    try {
+        const chatPanels=SillyTavern.getContext()?.chatMetadata?.scenepulse?.chatPanels;
+        if(Array.isArray(chatPanels))syncPinnedLibraryIntoChat(chatPanels,{save:true});
+    } catch (e) { warn('CHAT_CHANGED pinned library:', e); }
     // v6.9.14: renderExisting → updatePanel now reads getActivePanels()
     // which returns the new chat's chatPanels automatically. No manual
     // per-panel visibility sync needed.

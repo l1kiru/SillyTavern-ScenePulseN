@@ -1,15 +1,28 @@
 // ScenePulse — Settings & Data Access Module
 // Extracted from index.js lines 413-453, 786-895
 
-import { MODULE_NAME, DEFAULTS, normalizePromptMode } from './constants.js';
+import { MODULE_NAME, DEFAULTS, normalizePromptMode, normalizeParallelMaxConcurrent } from './constants.js';
 import { log, warn } from './logger.js';
 import { esc } from './utils.js';
 import { buildDynamicSchema, buildDynamicPrompt } from './schema.js';
 import { assemblePrompt } from './prompts/assembler.js';
 import { t } from './i18n.js';
 import { consolidateQuests } from './generation/delta-merge.js';
-import { getActiveProfile, migrateLegacySettingsToProfile, migrateOrphanRootData } from './profiles.js';
-import { currentChatFingerprint, buildActiveFingerprintIndex, FINGERPRINT_VERSION } from './message-fingerprint.js';
+import {
+    customPanelScope,
+    getActiveCustomFieldSpecs,
+    getActiveProfile,
+    isBuiltInCharacterFieldKey,
+    isCanonicalCharacterFieldKey,
+    isValidCustomFieldKey,
+    migrateLegacySettingsToProfile,
+    migrateOrphanRootData,
+    normalizeCustomFieldValue,
+} from './profiles.js';
+import { currentChatKey, currentChatFingerprint, buildActiveFingerprintIndex, FINGERPRINT_VERSION } from './message-fingerprint.js';
+import { customPanelActivationKey, normalizePanelActivationMode, normalizePanelActivationStrategy, normalizeSceneTags } from './panel-activation-policy.js';
+import { loadPanelLibrary, syncPinnedLibraryPanels } from './panel-library.js';
+import { characterMatchesAudience, normalizeAudience } from './character-audience.js';
 
 // Minimal inline user-name check for the one-shot migration below.
 // Duplicates the logic in normalize.isUserName to avoid a circular import
@@ -36,6 +49,7 @@ const{extensionSettings}=SillyTavern.getContext();if(!extensionSettings[MODULE_N
     if(Object.hasOwn(s,'functionToolEnabled')){delete s.functionToolEnabled;try{SillyTavern.getContext().saveSettingsDebounced()}catch{}}
     const oldPromptMode=s.promptMode;s.promptMode=normalizePromptMode(s.promptMode);
     if(oldPromptMode!==s.promptMode){try{SillyTavern.getContext().saveSettingsDebounced()}catch{}}
+    s.parallelMaxConcurrent=normalizeParallelMaxConcurrent(s.parallelMaxConcurrent);
 // where both name AND all keys were empty, which deleted panels mid-
 // edit when the user changed a field type before filling in the key.
 // Now only strips panels with zero fields (truly abandoned stubs).
@@ -119,10 +133,10 @@ export function getActivePanels(s) {
     try {
         const profile = getActiveProfile(s);
         if (profile && Array.isArray(profile.customPanels) && profile.customPanels.length > 0) {
-            return profile.customPanels;
+            return syncPinnedLibraryPanels(profile.customPanels, loadPanelLibrary()).panels;
         }
     } catch {}
-    return [];
+    return syncPinnedLibraryPanels([], loadPanelLibrary()).panels;
 }
 
 /**
@@ -148,8 +162,37 @@ export function ensureChatPanels() {
             ctx.chatMetadata.scenepulse.chatPanels = structuredClone(seed);
             try { ctx.saveMetadata(); } catch {}
         }
+        syncPinnedLibraryIntoChat(ctx.chatMetadata.scenepulse.chatPanels, { save: true });
         return ctx.chatMetadata.scenepulse.chatPanels;
     } catch { return seed; }
+}
+
+export function syncPinnedLibraryIntoChat(chatPanels = null, { save = false, library = null } = {}) {
+    const target = Array.isArray(chatPanels) ? chatPanels : (() => {
+        try {
+            const cp = SillyTavern.getContext()?.chatMetadata?.scenepulse?.chatPanels;
+            return Array.isArray(cp) ? cp : null;
+        } catch {
+            return null;
+        }
+    })();
+    if (!Array.isArray(target)) return { changed: false, added: 0, removed: 0, detachedStale: 0, skipped: 0, skippedPanels: [] };
+    const synced = syncPinnedLibraryPanels(target, library || loadPanelLibrary());
+    const changed = synced.changed === true;
+    if (changed) {
+        target.splice(0, target.length, ...synced.panels);
+        if (save) {
+            try { SillyTavern.getContext()?.saveMetadata?.(); } catch {}
+        }
+    }
+    return {
+        changed,
+        added: synced.added,
+        removed: synced.removed,
+        detachedStale: synced.detachedStale || 0,
+        skipped: synced.skipped || 0,
+        skippedPanels: Array.isArray(synced.skippedPanels) ? synced.skippedPanels : [],
+    };
 }
 
 /** Save per-chat panel changes to metadata. No-op if no chat is active. */
@@ -158,6 +201,217 @@ export function saveChatPanels() {
         const ctx = SillyTavern.getContext();
         if (ctx && ctx.chatMetadata) ctx.saveMetadata();
     } catch {}
+}
+
+/** Effective manual/automatic panel selection for the current chat. */
+export function getPanelActivationStrategy(s=getSettings()) {
+    // Automatic routing is only available on this transport. Keep the saved
+    // preference, but use manual selection until that transport is enabled.
+    if(s?.injectionMethod!=='separate'||s?.parallelFullGeneration!==true)return 'manual';
+    return getRequestedPanelActivationStrategy(s);
+}
+
+export function getRequestedPanelActivationStrategy(s=getSettings()) {
+    try {
+        const data=SillyTavern.getContext().chatMetadata?.scenepulse;
+        if(data&&Object.hasOwn(data,'panelActivationStrategy')){
+            return normalizePanelActivationStrategy(data.panelActivationStrategy);
+        }
+    } catch {}
+    return normalizePanelActivationStrategy(s?.panelActivationStrategy);
+}
+
+/** Persist a chat-local override without rewriting panel definitions. */
+export function setPanelActivationStrategy(value) {
+    const strategy=normalizePanelActivationStrategy(value);
+    try {
+        const ctx=SillyTavern.getContext();
+        if(!ctx?.chatMetadata)return strategy;
+        if(!ctx.chatMetadata.scenepulse)ctx.chatMetadata.scenepulse={snapshots:{}};
+        ctx.chatMetadata.scenepulse.panelActivationStrategy=strategy;
+        ctx.saveMetadata?.();
+    } catch {}
+    return strategy;
+}
+
+/**
+ * Remove selected custom-field paths from the current live snapshot only.
+ * Historical snapshots are intentionally left untouched.
+ */
+export function clearLatestCustomPanelValues(specs) {
+    const snapshot = getLatestSnapshot();
+    if (!snapshot) return false;
+    let changed = false;
+    const seen = new Set();
+    for (const spec of Array.isArray(specs) ? specs : []) {
+        const scope = spec?.scope === 'character' ? 'character' : 'global';
+        const key = typeof spec?.key === 'string' ? spec.key : '';
+        const path = `${scope}:${key}`;
+        if (!key || seen.has(path)) continue;
+        seen.add(path);
+        if (scope === 'character') {
+            for (const character of Array.isArray(snapshot.characters) ? snapshot.characters : []) {
+                if (character && typeof character === 'object' && Object.hasOwn(character, key)) {
+                    delete character[key];
+                    changed = true;
+                }
+            }
+        } else if (Object.hasOwn(snapshot, key)) {
+            delete snapshot[key];
+            changed = true;
+        }
+    }
+    if (changed) {
+        try { SillyTavern.getContext().saveMetadata(); } catch {}
+    }
+    return changed;
+}
+
+function _canonicalAudience(audience) {
+    const normalized=normalizeAudience(audience);
+    return {
+        names:[...normalized.names].sort((a,b)=>a.localeCompare(b,undefined,{sensitivity:'base'})),
+        genders:[...normalized.genders].sort(),
+        keywords:[...normalized.keywords].sort(),
+    };
+}
+
+function _customFieldValueSignature(spec) {
+    const field = spec?.field || {};
+    return JSON.stringify([
+        field.type || '',
+        field.type === 'enum' && Array.isArray(field.options) ? field.options : [],
+    ]);
+}
+
+function _customFieldStorageSignature(spec) {
+    return JSON.stringify([
+        _customFieldValueSignature(spec),
+        _canonicalAudience(spec?.audience || spec?.panel?.audience || null),
+    ]);
+}
+
+function _configuredCustomFieldSpecs(panels, { charactersEnabled = true } = {}) {
+    const specs=[];
+    for(const panel of Array.isArray(panels)?panels:[]){
+        if(!panel||panel.enabled===false||!Array.isArray(panel.fields))continue;
+        const scope=customPanelScope(panel);
+        if(scope==='character'&&!charactersEnabled)continue;
+        for(const field of panel.fields){
+            const key=typeof field?.key==='string'?field.key:'';
+            if(!isValidCustomFieldKey(key)||field.enabled===false)continue;
+            // Never treat a built-in property or legacy alias as removable
+            // custom data.
+            if(scope==='character'&&isBuiltInCharacterFieldKey(key))continue;
+            specs.push({scope,key,field,audience:panel.audience||null,panel});
+        }
+    }
+    return specs;
+}
+
+/**
+ * Clear values whose active storage path or value contract changed.
+ */
+export function reconcileLatestCustomPanelValues(previousPanels, nextPanels, {
+    previousCharactersEnabled = true,
+    nextCharactersEnabled = true,
+} = {}) {
+    const previousSpecs=_configuredCustomFieldSpecs(previousPanels,{charactersEnabled:previousCharactersEnabled});
+    const nextSpecs=_configuredCustomFieldSpecs(nextPanels,{charactersEnabled:nextCharactersEnabled});
+    const nextByPath=new Map(nextSpecs.map(spec=>[`${spec.scope}:${spec.key}`,spec]));
+    const clearAll=[];
+    const audienceChanged=[];
+    for(const previous of previousSpecs){
+        const path=`${previous.scope}:${previous.key}`;
+        const next=nextByPath.get(path);
+        if(!next||_customFieldValueSignature(previous)!==_customFieldValueSignature(next)){
+            clearAll.push(previous);
+            continue;
+        }
+        if(_customFieldStorageSignature(previous)!==_customFieldStorageSignature(next)){
+            audienceChanged.push(next);
+        }
+    }
+    let changed=clearLatestCustomPanelValues(clearAll);
+    if(audienceChanged.length){
+        const snapshot=getLatestSnapshot();
+        if(snapshot){
+            for(const spec of audienceChanged){
+                if(spec.scope!=='character')continue;
+                for(const character of Array.isArray(snapshot.characters)?snapshot.characters:[]){
+                    if(!character||typeof character!=='object'||!Object.hasOwn(character,spec.key))continue;
+                    if(!characterMatchesAudience(character,spec.audience||spec.panel?.audience||null)){
+                        delete character[spec.key];
+                        changed=true;
+                    }
+                }
+            }
+            if(changed){try{SillyTavern.getContext().saveMetadata()}catch{}}
+        }
+    }
+    return changed;
+}
+
+function _sortedEntries(value) {
+    return Object.entries(value && typeof value === 'object' ? value : {})
+        .sort(([a], [b]) => a.localeCompare(b));
+}
+
+function _trackerStructureSignature(structure) {
+    const charactersEnabled=structure?.panels?.characters!==false;
+    const customFields=_configuredCustomFieldSpecs(structure?.customPanels,{
+        charactersEnabled,
+    }).map(spec=>[
+        `${spec.scope}:${spec.key}`,
+        _customFieldStorageSignature(spec),
+    ]).sort(([a],[b])=>a.localeCompare(b));
+    const customActivation=(Array.isArray(structure?.customPanels)?structure.customPanels:[])
+        .filter(panel=>panel?.enabled!==false)
+        .map(panel=>[
+            customPanelActivationKey(panel),
+            normalizePanelActivationMode(panel),
+            normalizeSceneTags(panel?.activationTags),
+            _canonicalAudience(panel?.audience||null),
+        ])
+        .sort(([a],[b])=>a.localeCompare(b));
+    return JSON.stringify({
+        profileId:structure?.profileId||null,
+        panels:_sortedEntries(structure?.panels),
+        fieldToggles:_sortedEntries(structure?.fieldToggles),
+        dashCards:_sortedEntries(structure?.dashCards),
+        customFields,
+        customActivation,
+        panelActivationStrategy:normalizePanelActivationStrategy(structure?.panelActivationStrategy),
+    });
+}
+
+/** Capture the effective request-shaping configuration for the current chat. */
+export function captureTrackerStructure() {
+    const settings=getSettings();
+    const profile=getActiveProfile(settings);
+    const view=buildProfileView(settings,profile);
+    return {
+        profileId:profile?.id||null,
+        panels:structuredClone({...DEFAULTS.panels,...(view.panels||{})}),
+        fieldToggles:structuredClone(view.fieldToggles||{}),
+        dashCards:structuredClone({...DEFAULTS.dashCards,...(view.dashCards||{})}),
+        customPanels:structuredClone(getActivePanels(view)),
+        panelActivationStrategy:getRequestedPanelActivationStrategy(settings),
+    };
+}
+
+/**
+ * Reconcile one completed structural edit and force the next request to full
+ * state. Callers mutate settings first, then pass the pre-edit capture.
+ */
+export function reconcileTrackerStructureChange(previous, next = captureTrackerStructure()) {
+    if(!previous||!next||_trackerStructureSignature(previous)===_trackerStructureSignature(next))return false;
+    reconcileLatestCustomPanelValues(previous.customPanels,next.customPanels,{
+        previousCharactersEnabled:previous.panels?.characters!==false,
+        nextCharactersEnabled:next.panels?.characters!==false,
+    });
+    forceFullStateRefresh();
+    return true;
 }
 
 // v6.23.4 BUGFIX: was reading `s.panels` (root) which the v6.16.2+ orphan
@@ -180,7 +434,13 @@ export function anyPanelsActive(){
         p = s.panels || DEFAULTS.panels;
         panels = getActivePanels(s);
     }
-    return Object.values(p).some(v=>v!==false) || panels.some(cp=>cp.enabled!==false && cp.fields?.length>0);
+    const hasBuiltInPanel=Object.values(p).some(v=>v!==false);
+    const hasCustomPanel=panels.some(cp=>
+        cp?.enabled!==false &&
+        cp.fields?.length>0 &&
+        (customPanelScope(cp)!=='character'||p.characters!==false)
+    );
+    return hasBuiltInPanel||hasCustomPanel;
 }
 
 export function getTrackerData(){
@@ -805,12 +1065,16 @@ export function getLatestSnapshot(){const e=getLatestSnapshotEntry();return e?.s
  * snapshot is saved (in engine.js / pipeline.js), so repeated calls
  * within the same turn return the same answer.
  */
-let _forceFullNextTurn = false;
+const _fullRefreshByChat = new Map();
+function fullRefreshState(key=currentChatKey()) {
+    if(!_fullRefreshByChat.has(key))_fullRefreshByChat.set(key,{required:false,epoch:0});
+    return _fullRefreshByChat.get(key);
+}
 
 export function shouldUseDelta(snapshot = getLatestSnapshot()) {
     const s = getSettings();
     if (!s.deltaMode) return false;
-    if (_forceFullNextTurn) return false;
+    if (fullRefreshState().required) return false;
     if (!snapshot) return false;
     const interval = typeof s.deltaRefreshInterval === 'number' ? s.deltaRefreshInterval : 15;
     if (interval <= 0) return true; // periodic refresh disabled
@@ -827,15 +1091,36 @@ export function shouldUseDelta(snapshot = getLatestSnapshot()) {
  * normally.
  */
 export function forceFullStateRefresh() {
-    _forceFullNextTurn = true;
+    const state=fullRefreshState();
+    state.required=true;
+    state.epoch++;
 }
 
 /**
- * Clear the force-full flag. Called after the generation completes
- * (success or failure) so the flag doesn't persist across user actions.
+ * Consume the force-full flag after a concrete request has captured its
+ * delta/full decision. Mid-flight structural edits can re-arm the flag for
+ * the *following* turn. If this full run fails, call
+ * rearmForceFullAfterFailedFullRun(false) so the debt is not lost.
  */
 export function clearForceFullState() {
-    _forceFullNextTurn = false;
+    const chatKey=currentChatKey();
+    const state=fullRefreshState(chatKey);
+    state.required=false;
+    return {chatKey,epoch:++state.epoch};
+}
+
+/**
+ * Restore force-full after a terminal failure of a whole-tracker full run.
+ * No-op when the failed run was delta (preserves mid-flight re-arms).
+ */
+export function rearmForceFullAfterFailedFullRun(ranAsDelta, ticket=null) {
+    if (ranAsDelta) return;
+    if(ticket){
+        const state=fullRefreshState(ticket.chatKey);
+        if(state.epoch===ticket.epoch)state.required=true;
+        return;
+    }
+    forceFullStateRefresh();
 }
 
 // v6.22.1: Wiki Permanence Archive — guarantees the Character Wiki shows
@@ -867,7 +1152,16 @@ function _updateWikiArchive(data, snap){
             if(!nm || nm === '?') continue;
             // Latest write wins. Stash a deep copy so future delta merges
             // mutating the original snapshot don't bleed into the archive.
-            arc.characters[nm] = { ...ch, _spArchivedAt: new Date().toISOString() };
+            const incoming = { ...structuredClone(ch), _spArchivedAt: new Date().toISOString() };
+            const prior = arc.characters[nm];
+            if (prior && typeof prior === 'object') {
+                for (const key of Object.keys(prior)) {
+                    if (key.startsWith('_sp')) continue;
+                    const val = incoming[key];
+                    if (val === undefined || val === null || val === '') incoming[key] = prior[key];
+                }
+            }
+            arc.characters[nm] = incoming;
             // Index by aliases too so the wiki can look up by old placeholder.
             // Always reassign — if the model reveals "Karen had alias Stranger",
             // the alias key should resolve to the Karen entry, not whatever
@@ -885,7 +1179,6 @@ function _updateWikiArchive(data, snap){
                         continue;
                     }
                     arc.aliasOwners[al] = nm;
-                    arc.characters[al] = arc.characters[nm];
                 }
             }
         }
@@ -894,7 +1187,7 @@ function _updateWikiArchive(data, snap){
         for(const rel of snap.relationships){
             const nm = (rel?.name || '').toLowerCase().trim();
             if(!nm) continue;
-            arc.relationships[nm] = { ...rel, _spArchivedAt: new Date().toISOString() };
+            arc.relationships[nm] = { ...structuredClone(rel), _spArchivedAt: new Date().toISOString() };
         }
     }
 }
@@ -929,8 +1222,57 @@ export function getWikiArchive(){
     return _ensureArchive(data);
 }
 
-export function saveSnapshot(id,j,swipeId=getActiveSwipeId(id)){
+/** Freeze the active character custom-field contracts for one request. */
+export function captureCharacterCustomFieldSpecs() {
+    const settings=getSettings();
+    const view=buildProfileView(settings,getActiveProfile(settings));
+    if(view.panels?.characters===false)return[];
+    return getActiveCustomFieldSpecs(getActivePanels(view),'character')
+        .map(spec=>({
+            key:spec.key,
+            field:structuredClone(spec.field),
+            audience:structuredClone(spec.panel?.audience||spec.audience||null),
+            panelId:customPanelActivationKey(spec.panel),
+            activationMode:normalizePanelActivationMode(spec.panel),
+        }));
+}
+
+export function sanitizeCharacterCustomFields(snapshot, {
+    customFieldSpecs = null,
+    preserveAliases = false,
+} = {}) {
+    if (!snapshot || !Array.isArray(snapshot.characters)) return;
+    const specs = new Map(
+        (customFieldSpecs??captureCharacterCustomFieldSpecs())
+            .map(spec=>[spec.key,spec]),
+    );
+    for (const character of snapshot.characters) {
+        if (!character || typeof character !== 'object') continue;
+        for (const key of Object.keys(character)) {
+            if (
+                isCanonicalCharacterFieldKey(key)
+                || (preserveAliases&&isBuiltInCharacterFieldKey(key))
+                || (preserveAliases&&key==='_spKey')
+                || key === '_isPrimary'
+            ) continue;
+            const spec = specs.get(key);
+            const field = spec?.field || spec;
+            if (spec?.audience && !characterMatchesAudience(character, spec.audience)) {
+                delete character[key];
+                continue;
+            }
+            const normalized = field ? normalizeCustomFieldValue(field, character[key]) : { ok: false };
+            if (!normalized.ok) delete character[key];
+            else character[key] = normalized.value;
+        }
+    }
+}
+
+export function saveSnapshot(id,j,swipeId=getActiveSwipeId(id),{customFieldSpecs=null}={}){
     const data=getTrackerData();
+    // Persist only configured character custom fields whose values satisfy the
+    // same type/range/enum contract used by the dynamic schema and inline UI.
+    sanitizeCharacterCustomFields(j,{customFieldSpecs});
     // v6.16.2: stamp savedAt on every snapshot at write time so the inspector's
     // sparkline can correlate crash-log timestamps to turn IDs (Panel B
     // backfill). Live under _spMeta to avoid colliding with model-emitted
@@ -981,9 +1323,11 @@ export function getTrustedSnapshotFor(id,swipeId=getActiveSwipeId(id)){
     return getSnapshotStatus(id,swipeId,snap)==='stale'?null:snap;
 }
 
-export function getSnapshotProvenance(){
+export function getSnapshotProvenance(ids=null){
     const data=getTrackerData();const ctx=SillyTavern.getContext();const index=buildActiveFingerprintIndex(ctx.chat);const out=[];
+    const wanted=Array.isArray(ids)&&ids.length?new Set(ids.map(Number)):null;
     for(const id of Object.keys(data.swipeSnapshots||{}).map(Number).filter(Number.isFinite).sort((a,b)=>a-b)){
+        if(wanted&&!wanted.has(id))continue;
         const swipeId=getActiveSwipeId(id);const snapshot=_snapshotFor(data,id,swipeId);if(!snapshot)continue;
         const current=index.get(id)||'';const status=getSnapshotStatus(id,swipeId,snapshot,current);
         let reason='';
@@ -1125,7 +1469,16 @@ export function getActivePrompt(opts){
     // (full-text override) still wins inside the assembler. Settings UI
     // preview and slash-command preview keep using buildDynamicPrompt(s)
     // (no profile) so they always render the slot defaults.
-    const sView = buildProfileView(s, profile);
+    const baseView = buildProfileView(s, profile);
+    const hasRuntimeIds=Array.isArray(opts?.runtimeActivePanelIds);
+    const hasRuntimePanels=Array.isArray(opts?.runtimeCustomPanels);
+    const sView = hasRuntimeIds||hasRuntimePanels
+        ? {
+            ...baseView,
+            ...(hasRuntimeIds?{runtimeActivePanelIds:[...opts.runtimeActivePanelIds]}:{}),
+            ...(hasRuntimePanels?{runtimeCustomPanels:structuredClone(opts.runtimeCustomPanels)}:{}),
+        }
+        : baseView;
     return assemblePrompt(sView, profile, opts);
 }
 
@@ -1168,6 +1521,16 @@ export function getLanguage(){
 
 // ── External Access ──
 export function getConnectionProfiles(){try{const o=document.querySelectorAll('#connection_profiles option, #connection_profile option');if(o.length)return Array.from(o).filter(x=>x.value).map(x=>({id:x.value,name:x.textContent.trim()}))}catch(e){warn('Profiles:',e)}return[]}
+
+export function getResolvedConnectionProfileId(settings=getSettings(),ctx=_getContextSafe()){
+    const local=String(settings?.connectionProfile||'').trim();
+    if(local)return local;
+    try{
+        return String(ctx?.extensionSettings?.connectionManager?.selectedProfile||'').trim();
+    }catch{
+        return '';
+    }
+}
 
 export function getChatPresets(){try{for(const sel of['#settings_preset_openai','#preset_openai_select','#settings_preset_chat']){const o=document.querySelectorAll(`${sel} option`);if(o.length>1)return Array.from(o).filter(x=>x.value).map(x=>({id:x.value,name:x.textContent.trim()}))}}catch(e){warn('Presets:',e)}return[]}
 

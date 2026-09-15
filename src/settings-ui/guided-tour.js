@@ -86,7 +86,7 @@ export function startGuidedTour(){
         _tourPanelCreated=false;
     }
     let _ghostWasOn=false;
-    const _isMobile=spDetectMode()==='mobile';
+    const _isMobile=spDetectMode()!=='desktop';
     let steps=[
         {title:t('Welcome to ScenePulse'),desc:t('ScenePulse tracks characters, relationships, quests, and story state automatically. This tour loads <strong>example data</strong> so you can inspect every feature.'),sel:'.sp-toolbar',pos:'below'},
         {title:t('The Dashboard'),desc:t('Shows time, date, location, weather, and temperature. Use edit mode to correct values manually.'),sel:'.sp-env-permanent',pos:'below'},

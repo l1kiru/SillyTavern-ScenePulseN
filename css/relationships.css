@@ -272,3 +272,19 @@
 .sp-meter-desire .sp-meter-bar-fill { background: linear-gradient(90deg,#b060a0,#d480c0); }
 .sp-meter-stress .sp-meter-bar-fill { background: linear-gradient(90deg,#c47040,#e89060); }
 .sp-meter-compatibility .sp-meter-bar-fill { background: linear-gradient(90deg,#40a0c4,#60c8e8); }
+
+/* Mobile/touch hardening for the full-screen history graph. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-graph-overlay {
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+        box-sizing: border-box;
+    }
+    .sp-graph-container {
+        width: 100%; max-width: 100%;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    .sp-graph-title { min-width: 0; overflow-wrap: anywhere; }
+    .sp-graph-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; flex: 0 0 44px; }
+    .sp-graph-legend-btn { min-height: 44px; padding: 8px 10px; }
+    .sp-graph-tip-goto { min-height: 44px; }
+}

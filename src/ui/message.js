@@ -4,7 +4,7 @@ import { t } from '../i18n.js';
 import { MES_ICON_SVG } from '../constants.js';
 import { SP_MARKER_START, extractInlineTracker, extractInlineTrackerWithReplySplit } from '../generation/extraction.js';
 import { getSettings } from '../settings.js';
-import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
+import { getTrackerData, getLatestSnapshotEntry, getSnapshotEntryForMessage, getTrustedSnapshotFor, getActiveSwipeId, getPrevSnapshot, reconcileSnapshotsAfterChatMutation, sanitizeCharacterCustomFields, saveSnapshot, resolveScrubMesIdx } from '../settings.js';
 import { normalizeTracker } from '../normalize.js';
 import {
     generating, genNonce, setLastGenSource,
@@ -326,12 +326,13 @@ export async function onCharMsg(idx){
         // CRITICAL: Save the chat to disk FIRST, then wait for ST to finish all post-save hooks.
         // withProfileAndPreset triggers connection_profile_loaded -> CHAT_CHANGED -> chat reload.
         // If the message isn't saved to disk yet, it gets lost in the reload.
-        log('onCharMsg: saving chat and waiting 4s before auto-gen...');
+        const useBoundParallel=s.parallelFullGeneration===true&&s.injectionMethod==='separate';
+        log('onCharMsg: saving chat'+(useBoundParallel?' before auto-gen...':' and waiting 4s before auto-gen...'));
         setLastGenSource('auto:separate');
         const scheduledSwipeId=getActiveSwipeId(idx);
         const scheduledOwner=captureOperationOwner(idx,scheduledSwipeId);
         await ensureChatSaved();
-        await new Promise(r=>setTimeout(r,4000));
+        if(!useBoundParallel)await new Promise(r=>setTimeout(r,4000));
         // Re-check the exact chat/message/swipe after the delay. A swipe, edit,
         // deletion or chat switch must not let this old timer generate into the
         // new branch. Also avoid a duplicate call if another path already saved it.
@@ -469,6 +470,7 @@ export async function renderExisting(targetMessageId){
                 // across the recovered timeline. Idempotent: identical
                 // raw payloads always produce identical merged output.
                 const merged=mergedSoFar?_md(mergedSoFar,extracted):extracted;
+                sanitizeCharacterCustomFields(merged,{preserveAliases:true});
                 const norm=normalizeTracker(merged);
                 setCurrentSnapshotMesIdx(i);
                 saveSnapshot(i,norm);

@@ -5,6 +5,46 @@ modules. File-level headers cover module-local invariants; this document
 covers the things you'd otherwise have to reverse-engineer by reading
 five files.
 
+## Parallel extraction and continuity
+
+Separate optionally uses `parallel-build.js` through Connection Manager. Core owns
+time, location, current NPC roster and routing tags; character lanes own character
+continuity and custom character fields; Global owns relationships, quests, story threads
+and global custom fields. Lanes only return data. The engine validates, normalizes and
+saves one assembled snapshot. Only failed lanes are retried, within the configured
+concurrency limit. Automatic panel routing uses `SCENE_TAG_REGISTRY`, including `rest`.
+
+When character lanes are needed, Core requests `charactersPresent` even if its UI field
+or Scene panel is hidden. This operational roster stays in the snapshot for merge and
+presence filtering; UI visibility and narrative context projection still honor field
+settings. Audience validation applies to current-scene characters, not restored archive
+entries. A newly active audience panel needs initial values; ordinary Delta omissions
+can carry values already recorded for that character.
+
+The engine captures the schema, panel specifications, prompt role and a cloned base
+snapshot before transport. Parallel prompt macros are resolved through the ST context
+API before the first request and reused by subsequent lanes and retries, including
+schema descriptions. Saving uses the same frozen custom-field specifications, so an
+in-flight settings edit cannot strip accepted values. Chat/swipe ownership is checked
+before persistence. Together also clones its base snapshot at interception.
+
+Full-refresh debt is held per chat with an operation epoch. Consuming it returns a
+ticket; cancellation/failure can restore only that ticket's owner and epoch. A late old
+request cannot rearm a newer successful operation. Together chat changes, Stop and
+watchdog cleanup restore debt before dropping the inline context. Section updates do
+not consume the whole-scene ticket.
+
+Partial builds record `_spMeta.parallel.partial` and show a localized notice. Carried
+durable facts remain available; transient thoughts, intentions, immediate needs and
+reactions are cleared. Off-scene records remain last-known state without simulation.
+Both narrative delivery modes use `prepareSnapshotContext`; parallel transport does
+not disable the Separate embedding preference. Narrative output is never graded or
+regenerated to enforce predicted events.
+
+Automatic routing is effective only in Separate with parallel enabled. Other modes
+use manual panel selection while retaining the requested strategy. Connection Manager
+uses its saved profile preset; the legacy preset override belongs to ordinary requests.
+
 ## Module graph
 
 ```

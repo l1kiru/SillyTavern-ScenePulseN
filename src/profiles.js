@@ -16,8 +16,10 @@
 // `s.activeProfileId`. Used by the dropdown switcher when "this chat
 // only" is selected.
 
-import { DEFAULTS } from './constants.js';
+import { BUILTIN_SCHEMA, DEFAULTS, normalizeParallelMaxConcurrent } from './constants.js';
 import { log } from './logger.js';
+import { PANEL_ACTIVATION_MODES, PANEL_ACTIVATION_STRATEGIES, SCENE_TAG_REGISTRY } from './panel-activation-policy.js';
+import { CHARACTER_GENDER_OPTIONS, normalizeAudience, normalizeGenderToken } from './character-audience.js';
 import { normalizeTrackerPromptStyle } from './prompts/together-framing.js';
 
 const CUSTOM_PANEL_LIMITS = Object.freeze({
@@ -32,12 +34,48 @@ const CUSTOM_PANEL_LIMITS = Object.freeze({
     option: 100,
 });
 const CUSTOM_FIELD_TYPES = new Set(['text', 'number', 'meter', 'list', 'enum']);
+const CUSTOM_PANEL_SCOPES = new Set(['global', 'character']);
+const CUSTOM_PANEL_ACTIVATION_MODES = new Set(PANEL_ACTIVATION_MODES);
+const CUSTOM_PANEL_ACTIVATION_TAGS = new Set(SCENE_TAG_REGISTRY);
 const RESERVED_FIELD_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const FIELD_KEY_RE = /^[a-z_][a-z0-9_]*$/;
 const PANEL_ID_RE = /^cp_[a-z0-9_-]+$/i;
+const BUILTIN_CHARACTER_PROPERTY_KEYS = new Set([
+    ...Object.keys(BUILTIN_SCHEMA.value.properties.characters.items.properties),
+    'gender',
+    'sex',
+]);
+// Every alternate key consumed by normalizeChar(). A custom field using one
+// of these names would also write a built-in property during normalization.
+const BUILTIN_CHARACTER_FIELD_ALIASES = [
+    'charactername', 'character_name', 'charname', 'fullname', 'full_name',
+    'identity', 'who', 'emotion', 'title',
+    'thought', 'thinking', 'monologue',
+    'need', 'doing', 'trying', 'urgentaction',
+    'shortterm', 'neargoal',
+    'longterm', 'lifemotivation', 'overarchinggoal',
+    'makeup', 'expression',
+    'clothing', 'stateofdress', 'dress',
+    'stance', 'physicalstate', 'physical', 'condition',
+    'position',
+    'details', 'distinguishing', 'markings',
+    'items',
+    'status', 'notes',
+    'fertreason', 'statusreason',
+    'fertcyclephase', 'cyclephase',
+    'fertcycleday', 'cycleday',
+    'fertwindow', 'fertilitywindow',
+    'fertpregnancy', 'pregnancystatus',
+    'fertpregweek', 'pregnancyweek',
+    'fertilitytracker', 'fertility',
+];
+const RESERVED_CHARACTER_FIELD_KEYS = new Set(
+    [...BUILTIN_CHARACTER_PROPERTY_KEYS, ...BUILTIN_CHARACTER_FIELD_ALIASES]
+        .map(normalizeCharacterFieldKey),
+);
 const SAFE_MAP_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const CONFIG_SCALAR_KEYS = new Set([
-    'injectionMethod', 'deltaMode', 'language', 'theme', 'fontScale',
+    'injectionMethod', 'deltaMode', 'parallelFullGeneration', 'parallelMaxConcurrent', 'panelActivationStrategy', 'language', 'theme', 'fontScale',
     'contextMessages', 'maxRetries', 'promptMode', 'embedSnapshots',
     'embedRole', 'autoGenerate', 'showThoughts', 'showEmptyFields',
     'sceneTransitions', 'sceneSourceTrace', 'sceneSourceTraceDiagnostics',
@@ -49,11 +87,148 @@ export function customPanelSectionKey(name) {
     return 'custom_' + String(name || 'untitled').replace(/\s+/g, '_').toLowerCase();
 }
 
+/**
+ * Return the normalized target scope for a custom panel.
+ *
+ * Legacy panels predate the `scope` property and must continue behaving as
+ * top-level/global panels. Only the explicit `character` value opts into
+ * per-character fields.
+ */
+export function customPanelScope(panel) {
+    return panel?.scope === 'character' ? 'character' : 'global';
+}
+
+export function isCharacterScopedPanel(panel) {
+    return customPanelScope(panel) === 'character';
+}
+
+export function normalizeCharacterFieldKey(value) {
+    return typeof value === 'string'
+        ? value.trim().toLowerCase().replaceAll('_', '')
+        : '';
+}
+
+export function isCanonicalCharacterFieldKey(value) {
+    return typeof value === 'string' && BUILTIN_CHARACTER_PROPERTY_KEYS.has(value);
+}
+
+export function isBuiltInCharacterFieldKey(value) {
+    return RESERVED_CHARACTER_FIELD_KEYS.has(normalizeCharacterFieldKey(value));
+}
+
 export function isValidCustomFieldKey(value) {
     return typeof value === 'string'
         && value.length <= CUSTOM_PANEL_LIMITS.key
         && FIELD_KEY_RE.test(value)
         && !RESERVED_FIELD_KEYS.has(value);
+}
+
+/**
+ * Return enabled, valid custom field definitions in storage-path order.
+ * Duplicate paths are ignored defensively; validation prevents creating them.
+ */
+export function getActiveCustomFieldSpecs(panels, requestedScope = null) {
+    const specs = [];
+    const seen = new Set();
+    for (const panel of Array.isArray(panels) ? panels : []) {
+        if (!panel || panel.enabled === false || !Array.isArray(panel.fields)) continue;
+        const scope = customPanelScope(panel);
+        if (requestedScope && scope !== requestedScope) continue;
+        for (const field of panel.fields) {
+            if (!field || field.enabled === false || !isValidCustomFieldKey(field.key)) continue;
+            if (scope === 'character' && isBuiltInCharacterFieldKey(field.key)) continue;
+            const path = `${scope}:${field.key}`;
+            if (seen.has(path)) continue;
+            seen.add(path);
+            specs.push({ scope, key: field.key, panel, field });
+        }
+    }
+    return specs;
+}
+
+/**
+ * Validate one model/UI value against an existing custom field definition.
+ */
+export function normalizeCustomFieldValue(field, value) {
+    if (!field || typeof field !== 'object') return { ok: false };
+    if (field.type === 'text') {
+        return typeof value === 'string' ? { ok: true, value } : { ok: false };
+    }
+    if (field.type === 'number') {
+        return typeof value === 'number' && Number.isInteger(value)
+            ? { ok: true, value }
+            : { ok: false };
+    }
+    if (field.type === 'meter') {
+        return typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100
+            ? { ok: true, value }
+            : { ok: false };
+    }
+    if (field.type === 'list') {
+        return Array.isArray(value) && value.every(item => typeof item === 'string')
+            ? { ok: true, value: value.slice(0, 100) }
+            : { ok: false };
+    }
+    if (field.type === 'enum') {
+        const options = Array.isArray(field.options) ? field.options : [];
+        return typeof value === 'string' && options.includes(value)
+            ? { ok: true, value }
+            : { ok: false };
+    }
+    return { ok: false };
+}
+
+/**
+ * Validate the active UI configuration while allowing incomplete/disabled
+ * drafts to remain editable.
+ */
+export function validateActiveCustomPanelFields(panels) {
+    const errors = [];
+    const panelNames = new Set();
+    const fieldPaths = new Set();
+    for (const panel of Array.isArray(panels) ? panels : []) {
+        if (!panel || panel.enabled === false) continue;
+        if (Object.hasOwn(panel, 'activationMode')) {
+            const mode = typeof panel.activationMode === 'string' ? panel.activationMode.trim().toLowerCase() : '';
+            if (!CUSTOM_PANEL_ACTIVATION_MODES.has(mode)) errors.push(`Panel activationMode must be one of ${PANEL_ACTIVATION_MODES.join(', ')}`);
+        }
+        if (Object.hasOwn(panel, 'activationTags')) {
+            if (!Array.isArray(panel.activationTags)) errors.push('Panel activationTags must be an array');
+            else {
+                const seenTags = new Set();
+                for (const rawTag of panel.activationTags) {
+                    const tag = typeof rawTag === 'string' ? rawTag.trim().toLowerCase() : '';
+                    if (!CUSTOM_PANEL_ACTIVATION_TAGS.has(tag)) errors.push(`Unsupported panel activation tag: ${tag || '(empty)'}`);
+                    else if (seenTags.has(tag)) errors.push(`Duplicate panel activation tag: ${tag}`);
+                    seenTags.add(tag);
+                }
+            }
+        }
+        const scope = customPanelScope(panel);
+        const name = String(panel.name || '').trim();
+        if (name) {
+            const sectionKey = customPanelSectionKey(name);
+            if (panelNames.has(sectionKey)) errors.push(`Panel name "${name}" is duplicated`);
+            panelNames.add(sectionKey);
+        }
+        for (const field of Array.isArray(panel.fields) ? panel.fields : []) {
+            if (!field || field.enabled === false) continue;
+            const key = String(field.key || '').trim().toLowerCase();
+            if (!key) continue;
+            if (!isValidCustomFieldKey(key)) {
+                errors.push(`Field key "${key}" is reserved or invalid`);
+                continue;
+            }
+            if (scope === 'character' && isBuiltInCharacterFieldKey(key)) {
+                errors.push(`Character field key "${key}" conflicts with a built-in field`);
+                continue;
+            }
+            const path = `${scope}:${key}`;
+            if (fieldPaths.has(path)) errors.push(`Field key "${key}" is duplicated in ${scope} scope`);
+            fieldPaths.add(path);
+        }
+    }
+    return { ok: errors.length === 0, errors };
 }
 
 // v6.18.0: promptOverrides (per-slot overrides) added.
@@ -118,6 +293,7 @@ export function validateCustomPanels(raw) {
 
     const cleanPanels = [];
     const panelKeys = new Set();
+    const panelIds = new Set();
     const fieldKeys = new Set();
 
     for (let panelIndex = 0; panelIndex < Math.min(raw.length, CUSTOM_PANEL_LIMITS.panels); panelIndex++) {
@@ -143,6 +319,72 @@ export function validateCustomPanels(raw) {
         if (Object.hasOwn(rawPanel, 'enabled') && typeof rawPanel.enabled !== 'boolean') {
             errors.push(`${panelLabel}.enabled must be a boolean`);
         }
+        let scope = 'global';
+        if (Object.hasOwn(rawPanel, 'scope')) {
+            if (typeof rawPanel.scope !== 'string') {
+                errors.push(`${panelLabel}.scope must be a string`);
+            } else {
+                scope = rawPanel.scope.trim().toLowerCase();
+                if (!CUSTOM_PANEL_SCOPES.has(scope)) {
+                    errors.push(`${panelLabel}.scope must be one of ${[...CUSTOM_PANEL_SCOPES].join(', ')}`);
+                }
+            }
+        }
+        let activationMode = 'always';
+        if (Object.hasOwn(rawPanel, 'activationMode')) {
+            if (typeof rawPanel.activationMode !== 'string') {
+                errors.push(`${panelLabel}.activationMode must be a string`);
+            } else {
+                activationMode = rawPanel.activationMode.trim().toLowerCase();
+                if (!CUSTOM_PANEL_ACTIVATION_MODES.has(activationMode)) {
+                    errors.push(`${panelLabel}.activationMode must be one of ${PANEL_ACTIVATION_MODES.join(', ')}`);
+                }
+            }
+        }
+        const activationTags = [];
+        if (Object.hasOwn(rawPanel, 'activationTags')) {
+            if (!Array.isArray(rawPanel.activationTags)) {
+                errors.push(`${panelLabel}.activationTags must be an array`);
+            } else {
+                const tagSet = new Set();
+                for (let tagIndex = 0; tagIndex < rawPanel.activationTags.length; tagIndex++) {
+                    const rawTag = rawPanel.activationTags[tagIndex];
+                    const tag = typeof rawTag === 'string' ? rawTag.trim().toLowerCase() : '';
+                    if (!CUSTOM_PANEL_ACTIVATION_TAGS.has(tag)) {
+                        errors.push(`${panelLabel}.activationTags[${tagIndex}] must be one of ${SCENE_TAG_REGISTRY.join(', ')}`);
+                        continue;
+                    }
+                    if (tagSet.has(tag)) continue;
+                    tagSet.add(tag);
+                    activationTags.push(tag);
+                }
+            }
+        }
+        let audience = normalizeAudience();
+        if (Object.hasOwn(rawPanel, 'audience')) {
+            if (!_isPlainObject(rawPanel.audience)) {
+                errors.push(`${panelLabel}.audience must be an object`);
+            } else {
+                if (Object.hasOwn(rawPanel.audience, 'names') && !Array.isArray(rawPanel.audience.names)) {
+                    errors.push(`${panelLabel}.audience.names must be an array`);
+                }
+                if (Object.hasOwn(rawPanel.audience, 'genders') && !Array.isArray(rawPanel.audience.genders)) {
+                    errors.push(`${panelLabel}.audience.genders must be an array`);
+                } else if (Array.isArray(rawPanel.audience.genders)) {
+                    for (const rawGender of rawPanel.audience.genders) {
+                        const gender = String(rawGender || '').trim();
+                        if (!gender) continue;
+                        if (!CHARACTER_GENDER_OPTIONS.includes(normalizeGenderToken(gender))) {
+                            errors.push(`${panelLabel}.audience.genders contains an unsupported value: ${gender}`);
+                        }
+                    }
+                }
+                if (Object.hasOwn(rawPanel.audience, 'keywords') && !Array.isArray(rawPanel.audience.keywords)) {
+                    errors.push(`${panelLabel}.audience.keywords must be an array`);
+                }
+                audience = normalizeAudience(rawPanel.audience);
+            }
+        }
 
         const fields = [];
         for (let fieldIndex = 0; fieldIndex < Math.min(rawPanel.fields.length, CUSTOM_PANEL_LIMITS.fieldsPerPanel); fieldIndex++) {
@@ -156,8 +398,12 @@ export function validateCustomPanels(raw) {
             const key = _cleanString(rawField.key, `${fieldLabel}.key`, CUSTOM_PANEL_LIMITS.key, errors, { required: true }).toLowerCase();
             if (key && !FIELD_KEY_RE.test(key)) errors.push(`${fieldLabel}.key must match ${FIELD_KEY_RE}`);
             if (RESERVED_FIELD_KEYS.has(key)) errors.push(`${fieldLabel}.key is reserved`);
-            if (key && fieldKeys.has(key)) errors.push(`${fieldLabel}.key duplicates another custom field key`);
-            if (key) fieldKeys.add(key);
+            if (scope === 'character' && isBuiltInCharacterFieldKey(key)) {
+                errors.push(`${fieldLabel}.key conflicts with a built-in character field`);
+            }
+            const scopedKey = `${scope}:${key}`;
+            if (key && fieldKeys.has(scopedKey)) errors.push(`${fieldLabel}.key duplicates another custom field key in the same scope`);
+            if (key) fieldKeys.add(scopedKey);
 
             const label = _cleanString(Object.hasOwn(rawField, 'label') ? rawField.label : '', `${fieldLabel}.label`, CUSTOM_PANEL_LIMITS.label, errors);
             const desc = _cleanString(Object.hasOwn(rawField, 'desc') ? rawField.desc : '', `${fieldLabel}.desc`, CUSTOM_PANEL_LIMITS.description, errors);
@@ -197,8 +443,17 @@ export function validateCustomPanels(raw) {
             fields.push(field);
         }
 
-        const panel = { id: _newPanelId(rawPanel.id), name, fields };
+        let panelId = _newPanelId(rawPanel.id);
+        while (panelIds.has(panelId)) panelId = _newPanelId('');
+        panelIds.add(panelId);
+        const panel = { id: panelId, name, scope, activationMode, activationTags, audience, fields };
         if (rawPanel.enabled === false) panel.enabled = false;
+        if (typeof rawPanel.sourceLibraryId === 'string' && rawPanel.sourceLibraryId.trim()) {
+            panel.sourceLibraryId = rawPanel.sourceLibraryId.trim();
+        }
+        if (typeof rawPanel.sourceLibraryName === 'string' && rawPanel.sourceLibraryName.trim()) {
+            panel.sourceLibraryName = rawPanel.sourceLibraryName.trim().slice(0, CUSTOM_PANEL_LIMITS.name);
+        }
         cleanPanels.push(panel);
     }
 
@@ -312,6 +567,10 @@ export function validateImportedConfigSettings(raw) {
                 if (!['json', 'native'].includes(value)) errors.push('promptMode must be "json" or "native"');
                 else settingsPatch[key] = value;
                 break;
+            case 'panelActivationStrategy':
+                if (!PANEL_ACTIVATION_STRATEGIES.includes(value)) errors.push('panelActivationStrategy must be "manual" or "automatic"');
+                else settingsPatch[key] = value;
+                break;
             case 'embedRole':
                 if (!['system', 'user', 'assistant'].includes(value)) errors.push('embedRole must be system, user, or assistant');
                 else settingsPatch[key] = value;
@@ -332,6 +591,9 @@ export function validateImportedConfigSettings(raw) {
             case 'maxRetries':
                 if (!Number.isInteger(value) || value < 0 || value > 5) errors.push('maxRetries must be an integer between 0 and 5');
                 else settingsPatch[key] = value;
+                break;
+            case 'parallelMaxConcurrent':
+                settingsPatch[key] = normalizeParallelMaxConcurrent(value);
                 break;
             case 'embedSnapshots':
                 if (!Number.isInteger(value) || value < 0 || value > 5) errors.push('embedSnapshots must be an integer between 0 and 5');

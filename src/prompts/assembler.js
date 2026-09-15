@@ -22,11 +22,35 @@
 
 import { DEFAULTS } from '../constants.js';
 import { getLanguage, getActivePanels } from '../settings.js';
-import { isValidCustomFieldKey } from '../profiles.js';
+import { customPanelScope, isBuiltInCharacterFieldKey, isValidCustomFieldKey } from '../profiles.js';
+import { audienceNeedsGender, formatAudienceHint } from '../character-audience.js';
+import { customPanelActivationKey } from '../panel-activation-policy.js';
 import { getSlotText } from './slots.js';
 import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS, STORY_THREADS_SCHEMA, CONTINUITY_RULES, continuityFieldSpecs } from '../continuity.js';
 
 const BRANCH_TYPES = ['dramatic', 'intense', 'comedic', 'twist', 'exploratory'];
+function _customTypeHint(field) {
+    return field.type === 'meter' ? '(integer 0-100)' :
+        field.type === 'number' ? '(integer)' :
+        field.type === 'list' ? '(array of strings)' :
+        field.type === 'enum' ? `(one of: ${(Array.isArray(field.options) ? field.options : []).map(String).join(', ')})` :
+        '(string)';
+}
+
+function _customPanelsByScope(s, scope) {
+    const runtimeActive = Array.isArray(s?.runtimeActivePanelIds)
+        ? new Set(s.runtimeActivePanelIds)
+        : null;
+    const panels = Array.isArray(s?.runtimeCustomPanels) ? s.runtimeCustomPanels : getActivePanels(s);
+    return panels.filter(cp =>
+        cp &&
+        cp.enabled !== false &&
+        (!runtimeActive || runtimeActive.has(customPanelActivationKey(cp))) &&
+        customPanelScope(cp) === scope &&
+        Array.isArray(cp.fields) &&
+        cp.fields.length
+    );
+}
 
 // ── Per-section field-spec builders ────────────────────────────────────
 //
@@ -63,12 +87,17 @@ function _sceneFields(s) {
 
 function _characterFields(s) {
     const ft = s.fieldToggles || {};
+    const characterPanels = _customPanelsByScope(s, 'character');
+    const audienceGenderRequired = characterPanels.some(cp => audienceNeedsGender(cp.audience));
     const fields = [
         '- name: Character CURRENT canonical name ONLY. Never embed aliases, titles, or parentheticals. WRONG: "Officer Jane (The Entity)". RIGHT: {name: "Officer Jane", aliases: ["The Entity"]}. This rule applies in characters[], relationships[], AND charactersPresent[] — all references to the same character must use the identical canonical name. See the NAME AWARENESS checklist below for how to choose and update this field.',
         '- aliases: Array of former names, placeholders, partial names, or merged identities the character has been known by. Every time you promote a name (placeholder → real, partial → full), the previous value MUST go here. Emit a SINGLE character entry; never a separate entry under an old name. See NAME AWARENESS checklist below.',
     ];
     if (ft.char_archetype !== false) fields.push('- archetype: ONE dominant narrative role. ally=actively supports current goals | friend=platonic bond, no active quest required | rival=competitive, not hostile | mentor=teaches/trains {{user}} (skill/wisdom transfer) | authority=institutional power over {{user}} (boss/cop/judge/commander — power asymmetry is the defining feature, NOT teaching) | antagonist=actively opposes | family=blood/legal kin | lover=romantic partner or interest (emotional bond) | lust=purely sexual, no romance | pet=non-human companion | background=minor NPC with no story weight. Empty string if unclassified. A teacher running a lesson is mentor; the same teacher in a disciplinary meeting is authority — archetype is turn-to-turn mutable.');
     fields.push('- role: WHO this person IS — their identity/title/relationship. NOT feelings.');
+    if (ft.char_gender !== false || audienceGenderRequired) {
+        fields.push('- gender: female | male | nonbinary | "". Use explicit/canonically established gender when known; use empty string if genuinely unknown. Never guess from the name alone.' + (audienceGenderRequired ? ' REQUIRED because one or more custom panels use gender targeting.' : ''));
+    }
     if (ft.char_innerThought !== false) fields.push("- innerThought: A first-person thought in their voice, 1-3 sentences. Use explicitly narrated thoughts when available; otherwise a qualified interpretation grounded in this turn's behavior, not privileged access to hidden facts. Not a list of emotion labels. Empty if unsupported.");
     if (ft.char_immediateNeed !== false) fields.push('- immediateNeed: What they urgently need RIGHT NOW in this scene.');
     if (ft.char_shortTermGoal !== false) fields.push('- shortTermGoal: What THEY want in the coming hours/days, from their perspective.');
@@ -85,6 +114,16 @@ function _characterFields(s) {
         fields.push('- fertNotes: Free-text details (cycle day, pregnancy week, etc) when fertStatus is "active". Empty or "N/A" otherwise.');
     }
     fields.push(...continuityFieldSpecs(CHARACTER_CONTINUITY_FIELDS, ft));
+    for (const cp of characterPanels) {
+        const audienceHint=formatAudienceHint(cp.audience);
+        if (audienceHint) {
+            fields.push(`- Custom panel ${String(cp.name || 'Untitled')}: apply ALL fields below only to characters matching ${audienceHint}. Omit those fields for non-matching characters.`);
+        }
+        for (const f of cp.fields) {
+            if (!f || f.enabled === false || !isValidCustomFieldKey(f.key) || isBuiltInCharacterFieldKey(f.key)) continue;
+            fields.push(`- ${f.key}: ${f.desc || f.label || f.key} ${_customTypeHint(f)} [custom panel: ${String(cp.name || 'Untitled')}]`);
+        }
+    }
     return '\n### Characters (all EXCEPT {{user}}) — MAX 5 entries, named NPCs only\n' + fields.join('\n') + '\n';
 }
 
@@ -130,20 +169,14 @@ function _storyIdeaFields(s) {
 }
 
 function _customPanelFields(s) {
-    const customPanels = getActivePanels(s).filter(cp => cp && cp.enabled !== false && Array.isArray(cp.fields) && cp.fields.length);
+    const customPanels = _customPanelsByScope(s, 'global');
     if (!customPanels.length) return '';
     let block = '\n### Custom Tracked Fields\n';
     for (const cp of customPanels) {
         block += `\n#### ${String(cp.name || 'Untitled')}\n`;
         for (const f of cp.fields) {
             if (!f || f.enabled === false || !isValidCustomFieldKey(f.key)) continue;
-            const typeHint =
-                f.type === 'meter' ? '(integer 0-100)' :
-                f.type === 'number' ? '(integer)' :
-                f.type === 'list' ? '(array of strings)' :
-                f.type === 'enum' ? `(one of: ${(Array.isArray(f.options) ? f.options : []).map(String).join(', ')})` :
-                '(string)';
-            block += `- ${f.key}: ${f.desc || f.label} ${typeHint}\n`;
+            block += `- ${f.key}: ${f.desc || f.label} ${_customTypeHint(f)}\n`;
         }
     }
     return block;
@@ -184,7 +217,7 @@ export function assemblePrompt(s, profile, opts = {}) {
     // ── Body section: field specifications ─────────────────────────────
     prompt += '\n## FIELD SPECIFICATIONS\n';
 
-    const lang = getLanguage();
+    const lang = typeof s?.runtimeLanguage === 'string' ? s.runtimeLanguage : getLanguage();
     if (lang) {
         // Apply ${language} template variable substitution.
         const langText = getSlotText('language', profile).replace(/\$\{language\}/g, lang);

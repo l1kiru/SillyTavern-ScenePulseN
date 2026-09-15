@@ -394,3 +394,20 @@
     .sp-pe-ta { font-size: 10.5px; min-height: 100px; }
 }
 
+
+/* Prompt editor touch targets + dynamic viewport. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-pe-container {
+        width: 100%;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    .sp-cp-tab { min-height: 44px; padding: 8px 14px; }
+    .sp-pe-preset-clear,
+    .sp-pe-legacy-clear,
+    .sp-pe-slot-revert { min-height: 44px; padding: 7px 10px; }
+    .sp-pe-role-select { min-height: 44px; min-width: 0; flex: 1 1 180px; font-size: 16px; }
+    .sp-pe-ta { font-size: 16px; }
+    .sp-pe-slot-head { row-gap: 8px; }
+    .sp-pe-preset-browse { min-height: 44px; padding: 7px 10px; }
+    .sp-pe-preview summary { min-height: 44px; display: flex; align-items: center; }
+}

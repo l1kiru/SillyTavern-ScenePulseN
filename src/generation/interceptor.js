@@ -20,7 +20,7 @@ import { prepareSnapshotContext, CONTINUITY_CONTEXT_NOTE } from '../continuity.j
 
 import { log, warn } from '../logger.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, getActiveSchema, getActivePrompt, getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, getLanguage, shouldUseDelta, hasStaleSnapshotBefore, getActivePanels } from '../settings.js';
+import { captureCharacterCustomFieldSpecs, clearForceFullState, getSettings, getActiveSchema, getActivePrompt, getLatestSnapshot, getPrevSnapshot, getActiveSwipeId, getLanguage, shouldUseDelta, hasStaleSnapshotBefore, getActivePanels } from '../settings.js';
 import { anyPanelsActive } from '../settings.js';
 import { getGroupMemberNames } from '../normalize.js';
 import {
@@ -33,7 +33,8 @@ import { spSetGenerating } from '../ui/mobile.js';
 import { startStreamingHider, stopStreamingHider } from './streaming.js';
 import { showChatBanner, cleanupGenUI } from '../ui/loading.js';
 import { startStWatchdog } from './st-watchdog.js';
-import { getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
+import { discardTogetherSceneBuild } from './together-scene-build.js';
+import { customPanelScope, getActiveProfile, isBuiltInCharacterFieldKey, isValidCustomFieldKey } from '../profiles.js';
 import { getActivePromptRole } from '../prompts/role.js';
 import {
     normalizeTrackerPromptStyle,
@@ -81,6 +82,7 @@ function _onStallFire(genStart){
     if (!generating || inlineGenStartMs !== genStart || genStart <= 0) return;
     const elapsed = Math.round((Date.now() - genStart) / 1000);
     warn('Stall watchdog: stream went silent (' + elapsed + 's elapsed, streamStarted=' + _streamStarted + ') — force-resetting');
+    discardTogetherSceneBuild(inlineGenerationContext, 'stream-stalled');
     setGenerating(false);
     spSetGenerating(false);
     setInlineGenStartMs(0);
@@ -210,8 +212,18 @@ QUEST STATE RULES (all REQUIRED):
     for(const cp of customPanels){
         if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
         // v6.9.13: filter out disabled fields from hints
-        const _activeFields=cp.fields.filter(f=>f?.enabled!==false&&isValidCustomFieldKey(f?.key));
-        if(_activeFields.length)mandatoryHints+=`\n- ${_activeFields.map(f=>f.key).join(', ')}: ${String(cp.name||'Untitled')} fields \u2014 populate from story context.`;
+        const _scope=customPanelScope(cp);
+        if(_scope==='character'&&panels.characters===false)continue;
+        const _activeFields=cp.fields.filter(f=>
+            f?.enabled!==false&&isValidCustomFieldKey(f?.key)&&
+            (_scope!=='character'||!isBuiltInCharacterFieldKey(f.key))
+        );
+        if(!_activeFields.length)continue;
+        if(_scope==='character'){
+            mandatoryHints+=`\n- characters[].${_activeFields.map(f=>f.key).join(', characters[].')}: ${String(cp.name||'Untitled')} fields \u2014 populate separately for each emitted character.`;
+        }else{
+            mandatoryHints+=`\n- ${_activeFields.map(f=>f.key).join(', ')}: ${String(cp.name||'Untitled')} fields \u2014 populate from story context.`;
+        }
     }
     // v6.8.50: use the shared shouldUseDelta() helper instead of
     // checking deltaMode directly. This respects the periodic full-
@@ -303,6 +315,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _stuck = inlineGenStartMs<=0 || (Date.now()-inlineGenStartMs)>60000;
         if(_stuck){
             log('Interceptor: generating flag stuck (startMs='+inlineGenStartMs+') — force resetting');
+            discardTogetherSceneBuild(inlineGenerationContext, 'stuck-generation');
             setGenerating(false);setInlineExtractionDone(false);setPendingInlineIdx(-1);setInlineGenStartMs(0);
             try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
             setInlineGenerationContext(null);
@@ -319,7 +332,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         const _lastIsAssistant=_lastIdx>=0&&!_liveChat[_lastIdx]?.is_user&&!_liveChat[_lastIdx]?.is_system;
         const _targetMesIdx=_lastIsAssistant?_lastIdx:_liveChat.length;
         const _targetSwipeId=_lastIsAssistant?getActiveSwipeId(_targetMesIdx):0;
-        const _baseSnapshot=_lastIsAssistant?getPrevSnapshot(_targetMesIdx):getLatestSnapshot();
+        const _baseSnapshot=structuredClone(_lastIsAssistant?getPrevSnapshot(_targetMesIdx):getLatestSnapshot());
         const _owner=captureOperationOwner(_targetMesIdx,_targetSwipeId,{trackSource:false});
         const _sceneOp=startSceneBuild({
             messageId:_targetMesIdx,
@@ -407,6 +420,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             beginRequest(null, plan);
         } else {
             purgeStalePromptKeys();
+            const _frozenCharacterCustomFieldSpecs=captureCharacterCustomFieldSpecs();
             plan = buildPromptInjectionPlan({
                 text: prompt,
                 role: _spRole,
@@ -417,19 +431,25 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
                 },
                 frozenRequestSchema: _frozenSchema,
                 frozenDeltaMode: _isDelta,
+                frozenCharacterCustomFieldSpecs:_frozenCharacterCustomFieldSpecs,
                 baseSnapshot: _baseSnapshot,
                 chatKey: currentChatKey(),
                 messageId: _targetMesIdx,
                 swipeId: _targetSwipeId,
                 promptParts,
             });
+            // Consume only the decision captured by this new request. A later
+            // structural edit sets the flag again for the following turn.
+            plan.fullRefreshTicket=clearForceFullState();
             registerPromptInjection(plan);
             repositionAuthorityHandlers();
             beginRequest(null, plan);
             try { await measurePromptInjection(plan, { provisional: true }); } catch {}
         }
         _inlineCtx.frozenRequestSchema = plan.frozenRequestSchema;
+        _inlineCtx.fullRefreshTicket = plan.fullRefreshTicket;
         _inlineCtx.frozenDeltaMode = plan.frozenDeltaMode;
+        _inlineCtx.frozenCharacterCustomFieldSpecs = plan.frozenCharacterCustomFieldSpecs;
         _inlineCtx.promptInjection = {
             runId: plan.runId,
             registeredRole: plan.registeredRole,
@@ -463,7 +483,7 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
         try { clearPromptInjection(getActivePromptInjectionRun()?.runId || null); } catch {}
         if(!s.embedSnapshots)return;
         const snap=getLatestSnapshot();if(!snap){log('Interceptor: no snapshot to embed');return}
-        const snapJson=JSON.stringify(prepareSnapshotContext(snap,getActiveSchema().value),null,2);
+        const snapJson=JSON.stringify(prepareSnapshotContext(snap,getActiveSchema().value));
         chat.splice(Math.max(0,chat.length-1),0,{
             is_user:s.embedRole==='user',is_system:s.embedRole==='system',
             name:s.embedRole==='system'?'System':'ScenePulse',

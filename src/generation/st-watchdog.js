@@ -34,6 +34,7 @@
 import { warn } from '../logger.js';
 import {
     generating,
+    inlineGenerationContext,
     setGenerating,
     setInlineGenStartMs,
     setInlineExtractionDone,
@@ -47,6 +48,7 @@ import { cleanupGenUI } from '../ui/loading.js';
 import { stopStreamingHider } from './streaming.js';
 import { clearPromptInjection } from './prompt-injection.js';
 import { cancelSceneSourceTrace } from '../scene-source-trace.js';
+import { discardTogetherSceneBuild } from './together-scene-build.js';
 
 const POLL_INTERVAL_MS = 3000;
 const GRACE_PERIOD_MS = 5000;          // ignore the first 5s; ST may not have started yet
@@ -96,6 +98,7 @@ function _check() {
         warn(
             'ST watchdog: ST stop button hidden for ' + detectionLag + 's but SP is still generating — force-resetting (elapsed ' + elapsed + 's)'
         );
+        discardTogetherSceneBuild(inlineGenerationContext, 'st-stopped');
         setGenerating(false);
         spSetGenerating(false);
         setInlineGenStartMs(0);

@@ -8,9 +8,15 @@
 
 import { DEFAULTS, BUILTIN_PANELS, BUILTIN_SCHEMA } from './constants.js';
 import { getActivePanels } from './settings.js';
-import { isValidCustomFieldKey } from './profiles.js';
+import {
+    customPanelScope,
+    getActiveCustomFieldSpecs,
+    isBuiltInCharacterFieldKey,
+    isValidCustomFieldKey,
+} from './profiles.js';
 import { assemblePrompt } from './prompts/assembler.js';
 import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS } from './continuity.js';
+import { audienceIsOpen, audienceNeedsGender } from './character-audience.js';
 
 // ── Sub-field toggle → schema property mappings ──
 // v6.8.15: schema trim dropped 6 fertility sub-fields (reason/phase/day/window/
@@ -30,7 +36,8 @@ const CHAR_SUBFIELD_MAP={
     char_proximity:['proximity'],
     char_notableDetails:['notableDetails'],
     char_inventory:['inventory'],
-    char_fertility:['fertStatus','fertNotes']
+    char_fertility:['fertStatus','fertNotes'],
+    char_gender:['gender']
 };
 const REL_SUBFIELD_MAP={
     rel_type:['relType'],
@@ -66,7 +73,7 @@ function cloneSchema(value){
 }
 
 /** Build the schema for one concrete request without mutating the profile schema. */
-export function buildRequestSchema(schemaWrapper,{mode='full',fields=[]}={}){
+export function buildRequestSchema(schemaWrapper,{mode='full',fields=[],syncActiveCharacterRequirements=true}={}){
     const wrapper=cloneSchema(schemaWrapper||{});
     const value=wrapper.value&&typeof wrapper.value==='object'?wrapper.value:wrapper;
     const props=value?.properties||{};
@@ -77,6 +84,19 @@ export function buildRequestSchema(schemaWrapper,{mode='full',fields=[]}={}){
     if(mode==='delta')value.required=DELTA_REQUIRED_FIELDS.filter(key=>selectedSet.has(key));
     else if(mode==='section')value.required=selected;
     else value.required=(Array.isArray(value.required)?value.required:selected).filter(key=>selectedSet.has(key));
+    const characterItems=value.properties?.characters?.items;
+    if(characterItems?.properties&&syncActiveCharacterRequirements){
+        const customSpecs=getActiveCustomFieldSpecs(getActivePanels(),'character')
+            .filter(spec=>Object.hasOwn(characterItems.properties,spec.key));
+        const customKeySet=new Set(customSpecs.map(spec=>spec.key));
+        const requiredCustom=customSpecs
+            .filter(spec=>audienceIsOpen(spec.panel?.audience))
+            .map(spec=>spec.key);
+        const itemRequired=Array.isArray(characterItems.required)?characterItems.required:[];
+        characterItems.required=mode==='delta'
+            ?itemRequired.filter(key=>!customKeySet.has(key))
+            :[...itemRequired,...requiredCustom.filter(key=>!itemRequired.includes(key))];
+    }
     if(value.additionalProperties===undefined)value.additionalProperties=false;
     if(wrapper.value){
         wrapper.value=value;
@@ -106,12 +126,32 @@ function filterArraySchema(baseSchema,subFieldMap,ft){
     return clone;
 }
 
+function customFieldSchema(field){
+    const description=field.desc||field.label||field.key;
+    if(field.type==='text')return{type:'string',description};
+    if(field.type==='number')return{type:'integer',description};
+    if(field.type==='meter')return{type:'integer',minimum:0,maximum:100,description:description+' (0-100 scale)'};
+    if(field.type==='list')return{type:'array',items:{type:'string'},description};
+    if(field.type==='enum')return{type:'string',enum:Array.isArray(field.options)?field.options:[],description};
+    return null;
+}
+
 // ── Dynamic Schema Builder ──
 // Constructs JSON schema from enabled built-in panels + custom panels
 export function buildDynamicSchema(s){
     const props={};const required=[];
     const panels=s.panels||DEFAULTS.panels;
     const ft=s.fieldToggles||{};
+    const customPanels=getActivePanels(s);
+    // Gender is an internal routing dependency whenever a character panel
+    // targets gender. Keep it in the request contract even when the visible
+    // built-in Gender row is disabled; otherwise the audience matcher has no
+    // stable value to route against.
+    const audienceGenderRequired=customPanels.some(cp =>
+        cp?.enabled !== false &&
+        customPanelScope(cp) === 'character' &&
+        audienceNeedsGender(cp.audience)
+    );
     // Operational time fields are not standalone UI cards, but generation,
     // delta merging and temporal validation depend on them. Keep them in the
     // request schema even though the panel manager does not expose toggles.
@@ -140,6 +180,17 @@ export function buildDynamicSchema(s){
                 props[f.key]=filterArraySchema(BUILTIN_SCHEMA.value.properties.relationships,REL_SUBFIELD_MAP,ft);
             } else if(f.type==='characterArray'){
                 props[f.key]=filterArraySchema(BUILTIN_SCHEMA.value.properties.characters,CHAR_SUBFIELD_MAP,ft);
+                if(props[f.key]?.items?.properties&&(ft.char_gender!==false||audienceGenderRequired)){
+                    props[f.key].items.properties.gender={
+                        type:'string',
+                        enum:['female','male','nonbinary',''],
+                        description:'Stated or clearly presented gender: female, male, nonbinary, or empty if unknown. Do not guess from the name alone.',
+                    };
+                    if(audienceGenderRequired){
+                        const itemRequired=props[f.key].items.required||(props[f.key].items.required=[]);
+                        if(!itemRequired.includes('gender'))itemRequired.push('gender');
+                    }
+                }
             } else if(f.type==='plotArray'){
                 // Filter enabled branch types
                 const enabledTypes=BRANCH_TYPES.filter(t=>ft['branch_'+t]!==false);
@@ -154,25 +205,29 @@ export function buildDynamicSchema(s){
             if (!f.optional) required.push(f.key);
         }
     }
-    // Custom panels: add their fields (v6.9.14: per-chat definitions)
-    const customPanels=getActivePanels(s);
+    // Custom panels: global panels add top-level fields; character-scoped
+    // panels extend each characters[] item. Legacy panels without a scope
+    // remain global for backward compatibility.
     for(const cp of customPanels){
         if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
+        const scope=customPanelScope(cp);
+        const targetProps=scope==='character'?props.characters?.items?.properties:props;
+        if(!targetProps)continue; // Characters panel is disabled.
         for(const f of cp.fields){
             if(!f||f.enabled===false||!isValidCustomFieldKey(f.key))continue; // v6.9.13: per-field toggle
             const k=f.key;
-            if(f.type==='text'){
-                props[k]={type:'string',description:f.desc||f.label};
-            } else if(f.type==='number'){
-                props[k]={type:'integer',description:f.desc||f.label};
-            } else if(f.type==='meter'){
-                props[k]={type:'integer',minimum:0,maximum:100,description:(f.desc||f.label)+' (0-100 scale)'};
-            } else if(f.type==='list'){
-                props[k]={type:'array',items:{type:'string'},description:f.desc||f.label};
-            } else if(f.type==='enum'){
-                props[k]={type:'string',enum:f.options||[],description:f.desc||f.label};
+            // Per-character fields must not replace built-in character
+            // properties. Global panels retain their pre-scope behaviour for
+            // backward compatibility with existing panel exports.
+            if(scope==='character'&&(Object.hasOwn(targetProps,k)||isBuiltInCharacterFieldKey(k)))continue;
+            const fieldSchema=customFieldSchema(f);
+            if(!fieldSchema)continue;
+            targetProps[k]=fieldSchema;
+            if(scope==='global')required.push(k);
+            else if(audienceIsOpen(cp.audience)){
+                const itemRequired=props.characters.items.required||(props.characters.items.required=[]);
+                if(!itemRequired.includes(k))itemRequired.push(k);
             }
-            required.push(k);
         }
     }
     return{"$schema":"http://json-schema.org/draft-07/schema#",type:"object",properties:props,required,additionalProperties:false};

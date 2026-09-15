@@ -72,3 +72,11 @@
     border-left: 2px solid rgba(255,180,80,0.35);
     padding-left: 4px;
 }
+
+/* Touch: paste/inject actions cannot depend on hover or a 22px target. */
+@media (hover: none), (pointer: coarse), (max-width: 600px) {
+    .sp-idea-inject, .sp-idea-paste {
+        width: 44px; height: 44px; min-width: 44px; min-height: 44px;
+        opacity: 0.85;
+    }
+}
