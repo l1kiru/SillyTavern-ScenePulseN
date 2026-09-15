@@ -53,6 +53,7 @@ export function preserveOffSceneEntities(current, previous) {
     if (!Object.hasOwn(current, 'storyThreads') && Array.isArray(previous.storyThreads)) {
         current.storyThreads = structuredClone(previous.storyThreads.filter(thread => thread.status !== 'resolved'));
     }
+    carryContinuityFields(current, previous, ['narrativeHooks', 'trackedItems', 'worldFacts']);
     if (Array.isArray(current.characters) && Array.isArray(previous.characters)) {
         for (const prior of previous.characters) {
             const priorKey = characterNameKey(prior?.name);
@@ -64,12 +65,14 @@ export function preserveOffSceneEntities(current, previous) {
                 Array.isArray(prior.aliases) && prior.aliases.some(a => characterNameKey(a) === characterNameKey(ch?.name)));
             const match = exact || reveal || staleName;
             if (!match) {
-                current.characters.push(structuredClone(prior));
+                const archived = structuredClone(prior);
+                if (Object.hasOwn(archived, 'emotionalState')) archived.emotionalState = [];
+                current.characters.push(archived);
                 log('Full-state: preserved off-scene entity:', prior.name, 'in characters');
                 continue;
             }
             const oldCurrentName = match.name;
-            carryContinuityFields(match, prior, ['knowledge']);
+            carryContinuityFields(match, prior, ['knowledge', 'activityPlans', 'conditions', 'establishedTraits']);
             if (staleName && !exact && !reveal) match.name = prior.name;
             const aliases = [...(Array.isArray(prior.aliases) ? prior.aliases : []),
                 ...(Array.isArray(match.aliases) ? match.aliases : [])];
@@ -342,6 +345,12 @@ export function mergeDelta(prev, delta) {
     // foundations/conflicts. Alias resolution follows the same identity map.
     const continuityNames = buildCharacterNameMap(merged.characters);
     const continuityKey = name => characterNameKey(continuityNames.get(characterNameKey(name)) || name);
+    const freshCharacters = new Map((Array.isArray(delta.characters) ? delta.characters : []).map(ch => [continuityKey(ch?.name), ch]));
+    for (const ch of merged.characters || []) {
+        const fresh = freshCharacters.get(continuityKey(ch?.name));
+        if (fresh && Object.hasOwn(fresh, 'emotionalState')) ch.emotionalState = structuredClone(fresh.emotionalState);
+        else if (Object.hasOwn(ch, 'emotionalState')) ch.emotionalState = [];
+    }
     const freshRelationships = new Map((Array.isArray(delta.relationships) ? delta.relationships : []).map(rel => [continuityKey(rel?.name), rel]));
     for (const rel of merged.relationships || []) {
         const fresh = freshRelationships.get(continuityKey(rel?.name));
@@ -646,6 +655,10 @@ export function reconcileIdentityAliases(snap) {
     // characters owns a shared label (for example, "Stranger") corrupts
     // presence, relationships, and thoughts.
     const aliasToCanon = buildCharacterNameMap(snap.characters);
+
+    // A name reveal changes the holder label, never the object's identity.
+    if (Array.isArray(snap.trackedItems)) snap.trackedItems = snap.trackedItems.map(item =>
+        item.ownerType === 'npc' ? { ...item, owner: aliasToCanon.get(characterNameKey(item.owner)) || item.owner } : item);
 
     let renamedRels = 0, mergedRels = 0, renamedPresent = 0;
 

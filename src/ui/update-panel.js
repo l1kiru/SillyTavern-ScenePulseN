@@ -1,4 +1,5 @@
-import { renderStoryThreads, renderCharacterContinuity, renderRelationshipContinuity, syncContinuityVisibility } from './continuity-view.js';
+import { renderSceneState } from './state-records-view.js';
+import { renderStoryThreads, renderNarrativeHooks, renderCharacterContinuity, renderRelationshipContinuity, syncContinuityVisibility } from './continuity-view.js';
 // src/ui/update-panel.js — The massive updatePanel function (~960 lines)
 import { log, err } from '../logger.js';
 import { esc, clamp, str, spConfirm } from '../utils.js';
@@ -741,7 +742,7 @@ function _updatePanelInner(d,_force=false){
             sr.appendChild(sv); f.appendChild(sr);
         }
         const continuity=document.createElement('div');
-        continuity.innerHTML=renderStoryThreads(d.storyThreads);
+        continuity.innerHTML=renderStoryThreads(d.storyThreads)+renderNarrativeHooks(d.narrativeHooks)+renderSceneState(d);
         if(continuity.innerHTML)f.appendChild(continuity);
         const sceneFields=[[t('Tension'),'sceneTension'],[t('Topic'),'sceneTopic'],[t('Mood'),'sceneMood'],[t('Interaction'),'sceneInteraction'],[t('Elapsed'),'elapsed'],[t('Sounds'),'soundEnvironment']];
         for(const[l,key]of sceneFields){

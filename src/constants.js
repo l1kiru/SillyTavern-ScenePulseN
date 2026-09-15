@@ -6,7 +6,7 @@ export const MODULE_NAME='scenepulse';
 // v6.12.3 — every release bumped manifest.json but missed this. Activity
 // log + diagnostic version field were misreporting. Keep in sync with
 // manifest.json on every version bump going forward.
-export const VERSION = '7.1.15';
+export const VERSION = '7.1.15.2';
 
 export const LOG='[ScenePulse]';
 export const DEFAULT_EXTENSION_NAME='SillyTavern-ScenePulseN';
@@ -69,6 +69,9 @@ export const BUILTIN_PANELS={
             {key:'sceneTension',type:'enum',options:['calm','low','moderate','high','critical'],desc:'Current tension level.',label:'Tension'},
             {key:'sceneSummary',type:'string',desc:'Brief scene summary.',label:'Summary'},
             {key:'storyThreads',type:'threadArray',optional:true,desc:'Established promises, appointments and unresolved plot threads.',label:'Story Threads'},
+            {key:'narrativeHooks',type:'threadArray',optional:true,desc:'Established significant details with unresolved relevance.',label:'Story Hooks'},
+            {key:'trackedItems',type:'threadArray',optional:true,label:'Items and Ownership'},
+            {key:'worldFacts',type:'threadArray',optional:true,label:'World Facts'},
             {key:'soundEnvironment',type:'string',desc:'Audible sounds right now.',label:'Sounds'},
             {key:'charactersPresent',type:'array',itemType:'string',desc:'Names of all characters in the scene.',label:'Present'},
             {key:'witnesses',type:'array',itemType:'string',desc:'Background observers without a character card \u2014 bystanders, unnamed staff, security cameras, crowd members who saw or heard what happened. Do NOT include anyone already in characters[]. Empty array [] if the scene is private or unobserved.',label:'Witnesses'}
@@ -107,6 +110,11 @@ export const BUILTIN_PANELS={
             {key:'char_shortTermGoal',label:'Short-Term Goal'},{key:'char_longTermGoal',label:'Long-Term Goal'},
             {key:'char_innerThoughtBasis',label:'Thought Basis'},{key:'char_currentIntent',label:'Current Intention'},
             {key:'char_knowledge',label:'Knowledge and Beliefs'},
+            {key:'char_activityPlans',label:'Character Plans'},
+            {key:'char_conditions',label:'Physical Conditions'},
+            {key:'char_emotionalState',label:'Emotional State'},
+            {key:'char_establishedTraits',label:'Established Traits'},
+            {key:'char_knowledgeProvenance',label:'Knowledge Provenance'},
             {key:'char_hair',label:'Hair'},{key:'char_face',label:'Face'},
             {key:'char_outfit',label:'Outfit'},{key:'char_posture',label:'Posture'},{key:'char_proximity',label:'Proximity'},
             {key:'char_notableDetails',label:'Notable Details'},

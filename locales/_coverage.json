@@ -1,180 +1,180 @@
 {
-  "sourceKeyCount": 1316,
+  "sourceKeyCount": 1369,
   "note": "A value equal to its English key is an explicit English fallback, not a completed translation.",
   "languages": {
     "Russian": {
       "file": "russian.json",
-      "translated": 1316,
+      "translated": 1369,
       "fallback": 0,
       "coveragePercent": 100
     },
     "Japanese": {
       "file": "japanese.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Korean": {
       "file": "korean.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Chinese (Simplified)": {
       "file": "chinese-simplified.json",
       "translated": 248,
-      "fallback": 1068,
-      "coveragePercent": 18.8
+      "fallback": 1121,
+      "coveragePercent": 18.1
     },
     "Chinese (Traditional)": {
       "file": "chinese-traditional.json",
       "translated": 248,
-      "fallback": 1068,
-      "coveragePercent": 18.8
+      "fallback": 1121,
+      "coveragePercent": 18.1
     },
     "Spanish": {
       "file": "spanish.json",
       "translated": 240,
-      "fallback": 1076,
-      "coveragePercent": 18.2
+      "fallback": 1129,
+      "coveragePercent": 17.5
     },
     "Hindi": {
       "file": "hindi.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Arabic": {
       "file": "arabic.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Portuguese": {
       "file": "portuguese.json",
       "translated": 244,
-      "fallback": 1072,
-      "coveragePercent": 18.5
+      "fallback": 1125,
+      "coveragePercent": 17.8
     },
     "French": {
       "file": "french.json",
       "translated": 233,
-      "fallback": 1083,
-      "coveragePercent": 17.7
+      "fallback": 1136,
+      "coveragePercent": 17
     },
     "German": {
       "file": "german.json",
       "translated": 236,
-      "fallback": 1080,
-      "coveragePercent": 17.9
+      "fallback": 1133,
+      "coveragePercent": 17.2
     },
     "Turkish": {
       "file": "turkish.json",
       "translated": 247,
-      "fallback": 1069,
-      "coveragePercent": 18.8
+      "fallback": 1122,
+      "coveragePercent": 18
     },
     "Vietnamese": {
       "file": "vietnamese.json",
       "translated": 248,
-      "fallback": 1068,
-      "coveragePercent": 18.8
+      "fallback": 1121,
+      "coveragePercent": 18.1
     },
     "Italian": {
       "file": "italian.json",
       "translated": 242,
-      "fallback": 1074,
-      "coveragePercent": 18.4
+      "fallback": 1127,
+      "coveragePercent": 17.7
     },
     "Thai": {
       "file": "thai.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Polish": {
       "file": "polish.json",
       "translated": 246,
-      "fallback": 1070,
-      "coveragePercent": 18.7
+      "fallback": 1123,
+      "coveragePercent": 18
     },
     "Ukrainian": {
       "file": "ukrainian.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Indonesian": {
       "file": "indonesian.json",
       "translated": 236,
-      "fallback": 1080,
-      "coveragePercent": 17.9
+      "fallback": 1133,
+      "coveragePercent": 17.2
     },
     "Dutch": {
       "file": "dutch.json",
       "translated": 234,
-      "fallback": 1082,
-      "coveragePercent": 17.8
+      "fallback": 1135,
+      "coveragePercent": 17.1
     },
     "Romanian": {
       "file": "romanian.json",
       "translated": 239,
-      "fallback": 1077,
-      "coveragePercent": 18.2
+      "fallback": 1130,
+      "coveragePercent": 17.5
     },
     "Czech": {
       "file": "czech.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Greek": {
       "file": "greek.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Hungarian": {
       "file": "hungarian.json",
       "translated": 244,
-      "fallback": 1072,
-      "coveragePercent": 18.5
+      "fallback": 1125,
+      "coveragePercent": 17.8
     },
     "Swedish": {
       "file": "swedish.json",
       "translated": 236,
-      "fallback": 1080,
-      "coveragePercent": 17.9
+      "fallback": 1133,
+      "coveragePercent": 17.2
     },
     "Malay": {
       "file": "malay.json",
       "translated": 239,
-      "fallback": 1077,
-      "coveragePercent": 18.2
+      "fallback": 1130,
+      "coveragePercent": 17.5
     },
     "Finnish": {
       "file": "finnish.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     },
     "Danish": {
       "file": "danish.json",
       "translated": 235,
-      "fallback": 1081,
-      "coveragePercent": 17.9
+      "fallback": 1134,
+      "coveragePercent": 17.2
     },
     "Norwegian": {
       "file": "norwegian.json",
       "translated": 236,
-      "fallback": 1080,
-      "coveragePercent": 17.9
+      "fallback": 1133,
+      "coveragePercent": 17.2
     },
     "Hebrew": {
       "file": "hebrew.json",
       "translated": 249,
-      "fallback": 1067,
-      "coveragePercent": 18.9
+      "fallback": 1120,
+      "coveragePercent": 18.2
     }
   }
 }

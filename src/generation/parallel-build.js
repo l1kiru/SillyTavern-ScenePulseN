@@ -9,7 +9,7 @@ import { requestWithConnectionProfile } from './profile-request.js';
 import { classifyRequestError, correctiveInstruction } from './request.js';
 import { validateCharacterAudienceRequirements, validateExtraction } from './validation.js';
 import { customPanelActivationKey, hasAutomaticPanels, SCENE_TAG_REGISTRY } from '../panel-activation-policy.js';
-import { CONTINUITY_CONTEXT_NOTE } from '../continuity.js';
+import { CONTINUITY_CONTEXT_NOTE, prepareSnapshotContext } from '../continuity.js';
 import { applyPromptRole } from '../prompts/role.js';
 import { freezePromptMacros, expandSchemaDescriptions } from './frozen-prompt.js';
 import { customPanelScope, isBuiltInCharacterFieldKey, isValidCustomFieldKey } from '../profiles.js';
@@ -242,6 +242,7 @@ function fillMergedGapsFromPrevious(mergedValue, previousSnapshot, gaps = []) {
                 if (!key || present.has(key)) continue;
                 const prior = findPreviousCharacter(previousSnapshot, name);
                 const carried = clone(prior || stubCharacter(name));
+                if (Object.hasOwn(carried, 'emotionalState')) carried.emotionalState = [];
                 for (const field of ['innerThought', 'innerThoughtBasis', 'currentIntent', 'immediateNeed']) {
                     if (Object.hasOwn(carried, field)) carried[field] = '';
                 }
@@ -265,7 +266,7 @@ function fillMergedGapsFromPrevious(mergedValue, previousSnapshot, gaps = []) {
     return { filled };
 }
 
-function previousForLane(previousSnapshot, spec) {
+function previousForLane(previousSnapshot, spec, schema) {
     if (!previousSnapshot || typeof previousSnapshot !== 'object') return null;
     if (spec.kind === 'characters') {
         const allowed = new Set(spec.characterNames.map(characterNameKey));
@@ -273,7 +274,7 @@ function previousForLane(previousSnapshot, spec) {
             const keys = [character?.name, ...(Array.isArray(character?.aliases) ? character.aliases : [])].map(characterNameKey);
             return keys.some(key => allowed.has(key));
         });
-        return { characters: clone(characters) };
+        return prepareSnapshotContext({ characters: clone(characters) }, schema);
     }
     const result = {};
     for (const field of spec.fields) {
@@ -283,7 +284,7 @@ function previousForLane(previousSnapshot, spec) {
             result[field] = clone(value.filter(quest => quest?.urgency !== 'resolved'));
         } else result[field] = clone(value);
     }
-    return Object.keys(result).length ? result : null;
+    return Object.keys(result).length ? prepareSnapshotContext(result, schema) : null;
 }
 
 function laneBudget(spec, budgets) {
@@ -292,8 +293,8 @@ function laneBudget(spec, budgets) {
     return spec.characterNames.length > 1 ? budgets.character2 : budgets.character1;
 }
 
-function lanePrompt({ spec, contextText, previousSnapshot, coreResult, retryInstruction = '' }) {
-    const previous = previousForLane(previousSnapshot, spec);
+function lanePrompt({ spec, schema, contextText, previousSnapshot, coreResult, retryInstruction = '' }) {
+    const previous = previousForLane(previousSnapshot, spec, schema);
     const frozenCore = spec.kind === 'core' ? '' : `\n\nFROZEN CORE FACTS (read-only; do not return or change them):\n${JSON.stringify(coreResult, null, 2)}`;
     const previousText = previous ? `\n\n${CONTINUITY_CONTEXT_NOTE}\nPREVIOUS STATE FOR THIS LANE (carry forward unchanged facts):\n${JSON.stringify(previous, null, 2)}` : '';
     const isDelta = spec.requestMode === 'delta';
@@ -413,6 +414,7 @@ async function executeLane({
         attempts++;
         const prompt = lanePrompt({
             spec,
+            schema: laneSchema.value,
             contextText,
             previousSnapshot,
             coreResult,

@@ -26,7 +26,9 @@ import { customPanelScope, isBuiltInCharacterFieldKey, isValidCustomFieldKey } f
 import { audienceNeedsGender, formatAudienceHint } from '../character-audience.js';
 import { customPanelActivationKey } from '../panel-activation-policy.js';
 import { getSlotText } from './slots.js';
-import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS, STORY_THREADS_SCHEMA, CONTINUITY_RULES, continuityFieldSpecs } from '../continuity.js';
+import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS, STORY_THREADS_SCHEMA, NARRATIVE_HOOKS_SCHEMA, CONTINUITY_RULES, continuityFieldSpecs } from '../continuity.js';
+
+import { SCENE_STATE_FIELDS } from '../state-records.js';
 
 const BRANCH_TYPES = ['dramatic', 'intense', 'comedic', 'twist', 'exploratory'];
 function _customTypeHint(field) {
@@ -81,6 +83,8 @@ function _sceneFields(s) {
     if (ft.soundEnvironment !== false) fields.push('- soundEnvironment: What is audible right now.');
     if (ft.charactersPresent !== false) fields.push('- charactersPresent: Array of character names PHYSICALLY PRESENT in the current beat with {{user}}. Only include characters who are in the same location RIGHT NOW, close enough to interact or observe. EXCLUDE anyone {{user}} is merely thinking about, remembering, dreaming of, reading about, or who is in a different location. SOLO SCENES ARE REAL: if {{user}} is alone (walking, hiding, internal monologue, sleeping, meditating, travelling alone), emit an EMPTY array []. An empty charactersPresent is valid and expected for solitude beats. NEVER carry forward the previous scene\'s roster out of habit — re-verify presence from THIS turn\'s narration every time.');
     if (ft.storyThreads !== false) fields.push(`- storyThreads: ${STORY_THREADS_SCHEMA.description} Each entry: id, summary, status (open/resolved), condition, source.`);
+    if (ft.narrativeHooks !== false) fields.push(`- narrativeHooks: ${NARRATIVE_HOOKS_SCHEMA.description} Each entry: id, detail, status (open/resolved/dismissed), condition, source.`);
+    fields.push(...continuityFieldSpecs(SCENE_STATE_FIELDS, ft));
     if (!fields.length) return '';
     return '\n### Scene Analysis (REQUIRED)\n' + fields.join('\n') + '\n';
 }

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const manifest = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8'));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const lock = JSON.parse(readFileSync(join(root, 'package-lock.json'), 'utf8'));
 const constants = readFileSync(join(root, 'src/constants.js'), 'utf8');
 const changelog = readFileSync(join(root, 'CHANGELOG.md'), 'utf8');
 const bindUi = readFileSync(join(root, 'src/settings-ui/bind-ui.js'), 'utf8');
@@ -15,10 +16,11 @@ function assert(condition, message) {
 }
 
 assert(
-  /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(expected),
-  'manifest version must be valid semantic versioning',
+  /^\d+\.\d+\.\d+(?:\.\d+)?(?:[-+][0-9A-Za-z.-]+)?$/.test(expected),
+  'manifest version must use major.minor.patch with an optional revision',
 );
 assert(pkg.version === expected, 'package version must match manifest');
+assert(lock.version === expected && lock.packages[''].version === expected, 'lockfile versions must match manifest');
 assert(
   constants.includes(`export const VERSION = '${expected}';`),
   'runtime VERSION must match manifest',
