@@ -1,3 +1,4 @@
+import { renderCharacterState, renderKnowledgeProvenance } from './state-records-view.js';
 import { esc } from '../utils.js';
 import { t } from '../i18n.js';
 
@@ -16,6 +17,20 @@ export function renderStoryThreads(threads, toggles = {}) {
     return group(t('Story Threads'), body, 'storyThreads');
 }
 
+export function renderNarrativeHooks(hooks, toggles = {}) {
+    if (toggles.narrativeHooks === false || !Array.isArray(hooks)) return '';
+    const statuses = { open: t('Open'), resolved: t('Resolved'), dismissed: t('Dismissed') };
+    const body = hooks.map(hook => `<div class="sp-continuity-entry"><strong>${esc(hook.detail)}</strong><span class="sp-continuity-status">${esc(statuses[hook.status] || hook.status)}</span>${row(t('Condition'), hook.condition, 'narrativeHooks', toggles)}${row(t('Source'), hook.source, 'narrativeHooks', toggles)}</div>`).join('');
+    return group(t('Story Hooks'), body, 'narrativeHooks');
+}
+
+function renderActivityPlans(plans, toggles) {
+    if (toggles.char_activityPlans === false || !Array.isArray(plans) || !plans.length) return '';
+    const statuses = { planned: t('Planned'), active: t('In Progress'), completed: t('Completed'), cancelled: t('Cancelled') };
+    return `<div data-ft="char_activityPlans"><div class="sp-continuity-label">${esc(t('Character Plans'))}</div>`
+        + plans.map(plan => `<div class="sp-continuity-entry"><strong>${esc(plan.goal)}</strong><span class="sp-continuity-status">${esc(statuses[plan.status] || plan.status)}</span>${row(t('Observed Progress'), plan.progress, 'char_activityPlans', toggles)}${row(t('Location'), plan.location, 'char_activityPlans', toggles)}${row(t('Condition'), plan.condition, 'char_activityPlans', toggles)}${row(t('Source'), plan.source, 'char_activityPlans', toggles)}</div>`).join('') + '</div>';
+}
+
 export function renderCharacterContinuity(character, toggles = {}) {
     let body = row(t('Thought Basis'), character.innerThoughtBasis, 'char_innerThoughtBasis', toggles)
         + row(t('Current Intention'), character.currentIntent, 'char_currentIntent', toggles);
@@ -23,10 +38,11 @@ export function renderCharacterContinuity(character, toggles = {}) {
         const kinds = { known: t('Known Information'), belief: t('Belief'), secret: t('Secret') };
         body += `<div data-ft="char_knowledge"><div class="sp-continuity-label">${esc(t('Knowledge and Beliefs'))}</div>`;
         for (const item of character.knowledge) {
-            body += `<div class="sp-continuity-entry"><strong>${esc(kinds[item.kind] || item.kind)}</strong><div>${esc(item.detail)}</div>${row(t('Source'), item.source, 'char_knowledge', toggles)}</div>`;
+            body += `<div class="sp-continuity-entry"><strong>${esc(kinds[item.kind] || item.kind)}</strong><div>${esc(item.detail)}</div>${row(t('Source'), item.source, 'char_knowledge', toggles)}${renderKnowledgeProvenance(item, toggles)}</div>`;
         }
         body += '</div>';
     }
+    body += renderActivityPlans(character.activityPlans, toggles) + renderCharacterState(character, toggles);
     return group(t('Character Context'), body);
 }
 

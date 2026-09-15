@@ -39,6 +39,8 @@ const ctx = {
             parallelFullGeneration: true, panelActivationStrategy: 'manual',
             promptMode: 'json', connectionProfile: 'profile-1', chatPreset: '',
             fallbackEnabled: false, showThoughts: false,
+            // Keep this batching fixture light as optional structured facets grow.
+            fieldToggles: { char_conditions: false, char_emotionalState: false, char_establishedTraits: false, char_knowledgeProvenance: false },
         },
         connectionManager: { selectedProfile: 'profile-1' },
     },

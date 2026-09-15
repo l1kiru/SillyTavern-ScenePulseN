@@ -1,4 +1,5 @@
-import { normalizeStoryThreads, normalizeCharacterContinuity, normalizeRelationshipContinuity } from './continuity.js';
+import { normalizeStoryThreads, normalizeNarrativeHooks, normalizeCharacterContinuity, normalizeRelationshipContinuity } from './continuity.js';
+import { SCENE_STATE_FIELDS, normalizeStateRecords } from './state-records.js';
 // ScenePulse — Normalization Module
 // Extracted from index.js lines 950-1356
 
@@ -179,6 +180,8 @@ export function normalizeTracker(d){
     o.sceneInteraction=g(['sceneinteraction','interaction','interactiontheme','dynamic','interactiontype']);
     o.sceneTension=g(['scenetension','tension','tensionlevel','intensity','stakes']);
     if (Object.hasOwn(d, 'storyThreads')) o.storyThreads = normalizeStoryThreads(d.storyThreads);
+    for (const [key, { schema }] of Object.entries(SCENE_STATE_FIELDS)) if (Object.hasOwn(d, key)) o[key] = normalizeStateRecords(d[key], schema);
+    if (Object.hasOwn(d, 'narrativeHooks')) o.narrativeHooks = normalizeNarrativeHooks(d.narrativeHooks);
     o.sceneSummary=g(['scenesummary','summary','description','currentsummary','overview']);
     const wit=flat['witnesses'];o.witnesses=Array.isArray(wit)?wit:[];
     // v6.9.10: strip witness names that match any tracked character.
@@ -580,6 +583,7 @@ export function normalizeTracker(d){
     // canonical name.
     {
         const aliasMap=buildCharacterNameMap(o.characters);
+        for (const item of o.trackedItems || []) if (item.ownerType === 'npc') item.owner = aliasMap.get(item.owner.toLowerCase().trim()) || item.owner;
         // Resolve any raw name string to its canonical form. Handles:
         //   - Direct canonical match
         //   - Direct alias match

@@ -99,12 +99,59 @@ ScenePulse is a SillyTavern extension that automatically extracts and tracks sce
 <img width="860" height="326" alt="image" src="https://github.com/user-attachments/assets/cb314a4e-a6d4-449d-96ad-929556564d40" />
 
 ### Scene Continuity
+
+- **Physical Conditions** — evidence-backed injuries, fatigue and temporary limitations;
+  recovery requires a narrated change.
+- **Items and Ownership** — a shared object register with stable IDs, holder, last known
+  location, quantity, condition and status. Transfers change the holder of the same
+  object. Player items use a separate holder type and never create a player NPC card.
+  Unknown quantities stay unknown. This register is authoritative for tracked objects;
+  the existing simple NPC inventory remains available.
+- **World Facts** — established setting facts with scope and source, kept separately
+  from rumors, knowledge, quests and unresolved hooks.
+- **Knowledge Provenance** — optional informant/document, acquisition channel and
+  corroboration status on the existing knowledge records. A rumor does not become a
+  world fact or another NPC's knowledge without evidence. Requires Knowledge and Beliefs.
+- **Emotional State** — a current description with emotional tone, activation, sense
+  of control and observed/interpreted basis. Recomputed from the current scene, cleared
+  when missing from an update, and excluded from off-scene character context.
+- **Established Traits** — sourced preferences, principles, fears, habits and skills;
+  no automatic personality generation on introduction.
+
+These six options follow the built-in default (enabled) and have complete RU/EN labels.
+Use **Panel Manager → Characters → Fields** for conditions, emotions, traits and knowledge
+provenance; use **Scene Details → Fields** for items and world facts. Disabling removes
+the field from extraction and subsequent prompt context without deleting old snapshots.
+Durable records survive Full/Delta updates; `[]` explicitly clears a list. Resolved
+conditions and superseded world facts stay in saved snapshots but are omitted from
+the next-response context. Records describe the scene and never force subsequent dialogue.
+In Together mode, the previous snapshot accompanies generation; in Separate mode, enable
+**Embed Snapshots** to include it in the next narrative response. Custom schemas/prompts
+remain user-controlled and must explicitly include the new fields.
+
 - **Final-state context** — Together and Separate pass the last recorded state into the next response (Separate respects **Embed snapshots**). State provides context; it does not prescribe dialogue, tone, actions, or future outcomes. ScenePulse does not reject or regenerate narrative responses for deviating from prior state.
+- **Character Plans** — tracks an NPC's established plans, observed progress, place,
+  condition and source. Status changes require narrative evidence. Off-scene plans stay
+  at their last known state; turns do not advance tasks or apply completion effects.
+- **Story Hooks** — records established significant objects, clues, statements and
+  unexplained events with their source and any stated relevance condition. Hooks stay
+  open until the narrative resolves or dismisses them. They do not trigger events,
+  expire by age, or reveal secrets automatically. Promises and appointments remain in
+  **Story Threads**; the tracker is instructed to avoid duplicate records.
+
 - **Character context** — current intention, the evidence or interpretation behind an inner thought, and knowledge/beliefs/secrets with their established sources. Knowing something as the model or player does not establish that an NPC knows it.
 - **Story threads** — a compact record of established promises, appointments, and loose ends, with source and any established time/condition. Resolved threads remain visible for one snapshot. No off-screen ticking or automatic event completion.
 - **Relationship context** — current reaction, enduring relationship basis, reasons for meter changes, and unresolved conflicts. Meters describe the narrative; no fixed progression rules force the story to fit a score.
 - Available in dynamic profiles through the existing **Scene Details**, **Characters**, and **Relationships** field toggles. Inspect the collapsible context sections in the dashboard and character wiki. Explicit custom schemas and full custom prompts remain user-controlled; add the new fields there to opt in.
 - Knowledge, relationship foundations, conflicts, and open threads persist across delta updates and full refreshes. Current intentions, thought explanations, reactions, and change reasons are refreshed rather than treated as new evidence on later turns. States remain tied to their message and swipe.
+
+Toggle the new fields independently in **Panel Manager → Characters → Fields → Character Plans**
+and **Panel Manager → Scene Details → Fields → Story Hooks**. Both follow the normal
+built-in field defaults (enabled). Disabling a field removes its extraction instructions,
+schema and next-response context and hides it in the live panel; saved history remains
+available when re-enabled. Completed/cancelled plans and resolved/dismissed hooks remain
+in snapshots for reference and are omitted from the next-response context. The tracker
+returns the complete list when updating it; an explicit empty list clears it.
 
 ### Character Wiki
 - **Full-screen browser** for every character ever encountered, not just those currently in scene
@@ -561,9 +608,9 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest release: v7.1.15** - Selectable parallel lanes for Separate mode, character audience filters with a tightened generation contract, the pinnable Panel Library, automatic scene-based panel selection, and a large mobile/layout pass. Russian UI coverage is back to 100%.
+**Latest release: v7.1.15.2** - Descriptive continuity with toggleable character plans, story hooks, physical conditions, items and ownership, world facts, knowledge provenance, emotional state and established traits. Includes RU/EN labels and parallel extraction support.
 
-**Previous release: v7.1.14** - Character-scoped custom panels.
+**Previous release: v7.1.15** - Selectable parallel lanes for Separate mode, character audience filters, the pinnable Panel Library, automatic scene-based panel selection, and mobile/layout improvements.
 
 ## Contributing
 

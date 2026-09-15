@@ -2,7 +2,23 @@
 
 All notable changes to ScenePulse are documented in this file.
 
-### Unreleased
+### [7.1.15.2]
+
+- Added six independently toggleable descriptive facets with RU/EN labels: physical
+  conditions, items and ownership (including player items), world facts, knowledge
+  provenance, emotional state and established traits. Connected them to snapshot
+  persistence, Full/Delta/section extraction, parallel lanes and next-response context.
+  Durable records change only on evidence; transient emotions clear without fresh
+  evidence. Disabled fields are excluded from prompts while saved history is retained.
+- Required nullable schema fields now accept explicit null, allowing unknown item
+  quantities without inventing a count. Item holders follow canonical NPC name reveals.
+
+- Added independently toggleable **Character Plans** and **Story Hooks**, with RU/EN
+  labels, snapshot persistence and Together/Separate/parallel context support. Both
+  record established facts and sources; they do not simulate off-scene activity or
+  force narrative events. Disabling them preserves saved history.
+- Parallel lane previous-state context now applies the shared continuity projection,
+  keeping disabled continuity fields out of lane prompts.
 
 - Combined descriptive scene continuity with parallel Separate extraction, character
   audience panels, automatic panels and the pinned Panel Library.

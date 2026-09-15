@@ -38,7 +38,7 @@ function check(value,spec,path,errors,warnings){
     if(actual==='object'){
         const props=spec.properties||{};
         for(const key of spec.required||[]){
-            if(!Object.hasOwn(value,key)||value[key]===null||value[key]===undefined)errors.push(`${path}.${key}: missing required field`);
+            if(!Object.hasOwn(value,key)||value[key]===undefined||(value[key]===null&&!matchesType(null,props[key]?.type)))errors.push(`${path}.${key}: missing required field`);
         }
         for(const[key,nested]of Object.entries(props))if(Object.hasOwn(value,key))check(value[key],nested,`${path}.${key}`,errors,warnings);
         if(spec.additionalProperties===false){

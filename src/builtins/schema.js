@@ -4,7 +4,9 @@
 // constants module that everyone imports. constants.js re-exports
 // BUILTIN_SCHEMA from here for backward compatibility.
 
-import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS, STORY_THREADS_SCHEMA } from '../continuity.js';
+import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS, STORY_THREADS_SCHEMA, NARRATIVE_HOOKS_SCHEMA } from '../continuity.js';
+
+import { SCENE_STATE_FIELDS } from '../state-records.js';
 
 export const BUILTIN_SCHEMA={name:'ScenePulse',description:'Scene tracker.',strict:false,
 value:{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","properties":{"time":{"type":"string","description":"HH:MM:SS only."},"date":{"type":"string","description":"MM/DD/YYYY (DayName)"},"elapsed":{"type":"string","description":"Time elapsed since last action. Format: duration (context). Example: 30s (dialogue), 2m (walking)"},"temporalIntent":{"type":"string","enum":["continue","flashback","timeSkip","parallel"],"description":"Optional. Set to 'flashback' when this turn depicts an EARLIER moment than the previous turn (memory, recall, dream-of-past). Set to 'timeSkip' for a deliberate large forward jump (hours/days passing). Set to 'parallel' for a cutaway to another character or location at roughly the same time. Omit or 'continue' for normal scene progression. ScenePulse uses this to distinguish intentional time jumps from model errors."},"location":{"type":"string","description":"Immediate location > Parent area. Only 2 levels. Example: Kitchen > Windbloom Apartment, Bridge > USS Enterprise, Alley > Chinatown"},"weather":{"type":"string","description":"Sky/precipitation only."},"temperature":{"type":"string","description":"Number AND description. Example: 72°F — warm and humid. Never just a number."},"soundEnvironment":{"type":"string","description":"Audible sounds right now."},"witnesses":{"type":"array","items":{"type":"string"},"description":"[] if none."},"sceneTopic":{"type":"string"},"sceneMood":{"type":"string"},"sceneInteraction":{"type":"string"},"sceneTension":{"type":"string","enum":["calm","low","moderate","high","critical"]},"sceneSummary":{"type":"string"},
@@ -19,6 +21,8 @@ value:{"$schema":"http://json-schema.org/draft-07/schema#","type":"object","prop
 
 // Additive, optional fields keep older saved snapshots and custom profiles valid.
 BUILTIN_SCHEMA.value.properties.storyThreads = STORY_THREADS_SCHEMA;
+BUILTIN_SCHEMA.value.properties.narrativeHooks = NARRATIVE_HOOKS_SCHEMA;
+for (const [key, { schema }] of Object.entries(SCENE_STATE_FIELDS)) BUILTIN_SCHEMA.value.properties[key] = schema;
 for (const [array, fields] of [['characters', CHARACTER_CONTINUITY_FIELDS], ['relationships', RELATIONSHIP_CONTINUITY_FIELDS]]) {
     for (const [key, field] of Object.entries(fields)) BUILTIN_SCHEMA.value.properties[array].items.properties[key] = field.schema;
 }

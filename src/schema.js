@@ -16,6 +16,7 @@ import {
 } from './profiles.js';
 import { assemblePrompt } from './prompts/assembler.js';
 import { CHARACTER_CONTINUITY_FIELDS, RELATIONSHIP_CONTINUITY_FIELDS } from './continuity.js';
+import { KNOWLEDGE_PROVENANCE_FIELDS } from './state-records.js';
 import { audienceIsOpen, audienceNeedsGender } from './character-audience.js';
 
 // ── Sub-field toggle → schema property mappings ──
@@ -56,7 +57,7 @@ for (const [key, field] of Object.entries(RELATIONSHIP_CONTINUITY_FIELDS)) REL_S
 
 export const SECTION_FIELDS=Object.freeze({
     dashboard:['time','date','location','weather','temperature'],
-    scene:['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent','witnesses','storyThreads'],
+    scene:['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent','witnesses','storyThreads','narrativeHooks','trackedItems','worldFacts'],
     quests:['northStar','mainQuests','sideQuests'],
     relationships:['relationships'],
     characters:['characters'],
@@ -123,6 +124,9 @@ function filterArraySchema(baseSchema,subFieldMap,ft){
             }
         }
     }
+    if (ft.char_knowledgeProvenance === false && itemProps.knowledge?.items?.properties) {
+        for (const key of Object.keys(KNOWLEDGE_PROVENANCE_FIELDS)) delete itemProps.knowledge.items.properties[key];
+    }
     return clone;
 }
 
@@ -173,7 +177,7 @@ export function buildDynamicSchema(s){
             } else if(f.type==='array'){
                 props[f.key]={type:'array',items:{type:f.itemType||'string'},description:f.desc};
             } else if(f.type==='threadArray'){
-                props[f.key]=structuredClone(BUILTIN_SCHEMA.value.properties.storyThreads);
+                props[f.key]=structuredClone(BUILTIN_SCHEMA.value.properties[f.key]);
             } else if(f.type==='questArray'){
                 props[f.key]={type:'array',description:f.desc,items:{type:'object',properties:{name:{type:'string'},urgency:{type:'string',enum:['critical','high','moderate','low','resolved']},detail:{type:'string'}},required:['name','urgency','detail']}};
             } else if(f.type==='relationshipArray'){

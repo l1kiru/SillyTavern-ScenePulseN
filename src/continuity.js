@@ -1,9 +1,24 @@
 // Descriptive continuity shared by the tracker schema, prompts and snapshots.
 // This module never generates, grades, or rewrites narrative responses.
 
+import { CHARACTER_STATE_FIELDS, SCENE_STATE_FIELDS, KNOWLEDGE_PROVENANCE_FIELDS, KNOWLEDGE_PROVENANCE_RULE, normalizeStateRecords, normalizeKnowledgeProvenance } from './state-records.js';
+
 const text = description => ({ type: 'string', description });
 
 export const CHARACTER_CONTINUITY_FIELDS = {
+    ...CHARACTER_STATE_FIELDS,
+    activityPlans: { toggle: 'char_activityPlans', schema: {
+        type: 'array', maxItems: 6, description: 'Up to 6 explicitly established personal plans or ongoing activities of this NPC. Keep stable ids. Record goal, observed progress, established location and time/condition; leave unknown details empty. planned = stated but not begun, active = observed underway, completed/cancelled = explicitly established outcome. Do not assign routine tasks on introduction or departure, invent steps, advance off-screen work per turn, or apply healing, inventory, relationship or quest effects. Return the COMPLETE list on change, [] to clear; omission preserves prior records. Do not duplicate currentIntent or a quest unless this records distinct established progress. Plans are descriptive, never instructions for the next reply.',
+        items: { type: 'object', properties: {
+            id: text('Stable plan id reused across turns.'),
+            goal: text('Explicitly established intended activity or objective.'),
+            status: { type: 'string', enum: ['planned', 'active', 'completed', 'cancelled'] },
+            progress: text('Last observed progress only; empty if none is established.'),
+            location: text('Established place of the activity, not an inferred current NPC location; empty if unknown.'),
+            condition: text('Stated time or prerequisite; preserve uncertainty, never invent a deadline.'),
+            source: text('Brief narrative evidence establishing or changing the plan. Required, not speculation.'),
+        }, required: ['id', 'goal', 'status', 'progress', 'location', 'condition', 'source'] },
+    } },
     innerThoughtBasis: { toggle: 'char_innerThoughtBasis', schema: text('Basis for this turn\'s innerThought: cite explicit narration, or label it as an interpretation of observed behavior. Empty when no basis exists. An inferred thought is not evidence of facts, secrets, or completed actions.') },
     currentIntent: { toggle: 'char_currentIntent', schema: text('Intention still held at the END of this scene, grounded in words or actions; qualify an inference. A plan is not a completed action or an instruction for the next reply. Recompute this turn; empty if unknown or already fulfilled.') },
     knowledge: { toggle: 'char_knowledge', schema: {
@@ -12,6 +27,7 @@ export const CHARACTER_CONTINUITY_FIELDS = {
             kind: { type: 'string', enum: ['known', 'belief', 'secret'] },
             detail: text('The information or belief, with uncertainty preserved.'),
             source: text('Established source of this NPC\'s knowledge or belief.'),
+            ...KNOWLEDGE_PROVENANCE_FIELDS,
         }, required: ['kind', 'detail', 'source'] },
     } },
 };
@@ -36,6 +52,17 @@ export const STORY_THREADS_SCHEMA = {
     }, required: ['id', 'summary', 'status', 'condition', 'source'] },
 };
 
+export const NARRATIVE_HOOKS_SCHEMA = {
+    type: 'array', maxItems: 20, description: 'Up to 20 established significant objects, clues, statements or unexplained events whose relevance remains unresolved. Record evidence, not invented foreshadowing or hidden truth. Keep stable ids. Do not duplicate promises/appointments in storyThreads, quests, or NPC knowledge records. Preserve who knows a fact in their knowledge, never infer universal awareness from this scene-level register. open = unresolved, resolved = narrative supplied an outcome, dismissed = explicitly disproved or no longer applicable. Keep an open hook unchanged without new evidence; do not age, randomly activate, expire or force a payoff. A condition is an established prerequisite, not a command to reveal a secret or cause an event. Return the COMPLETE list on change, [] to clear; omission preserves prior records.',
+    items: { type: 'object', properties: {
+        id: text('Stable hook id reused across turns.'),
+        detail: text('The established significant detail, preserving uncertainty and attribution.'),
+        status: { type: 'string', enum: ['open', 'resolved', 'dismissed'] },
+        condition: text('Explicitly established relevance condition; empty if none.'),
+        source: text('Brief narrative evidence establishing, resolving or dismissing this detail. Required.'),
+    }, required: ['id', 'detail', 'status', 'condition', 'source'] },
+};
+
 export const CONTINUITY_RULES = `## DESCRIPTIVE CONTINUITY — tracker extraction only
 Record the final state AFTER the narrative. The narrative is authoritative even when it differs from earlier intentions, expectations, or relationship estimates. Never rewrite, reject, continue, or regenerate the narrative to make it match tracker state. Do not prescribe dialogue, tone, actions, or the next outcome.
 Needs and goals describe the character; intentions remain unexecuted until shown. Inner thoughts inferred from behavior are interpretations, not new evidence or knowledge. Do not turn old inferred thoughts into established facts.
@@ -47,7 +74,10 @@ export const CONTINUITY_CONTEXT_NOTE = 'Descriptive state at the end of the prev
 export function continuityFieldSpecs(fields, toggles = {}) {
     return Object.entries(fields)
         .filter(([, field]) => toggles[field.toggle] !== false)
-        .map(([key, { schema }]) => `- ${key}: ${schema.description}${schema.items?.properties ? ` Each entry: ${Object.keys(schema.items.properties).join(', ')}.` : ''}`);
+        .map(([key, { schema }]) => {
+            const keys = Object.keys(schema.items?.properties || {}).filter(field => key !== 'knowledge' || toggles.char_knowledgeProvenance !== false || !Object.hasOwn(KNOWLEDGE_PROVENANCE_FIELDS, field));
+            return `- ${key}: ${schema.description}${keys.length ? ` Each entry: ${keys.map(field => schema.items.properties[field].enum ? `${field} (${schema.items.properties[field].enum.join('/')})` : field).join(', ')}.` : ''}${key === 'knowledge' && toggles.char_knowledgeProvenance !== false ? ' ' + KNOWLEDGE_PROVENANCE_RULE : ''}`;
+        });
 }
 
 const cleanText = value => typeof value === 'string' ? value.trim() : '';
@@ -55,7 +85,32 @@ const records = value => Array.isArray(value) ? value.filter(item => item && typ
 
 export function normalizeKnowledge(value) {
     return records(value).filter(item => ['known', 'belief', 'secret'].includes(item.kind) && cleanText(item.detail) && cleanText(item.source))
-        .map(item => ({ kind: item.kind, detail: cleanText(item.detail), source: cleanText(item.source) }));
+        .map(item => ({ kind: item.kind, detail: cleanText(item.detail), source: cleanText(item.source), ...normalizeKnowledgeProvenance(item) }));
+}
+
+export function normalizeActivityPlans(value) {
+    const seen = new Set();
+    return records(value).filter(item => {
+        const id = cleanText(item.id);
+        if (!id || seen.has(id) || !cleanText(item.goal) || !cleanText(item.source)
+            || !['planned', 'active', 'completed', 'cancelled'].includes(item.status)) return false;
+        seen.add(id);
+        return true;
+    }).slice(0, 6).map(item => ({ id: cleanText(item.id), goal: cleanText(item.goal), status: item.status,
+        progress: cleanText(item.progress), location: cleanText(item.location),
+        condition: cleanText(item.condition), source: cleanText(item.source) }));
+}
+
+export function normalizeNarrativeHooks(value) {
+    const seen = new Set();
+    return records(value).filter(item => {
+        const id = cleanText(item.id);
+        if (!id || seen.has(id) || !cleanText(item.detail) || !cleanText(item.source)
+            || !['open', 'resolved', 'dismissed'].includes(item.status)) return false;
+        seen.add(id);
+        return true;
+    }).slice(0, 20).map(item => ({ id: cleanText(item.id), detail: cleanText(item.detail), status: item.status,
+        condition: cleanText(item.condition), source: cleanText(item.source) }));
 }
 
 export function normalizeStoryThreads(value) {
@@ -71,8 +126,10 @@ export function normalizeStoryThreads(value) {
 // Preserve absence for older snapshots and disabled fields. In particular,
 // missing arrays mean unchanged; an explicit [] means deliberately cleared.
 export function normalizeCharacterContinuity(from, to) {
+    for (const [key, { schema }] of Object.entries(CHARACTER_STATE_FIELDS)) if (Object.hasOwn(from, key)) to[key] = normalizeStateRecords(from[key], schema);
     for (const key of ['innerThoughtBasis', 'currentIntent']) if (Object.hasOwn(from, key)) to[key] = cleanText(from[key]);
     if (Object.hasOwn(from, 'knowledge')) to.knowledge = normalizeKnowledge(from.knowledge);
+    if (Object.hasOwn(from, 'activityPlans')) to.activityPlans = normalizeActivityPlans(from.activityPlans);
 }
 
 export function normalizeRelationshipContinuity(from, to) {
@@ -94,13 +151,26 @@ export function prepareSnapshotContext(snapshot, schema) {
     for (const key of ['mainQuests', 'sideQuests']) if (Array.isArray(out[key])) out[key] = out[key].filter(item => item.urgency !== 'resolved');
     delete out.activeTasks;
     delete out._spMeta;
+    for (const key of Object.keys(SCENE_STATE_FIELDS)) if (!props[key]) delete out[key];
+    if (Array.isArray(out.worldFacts)) out.worldFacts = out.worldFacts.filter(item => item.status === 'active');
     if (!props.plotBranches) delete out.plotBranches;
     if (!props.storyThreads) delete out.storyThreads;
     else if (Array.isArray(out.storyThreads)) out.storyThreads = out.storyThreads.filter(item => item.status !== 'resolved');
+    if (!props.narrativeHooks) delete out.narrativeHooks;
+    else if (Array.isArray(out.narrativeHooks)) out.narrativeHooks = out.narrativeHooks.filter(item => item.status === 'open');
     for (const [array, fields] of [['characters', CHARACTER_CONTINUITY_FIELDS], ['relationships', RELATIONSHIP_CONTINUITY_FIELDS]]) {
         for (const entry of out[array] || []) for (const key of Object.keys(fields)) {
             if (!props[array]?.items?.properties?.[key]) delete entry[key];
         }
+    }
+    for (const character of out.characters || []) {
+        for (const item of character.knowledge || []) for (const key of Object.keys(KNOWLEDGE_PROVENANCE_FIELDS)) {
+            if (!props.characters?.items?.properties?.knowledge?.items?.properties?.[key]) delete item[key];
+        }
+        if (Array.isArray(character.conditions)) character.conditions = character.conditions.filter(item => item.status === 'active');
+    }
+    for (const character of out.characters || []) if (Array.isArray(character.activityPlans)) {
+        character.activityPlans = character.activityPlans.filter(item => ['planned', 'active'].includes(item.status));
     }
     if (Array.isArray(out.charactersPresent)) {
         const present = new Set(out.charactersPresent.map(name => String(name).trim().toLowerCase()));
@@ -108,7 +178,7 @@ export function prepareSnapshotContext(snapshot, schema) {
         if (Array.isArray(out.characters)) {
             out._offSceneCharacters = out.characters.filter(entry => !isPresent(entry)).map(entry => {
                 const stub = { name: entry.name, role: entry.role || '', aliases: entry.aliases || [] };
-                for (const key of ['shortTermGoal', 'longTermGoal', 'knowledge']) if (props.characters?.items?.properties?.[key] && Object.hasOwn(entry, key)) stub[key] = entry[key];
+                for (const key of ['shortTermGoal', 'longTermGoal', 'knowledge', 'activityPlans', 'conditions', 'establishedTraits']) if (props.characters?.items?.properties?.[key] && Object.hasOwn(entry, key)) stub[key] = entry[key];
                 return stub;
             });
             out.characters = out.characters.filter(isPresent);

@@ -7,6 +7,35 @@ five files.
 
 ## Parallel extraction and continuity
 
+`state-records.js` defines the optional evidence-backed state facets and their
+normalization: character `conditions`, `emotionalState`, `establishedTraits`, scene
+`trackedItems`/`worldFacts`, and optional provenance on `knowledge` records. The
+character fields join the continuity registry and built-in key protection; root
+records belong to Global. The player exists only as an item holder, never as an NPC.
+Stable item IDs survive transfers; canonical identity resolution updates NPC holder
+names. Quantity is nullable, and extraction validation accepts explicit null only
+where the schema allows it. Existing saved knowledge records need no migration.
+
+Each facet uses existing profile field toggles. Knowledge provenance trims nested
+schema fields and context while preserving the base knowledge contract. Shared
+projection filters all new disabled fields before Together/Separate/parallel context
+is sent. Conditions, traits, world facts and items are durable complete-list records;
+omission carries them, `[]` clears. Emotions are transient: Delta omission and partial
+character fallback clear them, and off-scene context never includes them. No code
+advances conditions or inventory with elapsed time. `state-records-view.js` renders
+escaped RU/EN labels in the scene and character context UI, including character wiki.
+
+`continuity.js` owns the optional `characters[].activityPlans` and root
+`narrativeHooks` contracts. They share the existing built-in field toggle path
+(`char_activityPlans`, `narrativeHooks`) and require no migration for old snapshots.
+Plans belong to character lanes; hooks belong to Global. Full refresh carries omitted
+records, Delta replaces a supplied list (including `[]`), and normalization preserves
+only valid, source-backed records with stable ids (at most 6 plans per NPC / 20 hooks).
+Terminal records stay available in saved history; `prepareSnapshotContext` excludes
+them and disabled fields. Lane previous-state prompts use that same projection without
+mutating the base snapshot used for merge. Neither feature advances time, simulates
+off-scene actions, adjusts meters, nor enforces narrative outcomes.
+
 Separate optionally uses `parallel-build.js` through Connection Manager. Core owns
 time, location, current NPC roster and routing tags; character lanes own character
 continuity and custom character fields; Global owns relationships, quests, story threads
