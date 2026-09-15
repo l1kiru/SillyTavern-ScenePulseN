@@ -9,9 +9,16 @@ import { relPhaseFamily } from '../rel-phase.js';
 import { markStart as _spPmStart, markEnd as _spPmEnd } from '../perf-monitor.js';
 import { t } from '../i18n.js';
 import { DEFAULTS } from '../constants.js';
-import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId } from '../settings.js';
+import { getSettings, buildProfileView, getActivePanels, canGenerateScene, getActiveSwipeId, getPanelActivationStrategy } from '../settings.js';
 import { getLatestSnapshot, getPrevSnapshot } from '../settings.js';
-import { customPanelSectionKey, getActiveProfile, isValidCustomFieldKey } from '../profiles.js';
+import {
+    customPanelScope,
+    customPanelSectionKey,
+    getActiveProfile,
+    isBuiltInCharacterFieldKey,
+    isValidCustomFieldKey,
+    normalizeCustomFieldValue,
+} from '../profiles.js';
 import { normalizeTracker, filterForView } from '../normalize.js';
 import { charColor } from '../color.js';
 import { currentChatKey } from '../message-fingerprint.js';
@@ -41,6 +48,8 @@ import { classifyQuest } from './classify-quest.js';
 import { openDiffViewer } from './diff-viewer.js';
 import { createSparklineCanvas } from './sparklines.js';
 import { detectStagnation } from '../stagnation.js';
+import { isCustomPanelLive } from '../panel-activation-policy.js';
+import { characterMatchesAudience } from '../character-audience.js';
 import { getPortraitHtml, buildPortraitIndex, setPortraitOverride, clearPortraitOverride } from './portraits.js';
 import { getCharacterHistory, invalidateCharacterHistory } from './character-history.js';
 import { updateCharacterField } from '../character-identity.js';
@@ -379,17 +388,28 @@ function _updatePanelInner(d,_force=false){
     // Update contextual subtitle with live scene info
     {const _sub=document.getElementById('sp-brand-subtitle');
     if(_sub){const _nc=d?.characters?.length||0;const _nr=d?.relationships?.length||0;const _mi=currentSnapshotMesIdx;const parts=[];if(_nc)parts.push(_nc+' char'+((_nc!==1)?'s':''));if(_nr)parts.push(_nr+' rel'+((_nr!==1)?'s':''));if(typeof _mi==='number'&&_mi>=0)parts.push('Msg #'+_mi);_sub.textContent=parts.join(' \u00b7 ')}}
-    // Snapshot previous content for error boundary recovery
-    const _prevContent=body.innerHTML;
     // Preserve panel manager during rebuild
     const mgrNode=document.getElementById('sp-panel-mgr');
     if(mgrNode)mgrNode.remove();
     body.innerHTML='';
     if(mgrNode)body.appendChild(mgrNode);
+    if(d?._spMeta?.parallel?.partial){
+        const notice=document.createElement('div');
+        notice.className='sp-partial-state';
+        notice.setAttribute('role','status');
+        notice.textContent=t('Scene partially updated. Some fields retain their last known values.');
+        body.appendChild(notice);
+    }
     try { // Error boundary: if rendering fails, restore previous panel content
     const rootSettings=getSettings();
     const s=buildProfileView(rootSettings,getActiveProfile(rootSettings));
     const ft=s.fieldToggles||{};
+    const customPanels=getActivePanels(s);
+    const livePanelOpts={
+        strategy:getPanelActivationStrategy(rootSettings),
+        activation:(()=>{const snap=getLatestSnapshot();return snap?._spMeta?.panelActivation||snap?._spMeta?.parallel?.activation||null})(),
+    };
+    const characterCustomPanels=s.panels?.characters===false?[]:customPanels.filter(cp=>cp&&cp.enabled!==false&&customPanelScope(cp)==='character'&&isCustomPanelLive(cp,livePanelOpts)&&Array.isArray(cp.fields)&&cp.fields.some(f=>f?.enabled!==false&&isValidCustomFieldKey(f?.key)&&!isBuiltInCharacterFieldKey(f.key)));
 
     // Environment -- always visible, NOT collapsible
     const envDiv=document.createElement('div');envDiv.className='sp-env-permanent';
@@ -858,7 +878,7 @@ function _updatePanelInner(d,_force=false){
             rightGroup.appendChild(actWrap);headerDiv.appendChild(rightGroup)}
             headerDiv.addEventListener('click',(ev)=>{if(ev.target.closest('.sp-quest-actions'))return;e.classList.toggle('sp-card-open')});e.appendChild(headerDiv);const detailEl=document.createElement('div');detailEl.className='sp-quest-detail';detailEl.textContent=p.detail||'\u2014';if(!p.detail){detailEl.classList.add('sp-empty-field');detailEl.dataset.placeholder=t('Quest details')}mkEditable(detailEl,()=>p.detail||'',v=>{p.detail=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,p.name);if(_si>=0)snap[tier.key][_si].detail=v});e.appendChild(detailEl);mkEditable(nameEl,()=>p.name||'',v=>{const _oldName=p.name;p.name=v;const snap=getLatestSnapshot();const _si=_findQuestStorageIdx(snap,tier.key,_oldName);if(_si>=0)snap[tier.key][_si].name=v});tierBody.appendChild(e)}}
             // Add quest button
-            const addBtn=document.createElement('div');addBtn.className='sp-quest-add';addBtn.innerHTML='<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> '+t('Add quest');
+            const addBtn=document.createElement('button');addBtn.type='button';addBtn.className='sp-quest-add';addBtn.innerHTML='<svg viewBox="0 0 14 14" width="11" height="11" fill="none"><line x1="7" y1="2" x2="7" y2="12" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/><line x1="2" y1="7" x2="12" y2="7" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg> '+t('Add quest');
             addBtn.addEventListener('click',()=>{_showAddQuestDialog(tier.t,tier.key,d)});
             tierBody.appendChild(addBtn);
             b.appendChild(tierBody);f.appendChild(b)}
@@ -1034,6 +1054,15 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const invA = Array.isArray(cur.inventory) ? [...cur.inventory].map(String).sort().join('|') : '';
             const invB = Array.isArray(prv.inventory) ? [...prv.inventory].map(String).sort().join('|') : '';
             if (invA !== invB) changed.add('inventory');
+            for(const cp of characterCustomPanels){
+                if(!characterMatchesAudience(cur,cp.audience))continue;
+                for(const field of cp.fields||[]){
+                    if(!field||field.enabled===false||!isValidCustomFieldKey(field.key)||isBuiltInCharacterFieldKey(field.key))continue;
+                    const a=Array.isArray(cur[field.key])?cur[field.key].map(String).join('|'):String(cur[field.key]??'');
+                    const b=Array.isArray(prv[field.key])?prv[field.key].map(String).join('|'):String(prv[field.key]??'');
+                    if(a!==b)changed.add(field.key);
+                }
+            }
             return changed;
         };
         for(let _ci2=0;_ci2<sortedChars.length;_ci2++){
@@ -1122,6 +1151,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
             const _ICON_BAG='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><path d="M2.5 4.5 h7 v6.5 h-7 z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M4 4.5 Q4 1.5 6 1.5 Q8 1.5 8 4.5" stroke="currentColor" stroke-width="1.1" fill="none"/><line x1="4" y1="7" x2="8" y2="7" stroke="currentColor" stroke-width="0.8" opacity="0.5"/></svg>';
             const _ICON_TARGET='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1.1"/><circle cx="6" cy="6" r="2.5" stroke="currentColor" stroke-width="0.9" opacity="0.7"/><circle cx="6" cy="6" r="0.9" fill="currentColor"/></svg>';
             const _ICON_LEAF='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><path d="M6 1.5 C3 3 2 6 3.5 9 C6 10 9 9 10 6 C9.5 3 8 1.5 6 1.5 Z" stroke="currentColor" stroke-width="1.1" stroke-linejoin="round"/><path d="M4 8.5 Q6 5.5 9 4" stroke="currentColor" stroke-width="0.9" stroke-linecap="round" opacity="0.65"/></svg>';
+            const _ICON_CUSTOM='<svg viewBox="0 0 12 12" width="11" height="11" fill="none" aria-hidden="true"><rect x="1.5" y="1.5" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/><rect x="7" y="1.5" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/><rect x="1.5" y="7" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/><rect x="7" y="7" width="3.5" height="3.5" rx="0.7" stroke="currentColor" stroke-width="1"/></svg>';
 
             // Helper: build a labeled subsection header (uppercase, bold,
             // with an SVG icon tinted in the character's accent color and
@@ -1323,6 +1353,75 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                 }
             }
 
+            // ── CHARACTER-SCOPED CUSTOM PANELS ─────────────────────────
+            // These definitions share the existing Custom Panel field
+            // types, but their values live on each characters[] item and
+            // render inside every character card instead of as standalone
+            // top-level sections.
+            for(const cp of characterCustomPanels){
+                if(!characterMatchesAudience(ch,cp.audience))continue;
+                const activeFields=(cp.fields||[]).filter(field=>
+                    field&&field.enabled!==false&&isValidCustomFieldKey(field.key)&&!isBuiltInCharacterFieldKey(field.key)
+                );
+                if(!activeFields.length)continue;
+                _mkSub(String(cp.name||t('Custom')), _ICON_CUSTOM);
+                const customWrap=document.createElement('div');customWrap.className='sp-char-custom-fields';
+                for(const field of activeFields){
+                    const key=field.key;
+                    const row=document.createElement('div');row.className='sp-row sp-char-custom-row';
+                    const label=document.createElement('div');label.className='sp-row-label';label.textContent=field.label||key;
+                    row.appendChild(label);
+                    const markChanged=(el)=>{
+                        if(!_changedFields.has(key))return;
+                        el.classList.add('sp-char-val-changed');
+                        const previous=_prevCh?.[key];
+                        const oldText=Array.isArray(previous)?previous.join(', '):String(previous??t('(empty)'));
+                        el.title=t('Previous')+': '+(oldText.length>160?oldText.substring(0,157)+'\u2026':oldText);
+                    };
+                    if(field.type==='meter'){
+                        const num=clamp(parseInt(ch[key])||0,0,100);
+                        const invert=!!field.invert;
+                        const effective=invert?(100-num):num;
+                        const danger=effective<25?'low':effective<50?'mid':'ok';
+                        const wrap=document.createElement('div');wrap.className='sp-row-value sp-cp-meter-wrap';
+                        wrap.innerHTML=`<div class="sp-cp-meter"><div class="sp-cp-meter-fill" data-danger="${danger}" style="width:${Math.max(num,3)}%"></div></div><span class="sp-cp-meter-val">${num}</span>`;
+                        markChanged(wrap);row.appendChild(wrap);
+                    }else if(field.type==='enum'){
+                        const val=str(ch[key])||'';
+                        const opts=Array.isArray(field.options)?field.options:[];
+                        const idx=opts.findIndex(option=>String(option).toLowerCase()===val.toLowerCase());
+                        const severity=opts.length>1&&idx>=0?Math.min(3,Math.floor((idx/(opts.length-1))*4)):0;
+                        const value=document.createElement('div');value.className='sp-row-value';
+                        const chip=document.createElement('span');chip.className='sp-cp-enum-chip';chip.dataset.severity=severity;chip.textContent=val||'\u2014';
+                        value.appendChild(chip);markChanged(value);row.appendChild(value);
+                    }else if(field.type==='list'){
+                        const arr=Array.isArray(ch[key])?ch[key]:[];
+                        const value=document.createElement('div');value.className='sp-row-value sp-cp-list-chips';
+                        if(!arr.length)value.textContent='\u2014';
+                        else for(const item of arr){const chip=document.createElement('span');chip.className='sp-cp-list-chip';chip.textContent=String(item);value.appendChild(chip)}
+                        markChanged(value);row.appendChild(value);
+                    }else{
+                        const value=document.createElement('div');value.className='sp-row-value';
+                        const current=ch[key];
+                        value.textContent=current===undefined||current===null||current===''?'\u2014':String(current);
+                        markChanged(value);
+                        mkEditable(value,()=>String(ch[key]??''),next=>{
+                            const candidate=field.type==='number'&&next.trim()!==''?Number(next):next;
+                            const normalized=normalizeCustomFieldValue(field,candidate);
+                            if(!normalized.ok){
+                                toastr.error(t('Enter a whole number.'));
+                                return false;
+                            }
+                            _saveCharField(key,normalized.value);
+                            return true;
+                        });
+                        row.appendChild(value);
+                    }
+                    customWrap.appendChild(row);
+                }
+                _cbody.appendChild(customWrap);
+            }
+
             cd.appendChild(_cbody);f.appendChild(cd);
         }
 
@@ -1445,16 +1544,16 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     },s);if(s.panels?.storyIdeas===false)_sec.classList.add('sp-panel-hidden');body.appendChild(_sec)}
 
     // Custom Panels (v6.9.14: per-chat definitions)
-    const customPanels=getActivePanels(s);
     for(const cp of customPanels){
-        if(!cp||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
+        if(!cp||customPanelScope(cp)!=='global'||!Array.isArray(cp.fields)||!cp.fields.length||cp.enabled===false)continue;
+        if(!isCustomPanelLive(cp,livePanelOpts))continue;
         const cpName=typeof cp.name==='string'&&cp.name.trim()?cp.name:'Untitled';
         const cpKey=customPanelSectionKey(cpName);
         const _cpSec=mkSection(cpKey,cpName,null,()=>{
             const frag=document.createDocumentFragment();
             for(const f of cp.fields){
                 if(!f||f.enabled===false||!isValidCustomFieldKey(f.key))continue; // v6.9.13: per-field toggle
-                const r=document.createElement('div');r.className='sp-row';
+                const r=document.createElement('div');r.className='sp-row sp-cp-display-row';
                 r.innerHTML=`<div class="sp-row-label">${esc(f.label||f.key)}</div>`;
                 if(f.type==='meter'){
                     // v6.9.12: threshold-based meter with danger colors
@@ -1481,7 +1580,7 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     const arr=Array.isArray(d[f.key])?d[f.key]:[];
                     const vd=document.createElement('div');vd.className='sp-row-value sp-cp-list-chips';
                     if(arr.length===0){vd.textContent='\u2014'}
-                    else{for(const item of arr){const chip=document.createElement('span');chip.className='sp-cp-list-chip';chip.textContent=item;vd.appendChild(chip)}}
+                    else{for(const item of arr){const chip=document.createElement('span');chip.className='sp-cp-list-chip';chip.textContent=str(item)||'\u2014';vd.appendChild(chip)}}
                     r.appendChild(vd);
                 } else if(f.type==='number'){
                     // v6.9.12: monospace styled well
@@ -1489,7 +1588,16 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
                     const numSpan=document.createElement('span');numSpan.className='sp-cp-number-val';
                     numSpan.textContent=str(d[f.key])||'0';
                     val.appendChild(numSpan);
-                    mkEditable(numSpan,()=>str(d[f.key])||'',v=>{d[f.key]=v;const snap=getLatestSnapshot();if(snap)snap[f.key]=v});
+                    mkEditable(numSpan,()=>str(d[f.key])||'',v=>{
+                        const normalized=normalizeCustomFieldValue(f,v.trim()===''?NaN:Number(v));
+                        if(!normalized.ok){
+                            toastr.error(t('Enter a whole number.'));
+                            return false;
+                        }
+                        d[f.key]=normalized.value;
+                        const snap=getLatestSnapshot();if(snap)snap[f.key]=normalized.value;
+                        return true;
+                    });
                     r.appendChild(val);
                 } else {
                     // text: plain editable
@@ -1512,7 +1620,9 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     // Generation stats footer (always last)
     const _meta=d._spMeta||{};
     const _mTokens=_meta.completionTokens||genMeta.completionTokens||0;
-    const _mElapsed=_meta.elapsed||genMeta.elapsed||0;
+    const _mElapsed=(_meta.timing?.status==='ok'&&_meta.timing?.wallMs>0)
+        ? _meta.timing.wallMs/1000
+        : (_meta.elapsed||genMeta.elapsed||0);
     const _mSource=_meta.source||lastGenSource||'';
     const _mInject=_meta.injectionMethod||s.injectionMethod||'inline';
     if(_mTokens>0||_mElapsed>0||_mSource){
@@ -1659,8 +1769,12 @@ if(rel.relType)hh+=`<span class="sp-rel-type-badge" data-ft="rel_type" title="${
     log('\u23F1 updatePanel:',((performance.now()-_perfStart)|0)+'ms');
     } catch(_renderErr) {
         // Error boundary: restore previous panel content on failure
-        log('ERROR updatePanel render failed — restoring previous content:', _renderErr?.message||_renderErr);
+        log('ERROR updatePanel render failed:', _renderErr?.message||_renderErr);
         err('updatePanel render error:', _renderErr);
-        if(body&&_prevContent){body.innerHTML=_prevContent}
+        if(body&&!body.querySelector('.sp-env-permanent')&&!body.querySelector('.sp-error')){
+            const fail=document.createElement('div');fail.className='sp-error';
+            fail.textContent=String(_renderErr?.message||_renderErr||'Panel render failed');
+            body.appendChild(fail);
+        }
     }
 }

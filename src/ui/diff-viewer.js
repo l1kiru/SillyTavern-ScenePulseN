@@ -5,6 +5,9 @@ import { log } from '../logger.js';
 import { esc } from '../utils.js';
 import { t } from '../i18n.js';
 import { getSnapshotFor, getPrevSnapshot, getSettings } from '../settings.js';
+
+let _diffViewerKeyHandler = null;
+
 import { lastDeltaPayload } from '../state.js';
 
 /**
@@ -97,6 +100,13 @@ export function openDiffViewer(mesIdx) {
     });
     overlay.querySelector('.sp-diff-close-float').addEventListener('click', closeDiffViewer);
     overlay.addEventListener('click', e => { if (e.target === overlay) closeDiffViewer(); });
+    _diffViewerKeyHandler = e => {
+        if (e.key !== 'Escape') return;
+        e.preventDefault();
+        e.stopPropagation();
+        closeDiffViewer();
+    };
+    document.addEventListener('keydown', _diffViewerKeyHandler, true);
     overlay.querySelector('.sp-diff-copy').addEventListener('click', () => {
         let text;
         if (activeTab === 'diff' && diffResult) {
@@ -124,6 +134,10 @@ export function openDiffViewer(mesIdx) {
 }
 
 export function closeDiffViewer() {
+    if (_diffViewerKeyHandler) {
+        document.removeEventListener('keydown', _diffViewerKeyHandler, true);
+        _diffViewerKeyHandler = null;
+    }
     const existing = document.getElementById('sp-diff-overlay');
     if (existing) {
         existing.classList.remove('sp-diff-visible');

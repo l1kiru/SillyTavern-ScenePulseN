@@ -59,3 +59,21 @@
 .sp-analytics-table tr:hover td { background: rgba(255,255,255,0.02); }
 .sp-analytics-src { padding: 1px 4px; border-radius: 3px; font-size: var(--sp-fs-xs); font-family: var(--sp-font); }
 .sp-analytics-src-warn { background: rgba(212,145,94,0.1); color: var(--sp-amber, #d4915e); }
+
+/* Mobile/touch hardening: keep analytics inside the visual viewport and make
+   the only destructive navigation target (close) reliably tappable. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-analytics-overlay {
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+        box-sizing: border-box;
+    }
+    .sp-analytics-container {
+        max-width: 100%;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+        padding: 12px;
+    }
+    .sp-analytics-header { gap: 8px; margin-bottom: 12px; }
+    .sp-analytics-title { min-width: 0; overflow-wrap: anywhere; }
+    .sp-analytics-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; flex: 0 0 44px; }
+    .sp-analytics-table-wrap { overflow: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
+}

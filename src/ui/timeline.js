@@ -15,7 +15,6 @@ export function renderTimeline(){
     let tl=document.getElementById('sp-timeline');
     if(tl)tl.remove();
     const all=getTrackerData();const sorted=Object.keys(all.snapshots).map(Number).sort((a,b)=>a-b);
-    const provenance=new Map(getSnapshotProvenance().map(p=>[p.id,p]));
     if(sorted.length<1)return;
     const latest=sorted[sorted.length-1];
     // Scrub may briefly point at a message with no active mirror (cancel/swipe).
@@ -47,6 +46,7 @@ export function renderTimeline(){
         if(nearest>0)displayKeys[nearest]=selectedKey;
         displayKeys.sort((a,b)=>a-b);
     }
+    const provenance=new Map(getSnapshotProvenance(displayKeys).map(p=>[p.id,p]));
     tl=document.createElement('div');tl.id='sp-timeline';tl.className='sp-timeline';
     const bar=document.createElement('div');bar.className='sp-tl-bar';
     for(let i=0;i<displayKeys.length;i++){
@@ -117,6 +117,9 @@ export function renderTimeline(){
             dateLabel='#'+k;
         }
         dot.title=tooltipParts.join(' \u00B7 ');
+        wrap.setAttribute('role','button');
+        wrap.tabIndex=0;
+        wrap.setAttribute('aria-label',dot.title||('Msg #'+k));
         const lbl=document.createElement('div');lbl.className='sp-tl-label'+(isSelected?' sp-tl-label-active':'');
         lbl.textContent='#'+k;
         wrap.appendChild(lbl);
@@ -144,6 +147,11 @@ export function renderTimeline(){
                 // Scroll to message AFTER panel render completes (separate timeout to avoid recursion)
                 setTimeout(()=>_scrollToMessage(k),50);
             },200));
+        });
+        wrap.addEventListener('keydown',(e)=>{
+            if(e.key!=='Enter'&&e.key!==' ')return;
+            e.preventDefault();
+            wrap.click();
         });
         bar.appendChild(wrap);
     }

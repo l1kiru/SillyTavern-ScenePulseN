@@ -24,6 +24,7 @@ import { debugLog } from '../logger.js';
 import { getLastRawResponse, getLastExtractionFailure, generating, genMeta, lastGenSource, currentSnapshotMesIdx, getActivePromptInjectionRun, getLastPromptInjectionMetrics, getLastPromptInjectionFailure } from '../state.js';
 import { getPairs as rawGetPairs } from '../raw-pairs.js';
 import { getEntries as netGetEntries, addChangeListener as netAddChangeListener, clearAll as netClearAll, entryCount as netEntryCount } from '../network-log.js';
+import { getBuildTimings } from '../generation/build-timing.js';
 import { runDoctor, DOCTOR_STEPS, runSingleDoctorCheck } from '../doctor.js';
 import {
     startFpsSampling, stopFpsSampling, addFpsListener, computeFpsStats,
@@ -281,6 +282,12 @@ function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
     const rawResp = lp?.response || (!allPairs.length ? getLastRawResponse() : '') || '';
     const rawPrompt = lp?.prompt || '';
     const extractionFailure = _currentChatFailure();
+    const latestBuildTiming = (() => {
+        try {
+            const chatKey = currentChatKey();
+            return getBuildTimings().filter(item => item.chatKey === chatKey).slice(-1)[0] || null;
+        } catch { return null; }
+    })();
     let provenance=[];
     try{provenance=getSnapshotProvenance()}catch{}
     const provenanceCounts=provenance.reduce((out,p)=>{out[p.status]=(out[p.status]||0)+1;return out},{current:0,stale:0,legacy:0});
@@ -395,6 +402,9 @@ function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
         extractionFailure ? `*Extraction: ${extractionFailure.code} · stage=${extractionFailure.stage||'extract'} · finish=${extractionFailure.finishReason||'(none)'} · message=${extractionFailure.mesIdx} · swipe=${extractionFailure.swipeId}*` : '*Extraction: no active failure*',
         `*Snapshots: current=${provenanceCounts.current} · stale=${provenanceCounts.stale} · legacy=${provenanceCounts.legacy}*`,
         '',
+        '## Latest build timing',
+        '```json', latestBuildTiming ? JSON.stringify(latestBuildTiming, null, 2) : '(none)', '```',
+        '',
         '### Prompt sent',
         rawPrompt ? '```\n' + _redact(promptTrunc) + '\n```' : '(none)',
         '',
@@ -423,6 +433,20 @@ function _overviewTab(panel, ctx = {}) {
     const failure = _currentChatFailure();
     const network = netGetEntries();
     const latestRequest = network.filter(entry => entry.label === 'generate').slice(-1)[0] || network.slice(-1)[0] || null;
+    const latestBuild = (() => {
+        try {
+            const chatKey = currentChatKey();
+            return getBuildTimings().filter(item => item.chatKey === chatKey).slice(-1)[0] || null;
+        } catch { return null; }
+    })();
+    const latestBuildRequestMs = latestBuild?.attempts?.reduce((sum, attempt) => sum + (Number(attempt.requestMs) || 0), 0) || 0;
+    const parallelPerformance = Number(latestBuild?.parallelGain) > 0 ? {
+        laneCount: Math.max(0, Number(latestBuild.laneCount) || 0),
+        concurrency: Math.max(1, Number(latestBuild.concurrency) || 1),
+        wallMs: Math.max(0, Number(latestBuild.laneWallMs) || 0),
+        sumMs: Math.max(0, Number(latestBuild.laneSumMs) || 0),
+        gain: Math.max(0, Number(latestBuild.parallelGain) || 0),
+    } : null;
     const settings = (() => { try { return getSettings(); } catch { return null; } })();
     const st = (() => { try { return SillyTavern.getContext(); } catch { return null; } })();
     const profile = (() => { try { return settings ? getActiveProfile(settings) : null; } catch { return null; } })();
@@ -515,7 +539,9 @@ function _overviewTab(panel, ctx = {}) {
         `Current session issues: ${errors} errors · ${warnings} warnings`,
         `Snapshots: ${snapshots.current} current · ${snapshots.stale} stale · ${snapshots.legacy} legacy`,
         `Latest request: ${requestStatus}`,
-    ].join('\n');
+        `Latest build: ${latestBuild ? `${latestBuild.status} · ${(latestBuild.wallMs / 1000).toFixed(1)}s · ${latestBuild.attempts.length} attempt(s)` : '(none)'}`,
+        parallelPerformance ? `Parallel lanes: ${parallelPerformance.laneCount} · concurrency=${parallelPerformance.concurrency} · wall=${(parallelPerformance.wallMs/1000).toFixed(1)}s · sum=${(parallelPerformance.sumMs/1000).toFixed(1)}s · gain=${parallelPerformance.gain.toFixed(2)}x` : '',
+    ].filter(Boolean).join('\n');
 
     panel.innerHTML = `
         <div class="sp-di-overview-scroll">
@@ -552,7 +578,7 @@ function _overviewTab(panel, ctx = {}) {
                         <div><dt>${t('Result')}</dt><dd class="sp-di-value-${pair?.parseFailed ? 'error' : 'normal'}">${esc(pair?.parseFailed ? t('Rejected') : responseKind)}</dd></div>
                         <div><dt>${t('Source')}</dt><dd>${esc(pair?.source || '—')}</dd></div>
                         <div><dt>${t('Size')}</dt><dd>${pair ? `${pair.response.length} ${t('chars')}` : '—'}</dd></div>
-                        <div><dt>${t('Generation time')}</dt><dd>${genMeta?.elapsed ? `${genMeta.elapsed.toFixed(1)}s` : '—'}</dd></div>
+                        <div><dt>${t('Generation time')}</dt><dd>${latestBuild?.wallMs ? `${(latestBuild.wallMs/1000).toFixed(1)}s` : (genMeta?.elapsed ? `${genMeta.elapsed.toFixed(1)}s` : '—')}</dd></div>
                     </dl>
                     <button class="sp-btn sp-di-open-response" ${pair ? '' : 'disabled'}>${t('Open response')}</button>
                 </section>
@@ -574,6 +600,20 @@ function _overviewTab(panel, ctx = {}) {
                         <span><strong>${snapshots.legacy}</strong>${t('Legacy')}</span>
                     </div>
                     ${failure ? `<div class="sp-di-overview-failure"><strong>${esc(failure.code || t('Failure'))}</strong><span>${esc(failure.message || '')}</span></div>` : ''}
+                </section>
+                <section class="sp-di-overview-card sp-di-overview-card-wide">
+                    <div class="sp-di-overview-card-title">Performance</div>
+                    <dl>
+                        <div><dt>${t('Status')}</dt><dd>${esc(latestBuild?.status || '—')}</dd></div>
+                        <div><dt>${t('Mode')}</dt><dd>${esc(latestBuild?.mode || '—')}</dd></div>
+                        <div><dt>${t('Generation time')}</dt><dd>${latestBuild?.wallMs ? `${(latestBuild.wallMs/1000).toFixed(1)}s` : '—'}</dd></div>
+                        <div><dt>Attempts</dt><dd>${latestBuild?.attempts?.length ?? '—'}</dd></div>
+                        <div><dt>${t('Latest request')}</dt><dd>${latestBuildRequestMs ? `${(latestBuildRequestMs/1000).toFixed(1)}s total` : '—'}</dd></div>
+                        ${parallelPerformance ? `
+                        <div><dt>Parallel lanes</dt><dd>${parallelPerformance.laneCount} · concurrency ${parallelPerformance.concurrency}</dd></div>
+                        <div><dt>Lane wall / sum</dt><dd>${(parallelPerformance.wallMs/1000).toFixed(1)}s / ${(parallelPerformance.sumMs/1000).toFixed(1)}s</dd></div>
+                        <div><dt>Parallel gain</dt><dd>${parallelPerformance.gain.toFixed(2)}x</dd></div>` : ''}
+                    </dl>
                 </section>
                 ${piHtml}
             </div>
@@ -2404,7 +2444,7 @@ export function openDebugInspector(initialTab = 'overview') {
     try { crashMarkSeen(); } catch {}
 
     const overlay = document.createElement('div');
-    overlay.className = 'sp-cl-overlay';
+    overlay.className = 'sp-cl-overlay sp-di-overlay';
     // v6.15.7: visible info popover next to the Diagnostics button (the
     // user couldn't tell at a glance how Diagnostics differs from the per-tab
     // Copy/Export buttons). Native `title` is desktop-only and slow; a CSS

@@ -20,11 +20,19 @@ import { cleanupGenUI } from '../ui/loading.js';
 import { spSetGenerating } from '../ui/mobile.js';
 import { setBrandState } from '../ui/panel.js';
 import { log } from '../logger.js';
+import { rearmForceFullAfterFailedFullRun } from '../settings.js';
 
 let _processExtractionFn = processExtraction;
 /** @param {typeof processExtraction|null} fn */
 export function _setTogetherProcessExtractionForTests(fn) {
     _processExtractionFn = fn || processExtraction;
+}
+
+function _rearmIfFailedFullTogether(inlineCtx, baseOpts = {}) {
+    const ranAsDelta = !!(Object.hasOwn(baseOpts, 'frozenDeltaMode')
+        ? baseOpts.frozenDeltaMode
+        : inlineCtx?.frozenDeltaMode);
+    rearmForceFullAfterFailedFullRun(ranAsDelta, inlineCtx?.fullRefreshTicket);
 }
 
 export async function processTogetherExtraction(mesIdx, extracted, source, inlineCtx, baseOpts = {}) {
@@ -44,16 +52,20 @@ export async function processTogetherExtraction(mesIdx, extracted, source, inlin
             sceneBuildOperationId: opId,
             frozenRequestSchema: baseOpts.frozenRequestSchema ?? inlineCtx?.frozenRequestSchema,
             frozenDeltaMode: baseOpts.frozenDeltaMode ?? inlineCtx?.frozenDeltaMode,
+            frozenCharacterCustomFieldSpecs: baseOpts.frozenCharacterCustomFieldSpecs
+                ?? inlineCtx?.frozenCharacterCustomFieldSpecs,
         });
         if (opId && isOperationCurrent(opId)) {
             if (result) settleSceneBuild(opId, 'ready');
             else failSceneBuild(opId, new Error('Together extraction pipeline failed'), 'pipeline');
         }
+        if (!result) _rearmIfFailedFullTogether(inlineCtx, baseOpts);
         return result;
     } catch (error) {
         if (opId && isOperationCurrent(opId)) {
             failSceneBuild(opId, error, 'pipeline');
         }
+        _rearmIfFailedFullTogether(inlineCtx, baseOpts);
         throw error;
     }
 }
@@ -61,6 +73,8 @@ export async function processTogetherExtraction(mesIdx, extracted, source, inlin
 export function discardTogetherSceneBuild(inlineCtx, reason = 'discarded') {
     const opId = inlineCtx?.sceneBuildOperationId;
     if (opId && isOperationCurrent(opId)) cancelSceneBuild(opId, reason);
+    // Terminal cancel of a forced-full Together run must keep the debt.
+    if (inlineCtx) _rearmIfFailedFullTogether(inlineCtx);
 }
 
 /** Same threshold as historical onCharMsg short-message wait gate. */

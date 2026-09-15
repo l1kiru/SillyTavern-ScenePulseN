@@ -150,6 +150,7 @@ for (const style of ['compatible', 'full']) {
     assert.ok(together.includes(CONTINUITY_RULES));
 }
 settings.injectionMethod = 'separate';
+settings.parallelFullGeneration = true;
 const outgoing = [{ is_user: true, mes: 'Continue' }];
 await scenePulseInterceptor(outgoing, 10000, () => assert.fail('narrative must not be aborted for continuity'), 'normal');
 assert.ok(outgoing.some(message => message.mes.includes(CONTINUITY_CONTEXT_NOTE)), 'Separate forwards descriptive state to the next story');

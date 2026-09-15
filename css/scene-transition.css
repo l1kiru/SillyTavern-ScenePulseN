@@ -42,3 +42,16 @@
     65% { opacity: 1; width: 140px; }
     100% { opacity: 0; width: 40px; }
 }
+
+
+@media (max-width: 600px), (pointer: coarse) {
+    #sp-scene-transition {
+        width: calc(100vw - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px) - 24px);
+        max-width: 100%; box-sizing: border-box;
+        padding: 48px 16px !important;
+        font-size: clamp(26px, 9vw, 40px) !important;
+        letter-spacing: 0.08em; white-space: normal;
+        text-align: center; overflow-wrap: anywhere;
+    }
+    .sp-st-sep { font-size: clamp(18px, 6vw, 28px); }
+}

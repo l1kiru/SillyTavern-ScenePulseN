@@ -131,3 +131,14 @@
         opacity: 0.85;
     }
 }
+
+
+@media (max-width: 600px), (pointer: coarse) {
+    .sp-scene-build-cancel,
+    .sp-scene-build-retry,
+    .sp-scene-build-close {
+        min-height: 44px;
+        padding: 8px 12px;
+    }
+    .sp-scene-build-row { align-items: center; }
+}

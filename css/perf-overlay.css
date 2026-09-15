@@ -85,9 +85,14 @@
     line-height: 1.4;
     font-style: italic;
 }
-@media (max-width: 560px) {
+@media (max-width: 560px), (pointer: coarse) {
     .sp-perf-overlay {
-        top: auto; bottom: 16px; right: 8px; left: 8px;
+        top: auto;
+        bottom: max(8px, calc(env(safe-area-inset-bottom, 0px) + 8px));
+        right: max(8px, env(safe-area-inset-right, 0px));
+        left: max(8px, env(safe-area-inset-left, 0px));
         width: auto;
     }
+    .sp-perf-overlay-row { flex-wrap: wrap; }
+    .sp-perf-overlay-cancel { min-height: 44px; padding: 8px 12px; }
 }

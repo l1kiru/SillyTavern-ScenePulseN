@@ -36,6 +36,25 @@ function eq(name, actual, expected) {
 console.log('\n── Together extraction catch ──');
 ctrl._resetSceneBuildRegistryForTests();
 
+let forwardedOpts=null;
+together._setTogetherProcessExtractionForTests(async (_mesIdx,_extracted,_source,opts) => {
+    forwardedOpts=opts;
+    return {ok:true};
+});
+await together.processTogetherExtraction(1,{sceneSummary:'x'},'auto:together',{
+    swipeId:0,
+    chatKey:currentChatKey(),
+    frozenCharacterCustomFieldSpecs:[{
+        key:'disposition',
+        field:{key:'disposition',type:'text'},
+    }],
+});
+eq(
+    'Together forwards frozen character custom fields',
+    forwardedOpts?.frozenCharacterCustomFieldSpecs?.[0]?.key,
+    'disposition',
+);
+
 const op = ctrl.startSceneBuild({
     messageId: 1, swipeId: 0, source: 'auto:together', chatKey: currentChatKey(),
 });

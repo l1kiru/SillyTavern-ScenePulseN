@@ -517,3 +517,15 @@
     opacity: 0.7;
 }
 .sp-devsec-relock-btn:hover { opacity: 1; }
+
+/* Touch/short visual viewports: the rich OR/preset dialogs inherit a dynamic
+   max-height from .sp-confirm-dialog. Their desktop overflow:hidden would clip
+   the lower content/actions when the keyboard is open or in a short landscape viewport. */
+@media (hover: none), (pointer: coarse), (max-width: 560px) {
+    .sp-orc-dialog, .sp-psp-dialog {
+        overflow-x: hidden;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+    }
+}

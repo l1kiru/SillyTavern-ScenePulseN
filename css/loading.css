@@ -18,7 +18,9 @@
 }
 /* On mobile, ensure overlay doesn't bleed above the SP topbar */
 body:has(#sp-panel.sp-mode-mobile) .sp-loading-glass-fixed {
-    top: 44px !important; height: calc(100vh - 44px) !important;
+    top: var(--sp-mobile-topbar-height, 44px) !important;
+    height: calc(100vh - var(--sp-mobile-topbar-height, 44px)) !important;
+    height: calc(100dvh - var(--sp-mobile-topbar-height, 44px)) !important;
     left: 0 !important; width: 100vw !important;
 }
 .sp-loading-glass-inline {
@@ -235,7 +237,7 @@ body:has(#sp-panel.sp-mode-mobile) .sp-loading-glass-fixed {
 .sp-diff-overlay.sp-diff-visible { opacity: 1; }
 /* Floating close button — always visible */
 .sp-diff-close-float {
-    position: fixed; top: 8px; right: 8px; z-index: 10001;
+    position: fixed; top: max(8px, env(safe-area-inset-top, 0px)); right: max(8px, env(safe-area-inset-right, 0px)); z-index: 10001;
     width: 44px; height: 44px; border-radius: 50%;
     background: rgba(30,32,40,0.9); border: 1px solid rgba(255,255,255,0.15);
     color: #e8ecf4; font-size: 24px; line-height: 1;
@@ -315,13 +317,13 @@ body:has(#sp-panel.sp-mode-mobile) .sp-loading-glass-fixed {
 /* Diff viewer: phones */
 @media (max-width: 600px) {
     .sp-diff-overlay { padding: 10px 6px; }
-    .sp-diff-container { width: 100%; max-height: calc(100vh - 20px); border-radius: 8px; }
+    .sp-diff-container { width: 100%; max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 20px); border-radius: 8px; }
     .sp-diff-header { padding: 8px 10px; gap: 4px 6px; }
     .sp-diff-title { font-size: var(--sp-fs-base); }
     .sp-diff-meta { font-size: var(--sp-fs-xs); width: 100%; }
     .sp-diff-spacer { display: none; }
-    .sp-diff-tab { font-size: var(--sp-fs-xs); padding: 3px 6px; }
-    .sp-diff-copy { font-size: var(--sp-fs-xs); padding: 3px 6px; }
+    .sp-diff-tab { font-size: var(--sp-fs-xs); padding: 6px 8px; min-height: 44px; }
+    .sp-diff-copy { font-size: var(--sp-fs-xs); padding: 6px 8px; min-height: 44px; }
     .sp-diff-pre { font-size: var(--sp-fs-xs); padding: 8px 10px; }
     .sp-diff-sbs { flex-direction: column; }
     .sp-diff-sbs-pane { border-right: none; border-bottom: 1px solid var(--sp-border, rgba(255,255,255,0.06)); max-height: 40vh; }
@@ -365,3 +367,32 @@ body:has(#sp-panel.sp-mode-mobile) .sp-loading-glass-fixed {
 .sp-loading { display: flex; align-items: center; gap: 8px; padding: 12px; color: var(--sp-text-dim); font-size: var(--sp-fs-base); }
 @keyframes sp-spin { to{transform:rotate(360deg)} }
 .sp-error { padding: 8px 12px; font-size: var(--sp-fs-xs); color: var(--sp-red); background: rgba(196,91,91,0.08); }
+
+
+/* Mobile/touch: compact status controls still need full hit targets. */
+@media (max-width: 600px), (pointer: coarse) {
+    .sp-stop-btn { min-height: 44px; padding: 10px 16px; }
+    .sp-gen-more,
+    .sp-gen-badge-profile,
+    .sp-gen-inspect,
+    .sp-gen-analytics,
+    .sp-gen-debug,
+    .sp-stag-dismiss,
+    .sp-recovery-actions .sp-btn {
+        min-height: 44px; box-sizing: border-box;
+        display: inline-flex; align-items: center; justify-content: center;
+    }
+    .sp-gen-more { min-width: 44px; }
+    .sp-stag-dismiss { min-width: 44px; }
+    .sp-recovery-actions { flex-wrap: wrap; }
+    .sp-recovery-actions .sp-btn { flex: 1 1 120px; }
+}
+
+/* Touch/tablet: compact landscape viewports can enter ScenePulse tablet mode.
+   Diff actions must not fall back to 22px desktop buttons there. */
+@media (hover: none), (pointer: coarse) {
+    .sp-diff-tab, .sp-diff-copy {
+        min-height: 44px;
+        padding: 8px 10px;
+    }
+}

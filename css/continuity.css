@@ -13,3 +13,11 @@
 .sp-continuity-label { opacity: .7; }
 .sp-continuity-status { margin-left: 8px; opacity: .7; font-size: .85em; }
 .sp-continuity ul { margin: 6px 0; padding-left: 20px; }
+.sp-partial-state {
+    margin: 8px;
+    padding: 10px;
+    border: 1px solid currentColor;
+    border-radius: 8px;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+}

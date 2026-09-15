@@ -27,7 +27,7 @@ globalThis.toastr={error(){},warning(){},info(){},success(){}};
 globalThis.getComputedStyle=()=>({display:'none',visibility:'hidden'});
 const classList={add(){},remove(){},contains(){return false}};
 const thoughtPanel={classList,querySelector:()=>null,style:{}};
-const thoughtBody={innerHTML:'',classList,querySelector:()=>null,querySelectorAll:()=>[]};
+const thoughtBody={innerHTML:'',classList,style:{},querySelector:()=>null,querySelectorAll:()=>[]};
 const messageButtons={appendChild(){}};
 const messageElement={querySelector:selector=>selector==='.sp-mes-btn'?null:messageButtons,getAttribute:()=> '1'};
 globalThis.document={
@@ -40,7 +40,8 @@ globalThis.setTimeout=()=>1;
 globalThis.clearTimeout=()=>{};
 
 await import('../index.js');
-const{shouldUseDelta}=await import('../src/settings.js');
+const{shouldUseDelta,forceFullStateRefresh,clearForceFullState}=await import('../src/settings.js');
+const state=await import('../src/state.js');
 const previous={_spMeta:{deltaTurnsSinceFull:0}};
 
 let pass=0,fail=0;
@@ -52,6 +53,27 @@ eventSource.emit('swiped',1);
 eq('selecting a swipe does not force full state',shouldUseDelta(previous),true);
 eventSource.emit('updated',1);
 eq('editing a message does not force full state pre-emptively',shouldUseDelta(previous),true);
+
+console.log('\n── Together Full ownership on chat change and Stop ──');
+forceFullStateRefresh();
+state.setInlineGenerationContext({fullRefreshTicket:clearForceFullState(),frozenDeltaMode:false});
+state.setInlineGenStartMs(Date.now());
+state.setGenerating(false);
+ctx.chatId='another-chat';
+for(const handler of eventSource.map.get('chat')||[])await handler();
+eq('chat change independently requests Full for the new panel set',shouldUseDelta(previous),false);
+clearForceFullState();
+ctx.chatId='swipe-events';
+eq('returning to chat retains cancelled Together Full debt',shouldUseDelta(previous),false);
+eq('chat change drops inline context',state.inlineGenerationContext,null);
+state.setInlineGenerationContext({fullRefreshTicket:clearForceFullState(),frozenDeltaMode:false});
+state.setInlineGenStartMs(Date.now());
+eventSource.emit('gen-stop');
+eq('ST Stop immediately restores Together Full debt',shouldUseDelta(previous),false);
+clearForceFullState();
+state.setInlineGenerationContext(null);
+state.setInlineGenStartMs(0);
+state.setCancelRequested(false);
 
 console.log('\n── Delayed separate-generation ownership ──');
 ctx.extensionSettings.scenepulse.injectionMethod='separate';

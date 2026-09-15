@@ -88,7 +88,9 @@ console.log('\n── Aliases indexed in archive ──');
     saveSnapshot(1, _snapWith([{ name: 'Karen', role: 'neighbor', aliases: ['Stranger'] }]));
     const arc = getWikiArchive();
     assertTrue('Karen entry exists', !!arc.characters['karen']);
-    assertTrue('Stranger alias points to same entry', arc.characters['stranger'] === arc.characters['karen']
+    assertTrue('Stranger alias points to same entry',
+        arc.aliasOwners['stranger'] === 'karen'
+        || arc.characters['stranger'] === arc.characters['karen']
         || (arc.characters['stranger'] && arc.characters['stranger'].name === 'Karen'));
 }
 

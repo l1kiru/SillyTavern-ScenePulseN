@@ -33,12 +33,17 @@ import {
 _resetPromptInjectionModuleForTests();
 
 const sourceBody = 'Hello\n\nWorld\nTRACKER SCHEMA HERE';
+const frozenCharacterCustomFieldSpecs = [{
+    key: 'disposition',
+    field: { key: 'disposition', type: 'text' },
+}];
 const plan = buildPromptInjectionPlan({
     text: sourceBody,
     role: 'system',
     owner: { chatKey: 'chat-1', messageId: 3, swipeId: 0 },
     frozenRequestSchema: { value: { type: 'object', properties: { time: {} } } },
     frozenDeltaMode: true,
+    frozenCharacterCustomFieldSpecs,
     baseSnapshot: { time: '12:00', secret: 'x' },
 });
 
@@ -52,7 +57,10 @@ assert.ok(plan.tail.text.includes('SP_PROMPT_TAIL'));
 assert.equal(plan.main.digest, digestText(plan.main.sourceText));
 assert.deepEqual(plan.frozenRequestSchema.value.properties.time, {});
 assert.equal(plan.frozenDeltaMode, true);
+assert.equal(plan.frozenCharacterCustomFieldSpecs[0].key, 'disposition');
 assert.equal(plan.baseSnapshot.time, '12:00');
+frozenCharacterCustomFieldSpecs[0].field.type = 'number';
+assert.equal(plan.frozenCharacterCustomFieldSpecs[0].field.type, 'text');
 
 // Deep clone: mutating original input must not affect frozen snapshot
 _resetPromptInjectionModuleForTests();

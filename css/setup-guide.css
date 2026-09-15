@@ -152,3 +152,37 @@
 .sp-setup-tip::before {
     content: '\2022'; color: var(--sp-accent); margin-right: 6px;
 }
+
+/* Mobile/touch hardening for the first-run wizard. */
+@media (max-width: 600px), (hover: none), (pointer: coarse) {
+    .sp-setup-overlay {
+        padding: max(8px, env(safe-area-inset-top, 0px)) max(8px, env(safe-area-inset-right, 0px)) max(8px, env(safe-area-inset-bottom, 0px)) max(8px, env(safe-area-inset-left, 0px));
+        box-sizing: border-box;
+    }
+    .sp-setup-dialog {
+        width: 100%; max-width: 520px;
+        max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 16px);
+    }
+    .sp-setup-header { padding: 10px 12px; gap: 8px; }
+    .sp-setup-title { min-width: 0; overflow-wrap: anywhere; }
+    .sp-setup-close { width: 44px; height: 44px; min-width: 44px; min-height: 44px; padding: 0; flex: 0 0 44px; }
+    .sp-setup-step { padding: 14px 12px; gap: 10px; }
+    .sp-setup-select { min-height: 44px; font-size: 16px; }
+    .sp-setup-radio { min-height: 44px; display: flex; align-items: center; }
+    .sp-setup-radio input { width: 20px; height: 20px; flex: 0 0 20px; }
+    .sp-setup-nav { flex-wrap: wrap; }
+    .sp-setup-btn { min-height: 44px; padding: 8px 14px; }
+    .sp-setup-btn-primary { margin-left: auto; }
+    .sp-setup-progress { padding: 4px 12px; }
+    .sp-setup-dots { gap: 0; }
+    .sp-setup-dot {
+        width: 44px; height: 44px; border-radius: 0; background: transparent; box-shadow: none;
+        display: inline-flex; align-items: center; justify-content: center;
+    }
+    .sp-setup-dot::before {
+        content: ''; width: 8px; height: 8px; border-radius: 50%;
+        background: rgba(255,255,255,0.1); transition: all 0.2s ease;
+    }
+    .sp-setup-dot:hover::before { background: var(--sp-text-dim); }
+    .sp-setup-dot.sp-dot-active::before { background: var(--sp-accent); box-shadow: 0 0 6px var(--sp-accent-glow); }
+}

@@ -216,7 +216,7 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 - **Scene transitions** — feathered location change popups with backdrop blur and soft radial fade
 
 ### Timeline & Snapshot Browser
-- Every AI message creates a snapshot (unlimited storage by default, configurable)
+- Every AI message creates a snapshot (60 retained by default; configurable, 0 means unlimited)
 - **Timeline scrubber** — visible from the first snapshot; click any dot to load historical scene data and scroll to the message
 - **"Browse All" button** — paginated snapshot list (10 per page) with time, location, tension, character count, token usage
 - Click any row to jump to that snapshot and scroll to the message in chat
@@ -234,6 +234,7 @@ Template variables for use in character cards, system prompts, Quick Replies. Re
 
 ### Custom Panels
 - Create panels to track **anything** — health, mana, reputation, faction standings
+- Choose **Global** for a standalone panel or **Each Character** to repeat the fields inside every character card
 - Each field supports text, number, meter, list, or enum types
 - LLM hints tell the AI what to output for each field
 <img width="858" height="472" alt="image" src="https://github.com/user-attachments/assets/6732fa65-dc8b-4390-8445-bbd08d36f9df" />
@@ -364,6 +365,27 @@ If the AI omits the tracker, ScenePulse can **automatically fall back** to a sep
 
 ### Separate Mode
 Alternatively, ScenePulse can run a completely separate quiet API call after each message — useful for models that struggle with inline instructions.
+
+**Parallel requests** is optional and off by default. With it enabled, Core identifies the
+current scene, then character groups and global state are extracted with a concurrency
+limit of 2, 3, or 4 requests. Adaptive Delta can keep a small update in one request.
+Use a saved Connection Manager profile: parallel requests use the preset saved in that
+profile. The separate preset override applies to ordinary requests, including a single
+adaptive Delta request. A higher concurrency limit does not guarantee a faster result;
+provider limits, retries and scene size affect the total time.
+
+Automatic custom panels require Separate with parallel requests. In Together or with
+parallel disabled, enabled panels use manual selection; the automatic preference is
+retained for when you return to a supported mode. Audience filters still apply. A newly
+activated panel must receive initial values for matching characters currently in the
+scene; archived characters keep their last known state.
+
+**Embed snapshots** also works with parallel requests. The next narrative receives the
+same descriptive continuity context, including established knowledge and open threads.
+It does not receive instructions for how characters must speak or how events must unfold.
+If some extraction requests fail and previous data is retained, the panel displays a
+partial-update notice. Carried thoughts, intentions and reactions are cleared so they
+cannot appear to be new observations. Cancelling a Full update keeps the next update Full.
 
 ### Delta Mode
 By default (since v6.9.0), the LLM returns only fields that changed since the last snapshot. The client merges the delta with the previous snapshot, reducing output tokens by ~70–90%. Entity arrays (characters, relationships, quests) are merged by name at the field level. Periodic full-state refresh runs every 15 delta turns; `/sp-refresh` forces a full output immediately.
@@ -515,13 +537,16 @@ Create custom tracking panels with any fields you need:
 
 1. Open **Panel Manager** (grid icon in toolbar)
 2. Scroll to **Custom Panels** → **+ Add Panel**
-3. Add fields with:
+3. Choose a target:
+   - **Global panel** — fields live at the root of the tracker and render as a standalone section
+   - **Each character** — fields are added to every `characters[]` item and render inside character cards
+4. Add fields with:
    - **Key** — JSON field name (e.g., `player_health`)
    - **Label** — display name (e.g., "Health Points")
    - **Type** — text, number, meter (0–100), list, or enum
    - **LLM Hint** — instruction for the AI (e.g., "Current HP out of 100")
 
-Custom fields are automatically included in the tracker prompt and extracted from AI responses.
+Custom fields are automatically included in the tracker prompt and extracted from AI responses. Character-scoped fields are required during a full refresh and optional in Delta Mode, so unchanged values can carry forward without being repeated every turn. Profiles with a custom schema or full system-prompt override must declare the character fields in that override manually.
 
 ## Known Issues
 
@@ -536,7 +561,9 @@ Custom fields are automatically included in the tracker prompt and extracted fro
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-**Latest: v7.1.13** - Scene-build badge lifecycle: dismiss removes controller state, absolute deadlines, chat/swipe wipe, hung saving expire.
+**Latest release: v7.1.15** - Selectable parallel lanes for Separate mode, character audience filters with a tightened generation contract, the pinnable Panel Library, automatic scene-based panel selection, and a large mobile/layout pass. Russian UI coverage is back to 100%.
+
+**Previous release: v7.1.14** - Character-scoped custom panels.
 
 ## Contributing
 
