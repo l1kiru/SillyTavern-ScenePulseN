@@ -1,4 +1,5 @@
 // Character-scoped custom panels — schema, prompt, normalization and delta merge.
+import { installThoughtDom } from './helpers/thought-dom.mjs';
 
 const _ctx = {
     name1: 'Alex', name2: 'Jenna',
@@ -23,6 +24,8 @@ if (typeof localStorage === 'undefined') {
 }
 
 const { buildDynamicSchema, buildRequestSchema } = await import('../src/schema.js');
+installThoughtDom();
+Object.defineProperty(performance, 'now', { configurable: true, value: () => 1000 });
 const { assemblePrompt } = await import('../src/prompts/assembler.js');
 const { normalizeChar } = await import('../src/normalize.js');
 const { mergeDelta } = await import('../src/generation/delta-merge.js');
@@ -420,5 +423,6 @@ console.log('\n── Reset / template structure reconcile ──');
     ok('prompt-only patch does not reconcile',!reconcileTrackerStructureChange(beforePrompt));
 }
 
+ok('ordinary extraction renders without UI errors', !(await import('../src/logger.js')).debugLog.some(line => line.includes('panel update failed')));
 console.log(`\n${fail === 0 ? 'PASS' : 'FAIL'} ${pass}/${pass + fail}`);
 if (fail) process.exit(1);

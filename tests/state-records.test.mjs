@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { installThoughtDom } from './helpers/thought-dom.mjs';
 
 const ctx = {
     name1: 'User', name2: 'Alice', chatId: 'plans', characterId: 0,
@@ -15,6 +16,8 @@ globalThis.document = {
     querySelector: () => null, querySelectorAll: () => [], getElementById: () => null,
 };
 globalThis.window = { innerWidth: 1280, addEventListener() {} };
+installThoughtDom();
+Object.defineProperty(performance, 'now', { configurable: true, value: () => 1000 });
 
 const { getSettings, getActiveSchema, getActivePrompt, saveSnapshot, getSnapshotFor } = await import('../src/settings.js');
 const { getActiveProfile, isBuiltInCharacterFieldKey } = await import('../src/profiles.js');
@@ -161,4 +164,5 @@ assert.equal(renderKnowledgeProvenance(knowledge, { char_knowledgeProvenance: fa
 assert.ok(!renderSceneState({ worldFacts: [{ ...fact, detail: '<script>bad</script>' }] }).includes('<script>'));
 assert.ok(!renderCharacterState({ conditions: [{ ...condition, source: '<img onerror=bad>' }] }).includes('<img'));
 assert.ok(!renderKnowledgeProvenance({ ...knowledge, learnedFrom: '<img onerror=bad>' }).includes('<img'));
+assert.ok(!(await import('../src/logger.js')).debugLog.some(line => line.includes('panel update failed')), 'ordinary extraction renders without UI errors');
 console.log('PASS six state facets: switches, evidence, lifecycle, transfers, aliases, context, saved pipeline, lanes and UI');

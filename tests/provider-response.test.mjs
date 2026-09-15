@@ -15,6 +15,8 @@ eq('output_text wrapper',normalizeProviderResponse({output_text:'{"time":"13:00"
 eq('Gemini candidate parts',normalizeProviderResponse({candidates:[{content:{parts:[{text:'{"time":'},{text:'"14:00"}'}]},finishReason:'MAX_TOKENS'}]}),{text:'{"time":"14:00"}',finishReason:'MAX_TOKENS'});
 eq('text completion results',normalizeProviderResponse({results:[{text:'{"time":"15:00"}',finish_reason:'stop'}]}),{text:'{"time":"15:00"}',finishReason:'stop'});
 eq('direct tracker object',normalizeProviderResponse({time:'16:00',sceneSummary:'Direct object'}),{text:'{"time":"16:00","sceneSummary":"Direct object"}',finishReason:''});
+eq('NovelAI raw output',normalizeProviderResponse({output:'{"time":"17:00"}'}),{text:'{"time":"17:00"}',finishReason:''});
+eq('text completion content array',normalizeProviderResponse([{content:'{"time":"18:00"}'}]),{text:'{"time":"18:00"}',finishReason:''});
 
 console.log(`\n${fail===0?'PASS':'FAIL'} ${pass}/${pass+fail}`);
 if(fail)process.exit(1);

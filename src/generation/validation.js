@@ -4,6 +4,7 @@ import { log } from '../logger.js';
 import { getActiveSchema } from '../settings.js';
 import { audienceIsOpen, characterMatchesAudience } from '../character-audience.js';
 import { characterNameKey } from '../character-identity.js';
+import { canonicalizeTracker } from '../tracker-shape.js';
 
 function typeName(value){
     if(Array.isArray(value))return'array';
@@ -66,22 +67,7 @@ function normalizeOptionalTemporalIntent(data,schema,warnings){
 function coerceKnownProviderShapes(data,schema,warnings){
     if(!data||typeof data!=='object'||Array.isArray(data)||!schema?.properties)return;
     const props=schema.properties;
-    const hoist=(wrapperKey,keys)=>{
-        const wrapper=data[wrapperKey];
-        if(!wrapper||typeof wrapper!=='object'||Array.isArray(wrapper))return;
-        let moved=0;
-        for(const key of keys){
-            if(!Object.hasOwn(props,key)||!Object.hasOwn(wrapper,key)||Object.hasOwn(data,key))continue;
-            data[key]=wrapper[key];moved++;
-        }
-        if(moved)warnings.push(`root.${wrapperKey}: hoisted ${moved} field(s) to top level`);
-    };
-    hoist('questJournal',['northStar','mainQuests','sideQuests']);
-    hoist('quests',['northStar','mainQuests','sideQuests']);
-    hoist('environment',['elapsed','time','date','location','weather','temperature']);
-    for(const key of['scene','sceneDetails','sceneInfo','sceneAnalysis']){
-        hoist(key,['sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','soundEnvironment','charactersPresent','witnesses']);
-    }
+    canonicalizeTracker(data,schema,warnings);
     if(Object.hasOwn(props,'witnesses')&&!Object.hasOwn(data,'witnesses')&&Array.isArray(data.charactersPresent)){
         data.witnesses=[];
         warnings.push('root.witnesses: defaulted missing array to []');

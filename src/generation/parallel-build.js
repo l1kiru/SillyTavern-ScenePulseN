@@ -6,6 +6,8 @@ import { characterNameKey } from '../character-identity.js';
 import { normalizeProviderResponse, parseTrackerCandidate } from './extraction.js';
 import { buildLaneSchema, mergeOwnedLaneResults, projectLaneResult } from './lane-contract.js';
 import { requestWithConnectionProfile } from './profile-request.js';
+import { trackerContract } from './tracker-contract.js';
+import { canonicalizeTracker } from '../tracker-shape.js';
 import { classifyRequestError, correctiveInstruction } from './request.js';
 import { validateCharacterAudienceRequirements, validateExtraction } from './validation.js';
 import { customPanelActivationKey, hasAutomaticPanels, SCENE_TAG_REGISTRY } from '../panel-activation-policy.js';
@@ -266,8 +268,9 @@ function fillMergedGapsFromPrevious(mergedValue, previousSnapshot, gaps = []) {
     return { filled };
 }
 
-function previousForLane(previousSnapshot, spec, schema) {
+function previousForLane(previousSnapshot, spec, schema, fullSchema) {
     if (!previousSnapshot || typeof previousSnapshot !== 'object') return null;
+    previousSnapshot = canonicalizeTracker(clone(previousSnapshot), fullSchema);
     if (spec.kind === 'characters') {
         const allowed = new Set(spec.characterNames.map(characterNameKey));
         const characters = (Array.isArray(previousSnapshot.characters) ? previousSnapshot.characters : []).filter(character => {
@@ -293,8 +296,8 @@ function laneBudget(spec, budgets) {
     return spec.characterNames.length > 1 ? budgets.character2 : budgets.character1;
 }
 
-function lanePrompt({ spec, schema, contextText, previousSnapshot, coreResult, retryInstruction = '' }) {
-    const previous = previousForLane(previousSnapshot, spec, schema);
+function lanePrompt({ spec, schema, fullSchema, contextText, previousSnapshot, coreResult, retryInstruction = '' }) {
+    const previous = previousForLane(previousSnapshot, spec, schema, fullSchema);
     const frozenCore = spec.kind === 'core' ? '' : `\n\nFROZEN CORE FACTS (read-only; do not return or change them):\n${JSON.stringify(coreResult, null, 2)}`;
     const previousText = previous ? `\n\n${CONTINUITY_CONTEXT_NOTE}\nPREVIOUS STATE FOR THIS LANE (carry forward unchanged facts):\n${JSON.stringify(previous, null, 2)}` : '';
     const isDelta = spec.requestMode === 'delta';
@@ -313,7 +316,8 @@ ${contextText}${frozenCore}${previousText}
 
 Return exactly one JSON object containing ONLY these owned root fields: ${spec.fields.join(', ')}.${characterRule}${deltaRule}${routerRule}
 ${spec.kind === 'core' && spec.fields.includes('charactersPresent') ? 'charactersPresent: NPCs physically present with the user now; exclude the user, memories and off-scene characters. Return [] for solitude.' : ''}
-Do not return markdown, commentary, wrapper objects, or fields owned by another lane.${retryInstruction ? `\n\nCORRECTION: ${retryInstruction}` : ''}`;
+Do not return markdown, commentary, wrapper objects, or fields owned by another lane.
+${trackerContract(schema)}${retryInstruction ? `\n\nCORRECTION: ${retryInstruction}` : ''}`;
 }
 
 function laneSystemPrompt(systemPrompt, spec) {
@@ -415,6 +419,7 @@ async function executeLane({
         const prompt = lanePrompt({
             spec,
             schema: laneSchema.value,
+            fullSchema,
             contextText,
             previousSnapshot,
             coreResult,

@@ -3,6 +3,7 @@
 import { applyPromptRole } from '../prompts/role.js';
 import { suspendPromptInjection, restorePromptInjection } from './prompt-injection.js';
 import { getActivePromptInjectionRun } from '../state.js';
+import { trackerContract } from './tracker-contract.js';
 
 const MIN_OUTPUT={full:16384,delta:8192,section:8192};
 const MAX_OUTPUT=16384;
@@ -44,8 +45,9 @@ export function correctiveInstruction(code,errors=[]){
     return'Return exactly one valid ScenePulse tracker JSON object and no other text.';
 }
 
-export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true,stopStOnAbort=true}){
-    const routed=applyPromptRole({systemPrompt,prompt});
+export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true,stopStOnAbort=true,promptRole}){
+    const contract=trackerContract(jsonSchema);
+    const routed=applyPromptRole({systemPrompt,prompt:contract?`${prompt}\n\n${contract}`:prompt},promptRole);
     let stopped=false;
     let abortReject=null;
     const abortError=()=>signal?.reason||new DOMException('Aborted','AbortError');
@@ -64,20 +66,6 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
     if(signal?.aborted)onAbort();
     else signal?.addEventListener?.('abort',onAbort,{once:true});
     const run=async()=>{
-        if(typeof stContext.generateQuietPrompt==='function'){
-            const hadInjection=!!getActivePromptInjectionRun();
-            if(hadInjection)suspendPromptInjection();
-            try{
-                const value=await stContext.generateQuietPrompt({
-                    quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
-                    skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
-                });
-                throwIfAborted();
-                return{value,strategy:'quiet'};
-            }finally{
-                if(hadInjection)restorePromptInjection();
-            }
-        }
         if(typeof stContext.generateRawData==='function'){
             const value=await stContext.generateRawData({
                 prompt:routed.prompt,systemPrompt:routed.systemPrompt,responseLength,
@@ -93,6 +81,20 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
             });
             throwIfAborted();
             return{value,strategy:'raw'};
+        }
+        if(typeof stContext.generateQuietPrompt==='function'){
+            const hadInjection=!!getActivePromptInjectionRun();
+            if(hadInjection)suspendPromptInjection();
+            try{
+                const value=await stContext.generateQuietPrompt({
+                    quietPrompt:`${routed.systemPrompt?`${routed.systemPrompt}\n\n`:''}${routed.prompt}`,
+                    skipWIAN,responseLength,jsonSchema:promptMode==='native'?jsonSchema:undefined,
+                });
+                throwIfAborted();
+                return{value,strategy:'quiet'};
+            }finally{
+                if(hadInjection)restorePromptInjection();
+            }
         }
         throw new Error('SillyTavern exposes no supported generation API');
     };

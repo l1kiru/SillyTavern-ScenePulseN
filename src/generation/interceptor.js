@@ -1,4 +1,5 @@
 import { prepareSnapshotContext, CONTINUITY_CONTEXT_NOTE } from '../continuity.js';
+import { trackerContract } from './tracker-contract.js';
 // ── interceptor.js — Chat interceptor for inline/together and separate injection modes ──
 //
 // IN-FLIGHT GENERATION TUPLE (load-bearing across the codebase):
@@ -276,6 +277,7 @@ ${_langBlock}`;
 
 ${outputFormat}`;
     }
+    instructionsHead += `\n\n${trackerContract(buildRequestSchema({value:schemaObj},{mode:isDelta?'delta':'full'}))}\n`;
     const previousState = prevState || '';
     const text = instructionsHead + previousState + instructionsTail;
     // Footprint split: instructions (profile/rules/panels/schema) vs previous-state JSON block.

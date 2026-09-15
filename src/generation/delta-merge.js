@@ -233,11 +233,13 @@ function _findFuzzyQuestMatch(deltaName, prevArr, alreadyMatchedIdxs) {
  * - Replace arrays: delta replaces entirely
  * - Missing fields in delta: carry forward from previous
  */
-export function mergeDelta(prev, delta) {
+export function mergeDelta(prev, delta, { sectionFields = null } = {}) {
     if (!prev || typeof prev !== 'object') return delta;
     if (!delta || typeof delta !== 'object') return prev;
 
     const merged = {};
+    const updates = field => !sectionFields || sectionFields.includes(field);
+    if (sectionFields) delta = Object.fromEntries(Object.entries(delta).filter(([field]) => updates(field)));
 
     // 1. Start with all previous fields
     for (const [k, v] of Object.entries(prev)) {
@@ -249,13 +251,13 @@ export function mergeDelta(prev, delta) {
 
     // 1b. Strip resolved quests from carried-forward data — they had their grace period
     for (const qk of ['mainQuests', 'sideQuests']) {
-        if (Array.isArray(merged[qk])) merged[qk] = merged[qk].filter(q => q.urgency !== 'resolved');
+        if (updates(qk) && Array.isArray(merged[qk])) merged[qk] = merged[qk].filter(q => q.urgency !== 'resolved');
     }
     // 1c. Drop any activeTasks field that survives in legacy snapshots. The tier
     // is removed as of v6.8.9 — silently strip on merge so it stops leaking into
     // delta prompts as context.
     delete merged.activeTasks;
-    if (Array.isArray(merged.storyThreads)) merged.storyThreads = merged.storyThreads.filter(thread => thread.status !== 'resolved');
+    if (updates('storyThreads') && Array.isArray(merged.storyThreads)) merged.storyThreads = merged.storyThreads.filter(thread => thread.status !== 'resolved');
 
     // 2. Apply delta overrides
     const deltaKeys = [];
@@ -268,7 +270,7 @@ export function mergeDelta(prev, delta) {
         deltaKeys.push(k);
 
         if (k in ENTITY_ARRAYS && Array.isArray(v) && Array.isArray(merged[k])) {
-            merged[k] = mergeEntityArray(merged[k], v, ENTITY_ARRAYS[k], QUEST_ARRAYS.has(k), ALIAS_ARRAYS.has(k));
+            merged[k] = mergeEntityArray(merged[k], v, ENTITY_ARRAYS[k], QUEST_ARRAYS.has(k), ALIAS_ARRAYS.has(k), !!sectionFields);
         } else if (REPLACE_ARRAYS.includes(k)) {
             merged[k] = v;
         } else {
@@ -290,19 +292,19 @@ export function mergeDelta(prev, delta) {
     // delta-mode codepaths (engine.js:351, pipeline.js:50), so no
     // isDelta guard is needed — reaching this function means we're
     // processing a delta where every turn must carry its OWN presence.
-    if (!('charactersPresent' in delta)) {
+    if (!sectionFields && !('charactersPresent' in delta)) {
         merged.charactersPresent = [];
     }
     // v6.8.50: plotBranches is "ALWAYS include" per delta-mode rule 6.
     // Branches should be fresh every turn (5 new suggestions). If the
     // LLM omits them, stale branches from a prior turn would persist
     // indefinitely. Same pattern as the charactersPresent guard above.
-    if (!('plotBranches' in delta)) {
+    if (!sectionFields && !('plotBranches' in delta)) {
         merged.plotBranches = [];
     }
     // Presence-like arrays describe THIS beat. Carrying witnesses forward
     // invents observers who may already have left the scene.
-    if (!('witnesses' in delta)) {
+    if (!sectionFields && !('witnesses' in delta)) {
         merged.witnesses = [];
     }
 
@@ -318,7 +320,7 @@ export function mergeDelta(prev, delta) {
     // innerThought and immediateNeed are volatile scene state, not durable
     // biography. A missing fresh value must render empty rather than leak a
     // previous character's thought through an exact/alias identity match.
-    if (Array.isArray(merged.characters) && Array.isArray(merged.charactersPresent)) {
+    if (updates('characters') && Array.isArray(merged.characters) && Array.isArray(merged.charactersPresent)) {
         const nameMap = buildCharacterNameMap(merged.characters);
         const resolve = name => characterNameKey(nameMap.get(characterNameKey(name)) || name);
         const present = new Set(merged.charactersPresent.map(resolve).filter(Boolean));
@@ -346,13 +348,13 @@ export function mergeDelta(prev, delta) {
     const continuityNames = buildCharacterNameMap(merged.characters);
     const continuityKey = name => characterNameKey(continuityNames.get(characterNameKey(name)) || name);
     const freshCharacters = new Map((Array.isArray(delta.characters) ? delta.characters : []).map(ch => [continuityKey(ch?.name), ch]));
-    for (const ch of merged.characters || []) {
+    for (const ch of updates('characters') ? merged.characters || [] : []) {
         const fresh = freshCharacters.get(continuityKey(ch?.name));
         if (fresh && Object.hasOwn(fresh, 'emotionalState')) ch.emotionalState = structuredClone(fresh.emotionalState);
         else if (Object.hasOwn(ch, 'emotionalState')) ch.emotionalState = [];
     }
     const freshRelationships = new Map((Array.isArray(delta.relationships) ? delta.relationships : []).map(rel => [continuityKey(rel?.name), rel]));
-    for (const rel of merged.relationships || []) {
+    for (const rel of updates('relationships') ? merged.relationships || [] : []) {
         const fresh = freshRelationships.get(continuityKey(rel?.name));
         // Apply after identity reconciliation: the prior relationship may
         // otherwise win consolidation when Stranger becomes Alice this turn.
@@ -366,7 +368,7 @@ export function mergeDelta(prev, delta) {
     // accumulated near-duplicates from prior turns that the per-entry merge
     // path couldn't catch, and resolves quests that appear in BOTH mainQuests
     // and sideQuests to the main tier. See consolidateQuests() below.
-    consolidateQuests(merged);
+    if (updates('mainQuests') || updates('sideQuests')) consolidateQuests(merged);
 
     // 3. Warn if delta was suspiciously small
     if (deltaKeys.length < 2) {
@@ -406,7 +408,7 @@ export function mergeDelta(prev, delta) {
  *     canonical name, push the old name into aliases. Handles the
  *     unknown→known identity reveal.
  */
-function mergeEntityArray(prevArr, deltaArr, keyField, useFuzzy, useAliases) {
+function mergeEntityArray(prevArr, deltaArr, keyField, useFuzzy, useAliases, acceptEmpty = false) {
     const result = prevArr.map(item => ({ ...item }));
 
     // Repair legacy split identities before matching the new delta. Older
@@ -557,7 +559,7 @@ function mergeEntityArray(prevArr, deltaArr, keyField, useFuzzy, useAliases) {
                 // Aliases handled separately below so we can union the lists.
                 if (fk === 'aliases') continue;
                 // Only overwrite if delta has a non-empty value
-                if (fv !== undefined && fv !== null && fv !== '') {
+                if (fv !== undefined && fv !== null && (acceptEmpty || fv !== '')) {
                     merged[fk] = fv;
                 }
             }
