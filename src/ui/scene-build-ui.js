@@ -1,9 +1,8 @@
-// Scene-build status UI: per-message stub + floating toast (no message content edits).
+// Scene-build status UI: per-message stub + ST Action Loader (no message content edits).
 
 import { t } from '../i18n.js';
-import { log } from '../logger.js';
+import { log, warn } from '../logger.js';
 import { esc } from '../utils.js';
-import { spDetectMode } from './mobile.js';
 import {
     subscribeSceneBuild, getActiveSceneBuilds, getAllSceneBuilds, getSceneBuild,
     cancelSceneBuild, dismissSceneBuild, isActiveStatus, disposeSceneBuilds,
@@ -18,6 +17,7 @@ export const CANCEL_DISMISS_MS = 900;
 const _dismissTimers = new Map();
 let _subscribed = false;
 let _unsubscribe = null;
+let _floating = null;
 
 function _stageCopy(op) {
     const soft = op.softNotified;
@@ -211,31 +211,36 @@ function _renderStub(op) {
     el.innerHTML = `<div class="sp-scene-build-row">${spinner}<div class="sp-scene-build-text"><div class="sp-scene-build-title">${esc(copy.title)}</div>${copy.sub ? `<div class="sp-scene-build-sub">${esc(copy.sub)}</div>` : ''}</div>${actions}</div>`;
 }
 
+function _hideFloating() {
+    const previous = _floating;
+    _floating = null;
+    // Hide only our handle. loader.hide() without an argument affects other tasks.
+    try { Promise.resolve(previous?.handle?.hide()).catch(e => warn('Scene loader hide:', e)); }
+    catch (e) { warn('Scene loader hide:', e); }
+}
+
 function _syncFloating() {
-    const active = getActiveSceneBuilds().filter(_isOwnerVisible);
-    let toast = document.getElementById('sp-scene-build-toast');
-    if (!active.length) {
-        toast?.remove();
-        return;
-    }
-    const op = active[active.length - 1];
-    const mobile = spDetectMode() === 'mobile';
-    if (!toast) {
-        toast = document.createElement('div');
-        toast.id = 'sp-scene-build-toast';
-        toast.setAttribute('role', 'status');
-        toast.setAttribute('aria-live', 'polite');
-        document.body.appendChild(toast);
-    }
-    toast.className = 'sp-scene-build-toast' + (mobile ? ' sp-scene-build-toast-mobile' : '');
-    toast.setAttribute('aria-busy', 'true');
-    const label = mobile
-        ? t('Creating scene for the current reply')
-        : t('ScenePulse is creating a scene');
-    const cancelBtn = mobile
-        ? `<button type="button" class="sp-scene-build-toast-close" data-sp-cancel="${op.operationId}" aria-label="${t('Cancel scene creation')}">×</button>`
-        : `<button type="button" class="sp-scene-build-cancel" data-sp-cancel="${op.operationId}">${t('Cancel')}</button>`;
-    toast.innerHTML = `<span class="sp-scene-build-spinner" aria-hidden="true"></span><span class="sp-scene-build-toast-label">${label}</span>${cancelBtn}`;
+    const active = getActiveSceneBuilds().filter(op => _isOwnerVisible(op) && op.status !== 'cancelling');
+    const op = active.at(-1);
+    if (op && _floating?.operationId === op.operationId && _floating.handle.isActive) return;
+    _hideFloating();
+    if (!op) return;
+    const loader = globalThis.SillyTavern?.getContext?.()?.loader;
+    if (typeof loader?.show !== 'function') return; // Message status remains usable.
+    try {
+        const handle = loader.show({
+            blocking: false,
+            toastMode: 'stoppable',
+            slug: 'scenepulse-scene-build',
+            message: t('ScenePulse is creating a scene'),
+            stopTooltip: t('Cancel scene creation'),
+            onStop: () => {
+                const current = getSceneBuild(op.operationId);
+                if (current && _isOwnerVisible(current)) cancelSceneBuild(op.operationId, 'user');
+            },
+        });
+        _floating = { operationId: op.operationId, handle };
+    } catch (e) { warn('Scene loader show:', e); }
 }
 
 function _syncMesButtons() {
@@ -325,7 +330,7 @@ function _onClick(e) {
 function _onChange(op, reason) {
     if (reason === 'dispose') {
         document.querySelectorAll('.sp-scene-build').forEach(n => n.remove());
-        document.getElementById('sp-scene-build-toast')?.remove();
+        _hideFloating();
         _dismissTimers.forEach(clearTimeout);
         _dismissTimers.clear();
         _syncMesButtons();
@@ -425,7 +430,7 @@ export function disposeSceneBuildUi() {
     document.removeEventListener('visibilitychange', _onVisibilityChange);
     window.removeEventListener('pagehide', _onPageHide);
     document.querySelectorAll('.sp-scene-build').forEach(n => n.remove());
-    document.getElementById('sp-scene-build-toast')?.remove();
+    _hideFloating();
     _dismissTimers.forEach(clearTimeout);
     _dismissTimers.clear();
     _subscribed = false;
