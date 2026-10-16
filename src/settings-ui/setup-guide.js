@@ -6,11 +6,13 @@ import { getSettings, saveSettings, getConnectionProfiles, getChatPresets } from
 import { esc } from '../utils.js';
 import { spDetectMode } from '../ui/mobile.js';
 import { loadUI } from './bind-ui.js';
+import { applyUILanguage } from './bind-ui.js';
+import { languageOptions } from './language-options.js';
 import { _spSaveLS } from './bind-ui.js';
 import { startGuidedTour } from './guided-tour.js';
 import { t } from '../i18n.js';
 
-export function showSetupGuide(){
+export function showSetupGuide(draft=null){
     // Remove any existing guide
     document.getElementById('sp-setup-overlay')?.remove();
     const s=getSettings();
@@ -32,6 +34,16 @@ export function showSetupGuide(){
             <div class="sp-setup-step sp-setup-active" data-step="1">
                 <div class="sp-setup-step-num">1</div>
                 <div class="sp-setup-step-content">
+                    <div class="sp-setup-step-title"><label for="sp-setup-language">${t('Language')}</label></div>
+                    <div class="sp-setup-select-wrap">
+                        <select id="sp-setup-language" class="sp-setup-select">${languageOptions()}</select>
+                    </div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn sp-setup-btn-primary" data-goto="2">${t('Next')} →</button><button class="sp-setup-btn sp-setup-btn-skip" data-dismiss="true">${t('Skip setup')}</button></div>
+                </div>
+            </div>
+            <div class="sp-setup-step" data-step="2">
+                <div class="sp-setup-step-num">2</div>
+                <div class="sp-setup-step-content">
                     <div class="sp-setup-step-title">${t('How ScenePulse Works')}</div>
                     <p>${t('ScenePulse uses <strong>Together mode</strong> by default — the AI appends scene-tracking JSON to every response. This is fast, inexpensive, and accurate.')}</p>
                     <p>${t('Some models occasionally omit tracker data. ScenePulse can then <strong>automatically recover</strong> it with a separate API call.')}</p>
@@ -44,11 +56,11 @@ export function showSetupGuide(){
                         <div class="sp-setup-compat-tier"><span style="color:var(--sp-red)">${t('Not recommended:')}</span> ${t('Models under 14B parameters or heavily quantized (Q3/Q2)')}</div>
                         <div class="sp-setup-compat-note">${t('For local models, prefer Q5_K_M+ quantization. Consider Separate mode for models under 32B.')}</div>
                     </div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn sp-setup-btn-primary" data-goto="2">${t('Next')} →</button><button class="sp-setup-btn sp-setup-btn-skip" data-dismiss="true">${t('Skip setup')}</button></div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="1">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="3">${t('Next')} →</button><button class="sp-setup-btn sp-setup-btn-skip" data-dismiss="true">${t('Skip setup')}</button></div>
                 </div>
             </div>
-            <div class="sp-setup-step" data-step="2">
-                <div class="sp-setup-step-num">2</div>
+            <div class="sp-setup-step" data-step="3">
+                <div class="sp-setup-step-num">3</div>
                 <div class="sp-setup-step-content">
                     <div class="sp-setup-step-title">${t('Create a Connection Profile')}</div>
                     <p>${t('Recovery uses a SillyTavern <strong>Connection Profile</strong> for its separate API call. You can select an existing profile.')}</p>
@@ -61,11 +73,11 @@ export function showSetupGuide(){
                         <div class="sp-setup-inst">${t('5. Save the profile')}</div>
                     </div>
                     ${hasProfiles?`<p style="color:var(--sp-green)">✓ ${t('Available connection profiles: {count}',{count:profiles.length})}</p>`:`<p style="color:var(--sp-amber)">⚠ ${t('No connection profiles found. Create one in SillyTavern first.')}</p>`}
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="1">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="3">${t('Next')} →</button></div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="2">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="4">${t('Next')} →</button></div>
                 </div>
             </div>
-            <div class="sp-setup-step" data-step="3">
-                <div class="sp-setup-step-num">3</div>
+            <div class="sp-setup-step" data-step="4">
+                <div class="sp-setup-step-num">4</div>
                 <div class="sp-setup-step-content">
                     <div class="sp-setup-step-title">${t('Select Your Recovery Profile')}</div>
                     <p>${t('Choose the connection profile ScenePulse should use when tracker data is missing:')}</p>
@@ -83,22 +95,22 @@ export function showSetupGuide(){
                         </select>
                     </div>
                     <div class="sp-setup-note">${t('A different preset is selected temporarily during tracker generation and restored afterwards.')}</div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="2">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="4">${t('Next')} →</button></div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="3">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="5">${t('Next')} →</button></div>
                 </div>
             </div>
-            <div class="sp-setup-step" data-step="4">
-                <div class="sp-setup-step-num">4</div>
+            <div class="sp-setup-step" data-step="5">
+                <div class="sp-setup-step-num">5</div>
                 <div class="sp-setup-step-content">
                     <div class="sp-setup-step-title">${t('Recovery Preference')}</div>
                     <p>${t('When tracker data is missing, should ScenePulse run a separate API call automatically?')}</p>
                     <label class="sp-setup-radio"><input type="radio" name="sp-setup-fb-enable" value="yes" ${s.fallbackEnabled!==false?'checked':''}> <strong>${t('Yes')}</strong> — ${t('recover missing tracker data automatically')} <span style="color:var(--sp-text-dim)">${t('(recommended)')}</span></label>
                     <label class="sp-setup-radio"><input type="radio" name="sp-setup-fb-enable" value="no" ${s.fallbackEnabled===false?'checked':''}> <strong>${t('No')}</strong> — ${t('regenerate manually when needed')}</label>
                     <div class="sp-setup-note" id="sp-setup-no-warn" style="display:${s.fallbackEnabled===false?'block':'none'};color:var(--sp-amber)">${t('With automatic recovery disabled, use the ⟳ button to regenerate missing scene data manually.')}</div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="3">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="5">${t('Next')} →</button></div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="4">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary" data-goto="6">${t('Next')} →</button></div>
                 </div>
             </div>
-            <div class="sp-setup-step" data-step="5">
-                <div class="sp-setup-step-num">5</div>
+            <div class="sp-setup-step" data-step="6">
+                <div class="sp-setup-step-num">6</div>
                 <div class="sp-setup-step-content">
                     <div class="sp-setup-step-title">${t('Model discovery overlay')} <span style="color:var(--sp-text-dim);font-size:11px;font-weight:normal">${t('(optional)')}</span></div>
                     <p>${t('Show current OpenRouter pricing, context windows, and roleplay popularity while browsing templates. This is read-only and does not change prompts, samplers, or generation.')}</p>
@@ -113,13 +125,13 @@ export function showSetupGuide(){
                         <div class="sp-setup-tip">${t('Open the Character Wiki and its graph button to view the Relationship Web.')}</div>
                         <div class="sp-setup-tip">${t('Use <strong>Custom Panels</strong> to track health, mana, reputation, inventory, or any other state.')}</div>
                     </div>
-                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="4">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary sp-setup-btn-finish" data-finish="true">✓ ${t('Finish Setup')}</button></div>
+                    <div class="sp-setup-nav"><button class="sp-setup-btn" data-goto="5">← ${t('Back')}</button><button class="sp-setup-btn sp-setup-btn-primary sp-setup-btn-finish" data-finish="true">✓ ${t('Finish Setup')}</button></div>
                     <div style="text-align:center;margin-top:8px"><button class="sp-setup-btn sp-setup-btn-tour" data-tour="true">✦ ${t('Take a Guided Tour')}</button></div>
                 </div>
             </div>
         </div>
         <div class="sp-setup-progress">
-            <div class="sp-setup-dots"><span class="sp-setup-dot sp-dot-active" data-dot="1"></span><span class="sp-setup-dot" data-dot="2"></span><span class="sp-setup-dot" data-dot="3"></span><span class="sp-setup-dot" data-dot="4"></span><span class="sp-setup-dot" data-dot="5"></span></div>
+            <div class="sp-setup-dots"><span class="sp-setup-dot sp-dot-active" data-dot="1"></span><span class="sp-setup-dot" data-dot="2"></span><span class="sp-setup-dot" data-dot="3"></span><span class="sp-setup-dot" data-dot="4"></span><span class="sp-setup-dot" data-dot="5"></span><span class="sp-setup-dot" data-dot="6"></span></div>
         </div>
     </div>`;
     document.body.appendChild(ov);
@@ -131,6 +143,32 @@ export function showSetupGuide(){
         ov.querySelectorAll('.sp-setup-step').forEach(s=>{s.classList.toggle('sp-setup-active',+s.dataset.step===n)});
         ov.querySelectorAll('.sp-setup-dot').forEach(d=>{d.classList.toggle('sp-dot-active',+d.dataset.dot===n)});
     }
+    const languageSelect=ov.querySelector('#sp-setup-language');
+    languageSelect.value=s.language||'';
+    if(draft){
+        ov.querySelector('#sp-setup-fb-profile').value=draft.profile;
+        ov.querySelector('#sp-setup-fb-preset').value=draft.preset;
+        ov.querySelectorAll('input[name="sp-setup-fb-enable"]').forEach(r=>{r.checked=r.value===draft.recovery});
+        ov.querySelectorAll('input[name="sp-setup-or-enable"]').forEach(r=>{r.checked=r.value===draft.connector});
+        ov.querySelector('#sp-setup-no-warn').style.display=draft.recovery==='no'?'block':'none';
+        goToStep(draft.step);
+    }
+    languageSelect.addEventListener('change',async()=>{
+        languageSelect.disabled=true;
+        try{
+            await applyUILanguage(languageSelect.value);
+            // Do not reopen a guide dismissed while the locale was loading.
+            if(!ov.isConnected)return;
+            showSetupGuide({
+                step:currentStep,
+                profile:ov.querySelector('#sp-setup-fb-profile').value,
+                preset:ov.querySelector('#sp-setup-fb-preset').value,
+                recovery:ov.querySelector('input[name="sp-setup-fb-enable"]:checked').value,
+                connector:ov.querySelector('input[name="sp-setup-or-enable"]:checked').value,
+            });
+            document.getElementById('sp-setup-language')?.focus();
+        }finally{languageSelect.disabled=false}
+    });
     ov.addEventListener('click',(e)=>{
         const btn=e.target.closest('[data-goto]');
         if(btn)goToStep(+btn.dataset.goto);
@@ -142,7 +180,7 @@ export function showSetupGuide(){
             const prof=ov.querySelector('#sp-setup-fb-profile')?.value||'';
             const pre=ov.querySelector('#sp-setup-fb-preset')?.value||'';
             const enabled=ov.querySelector('input[name="sp-setup-fb-enable"]:checked')?.value!=='no';
-            // v6.27.0: OR connector opt-in choice from step 5
+            // v6.27.0: OR connector opt-in choice from step 6
             const orEnabled=ov.querySelector('input[name="sp-setup-or-enable"]:checked')?.value==='yes';
             s.fallbackProfile=prof;s.fallbackPreset=pre;s.fallbackEnabled=enabled;s.setupDismissed=true;
             s.orConnectorEnabled=orEnabled;s._spOrConnectorPromptShown=true;
