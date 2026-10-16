@@ -7,6 +7,13 @@ function _abortError(signal) {
     return new DOMException(String(signal?.reason || 'Aborted'), 'AbortError');
 }
 
+// An explicit preset override still requires the legacy global switching path.
+export function canUseConnectionProfile(stContext, profileId, presetOverride) {
+    return !!String(profileId || '').trim() && !presetOverride
+        && !stContext?.extensionSettings?.disabledExtensions?.includes('connection-manager')
+        && typeof stContext?.ConnectionManagerRequestService?.sendRequest === 'function';
+}
+
 export function getConnectionRequestService(stContext = null) {
     const context = stContext ?? globalThis.SillyTavern?.getContext?.();
     const service = context?.ConnectionManagerRequestService;

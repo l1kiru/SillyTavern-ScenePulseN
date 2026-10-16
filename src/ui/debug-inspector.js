@@ -19,6 +19,7 @@
 // lives in css/crash-log.css alongside the existing overlay styles.
 
 import { t } from '../i18n.js';
+import { readStCapabilities } from '../st-capabilities.js';
 import { esc, spConfirm } from '../utils.js';
 import { debugLog } from '../logger.js';
 import { getLastRawResponse, getLastExtractionFailure, generating, genMeta, lastGenSource, currentSnapshotMesIdx, getActivePromptInjectionRun, getLastPromptInjectionMetrics, getLastPromptInjectionFailure } from '../state.js';
@@ -271,6 +272,7 @@ function _detectShadowedRootData(s) {
 }
 
 function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
+    const capabilities = readStCapabilities();
     // Activity log: last 50 lines
     const activity = (debugLog || []).slice(-50).map(_redact).join('\n');
     // v6.15.6: prefer the latest pair (prompt + response) over the bare last
@@ -370,10 +372,14 @@ function _buildDiagnostics({ spVersion = '', stVersion = '' } = {}) {
     const body = [
         '## Versions',
         `- ScenePulse: ${spVersion || '(unknown)'}`,
-        `- SillyTavern: ${stVersion || '(unknown)'}`,
+        `- SillyTavern: ${capabilities.version || stVersion || '(unknown)'}`,
         `- UA: ${(typeof navigator !== 'undefined' && navigator.userAgent) || '(unknown)'}`,
         `- Viewport: ${typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : '(unknown)'}`,
         `- Runtime state: ${generating ? 'generating' : 'idle'} · source=${lastGenSource || '(none)'} · trackedMessage=${currentSnapshotMesIdx}`,
+        '',
+        '## SillyTavern API availability (not a live compatibility test)',
+        'Display path names the installed implementation; rawGeneration is the legacy request API priority, not the last request. Explicit profiles without a preset override and parallel builds use Connection Manager when available; Together uses host generation. See Latest build timing for the observed transport.',
+        '```json', JSON.stringify(capabilities, null, 2), '```',
         '',
         '## Effective configuration (what the UI actually uses)',
         '```', effectiveBlock, '```',
@@ -449,6 +455,8 @@ function _overviewTab(panel, ctx = {}) {
     } : null;
     const settings = (() => { try { return getSettings(); } catch { return null; } })();
     const st = (() => { try { return SillyTavern.getContext(); } catch { return null; } })();
+    const capabilities = readStCapabilities();
+    const missingEvents = Object.entries(capabilities.events).filter(([, available]) => !available).map(([name]) => name);
     const profile = (() => { try { return settings ? getActiveProfile(settings) : null; } catch { return null; } })();
     const provenance = (() => { try { return getSnapshotProvenance(); } catch { return []; } })();
     const snapshots = provenance.reduce((out, item) => {
@@ -532,6 +540,9 @@ function _overviewTab(panel, ctx = {}) {
     }
     const summaryText = [
         `ScenePulse ${VERSION}`,
+        `SillyTavern: ${capabilities.version || '(unknown)'}`,
+        `API availability only: display=${capabilities.displayPath} · raw=${capabilities.rawGeneration} · formatter=${capabilities.formatter.available} · connectionProfile=${capabilities.connectionProfile}`,
+        `Unavailable events: ${missingEvents.join(', ') || '(none)'}`,
         `Status: ${stateLabel}${stateDetail ? ' — ' + stateDetail : ''}`,
         `Mode: ${mode} · prompt=${settings?.promptMode || '(default)'} · profile=${profile?.name || '(default)'}`,
         `Chat: ${st?.chatId ? String(st.chatId).slice(-12) : '(unknown)'} · message=${Array.isArray(st?.chat) ? st.chat.length - 1 : '?'} · swipe=${swipeId}`,
@@ -558,10 +569,22 @@ function _overviewTab(panel, ctx = {}) {
                     <div class="sp-di-overview-card-title">${t('Runtime')}</div>
                     <dl>
                         <div><dt>ScenePulse</dt><dd>v${esc(VERSION)}</dd></div>
-                        <div><dt>SillyTavern</dt><dd>${esc(st?.version || t('Unknown'))}</dd></div>
+                        <div><dt>SillyTavern</dt><dd>${esc(capabilities.version || t('Unknown'))}</dd></div>
                         <div><dt>${t('Mode')}</dt><dd>${esc(mode)}</dd></div>
                         <div><dt>${t('Profile')}</dt><dd>${esc(profile?.name || t('Default'))}</dd></div>
                     </dl>
+                </section>
+                <section class="sp-di-overview-card">
+                    <div class="sp-di-overview-card-title">${t('SillyTavern API availability')}</div>
+                    <dl>
+                        <div><dt>${t('Display implementation')}</dt><dd>${esc(capabilities.displayPath)}</dd></div>
+                        <div><dt>MessageFormatter</dt><dd>${capabilities.formatter.available ? t('Available') : t('Unavailable')}</dd></div>
+                        <div><dt>${t('Legacy request API')}</dt><dd>${esc(capabilities.rawGeneration)}</dd></div>
+                        <div><dt>Connection Manager</dt><dd>${capabilities.connectionProfile ? t('Available') : t('Unavailable')}</dd></div>
+                        <div><dt>${t('Unavailable events')}</dt><dd>${esc(missingEvents.join(', ') || '—')}</dd></div>
+                    </dl>
+                    <p>${t('API availability does not verify live compatibility. Optional APIs may be absent on older clients.')}</p>
+                    <p>${t('Together uses host generation. Explicit profiles without a preset override and parallel requests use Connection Manager when available. The legacy API is selected by availability.')}</p>
                 </section>
                 <section class="sp-di-overview-card">
                     <div class="sp-di-overview-card-title">${t('Current chat')}</div>

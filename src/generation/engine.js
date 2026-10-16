@@ -35,6 +35,7 @@ import { mergeDelta, preserveOffSceneEntities } from './delta-merge.js';
 import { validateCharacterAudienceRequirements, validateExtraction } from './validation.js';
 import { buildRequestSchema, SECTION_FIELDS } from '../schema.js';
 import { buildRecentContext, classifyRequestError, computeResponseLength, correctiveInstruction, requestTracker } from './request.js';
+import { canUseConnectionProfile } from './profile-request.js';
 import { extractionReferenceContext } from './tracker-contract.js';
 import { createBuildTiming } from './build-timing.js';
 import { runParallelDeltaBuild, runParallelFullBuild, shouldUseParallelDeltaBuild } from './parallel-build.js';
@@ -51,7 +52,7 @@ import { isOperationCurrent, getActiveSceneBuilds, cancelSceneBuild } from './sc
 import { t } from '../i18n.js';
 
 let activeRequestAbort=null;
-let activeProfileBoundParallel=false;
+let activeProfileBoundRequest=false;
 
 async function _changeAndWait(ctx,element,value,eventName,label){
     if(!element)return false;
@@ -119,7 +120,7 @@ export function cancelGeneration(){
     if(inlineGenerationContext?.fullRefreshTicket){
         rearmForceFullAfterFailedFullRun(inlineGenerationContext.frozenDeltaMode,inlineGenerationContext.fullRefreshTicket);
     }
-    const cancelUsesProfileBound=activeProfileBoundParallel;
+    const cancelUsesProfileBound=activeProfileBoundRequest;
     try{
         for(const op of getActiveSceneBuilds())cancelSceneBuild(op.operationId,'cancelGeneration');
     }catch{}
@@ -282,6 +283,8 @@ export async function generateTracker(mesIdx,partKey,opts){
         if(!match)match=_genPresets.find(p=>p.name.toLowerCase().includes(norm)||norm.includes(p.name.toLowerCase()));
         if(match){log('Generation: resolved preset:',presetOverride,'\u2192',match.id);presetOverride=match.id}
     }
+    const useProfileBoundSingle=!useProfileBoundParallel&&canUseConnectionProfile(SillyTavern.getContext(),profileOverride,presetOverride);
+    if(useProfileBoundSingle)buildTiming.timing.transport='profile-bound';
     let terminalFailure=null;
     let successfulRequestMeta=null;
     let successfulValidationWarnings=[];
@@ -300,7 +303,7 @@ export async function generateTracker(mesIdx,partKey,opts){
         externalSignal.addEventListener('abort',()=>{try{requestAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
     }
     activeRequestAbort=requestAbort;
-    activeProfileBoundParallel=useProfileBoundParallel;
+    activeProfileBoundRequest=useProfileBoundParallel||useProfileBoundSingle;
     const doGen=async()=>{
         const stContext=SillyTavern.getContext();
         const{chat}=stContext;
@@ -337,7 +340,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 attemptTiming=buildTiming.startAttempt({attempt:a+1,promptMode:attemptPromptMode,responseBudget:responseLength,inputTokensEstimate:attemptPromptTokens});
                 let quietError=null;
                 try{
-                    const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true,stopStOnAbort,promptRole:frozenPromptRole});
+                    const response=await requestTracker({stContext,systemPrompt:sysPr,prompt:attemptPrompt,responseLength,jsonSchema:schema,promptMode:attemptPromptMode,signal:requestAbort.signal,skipWIAN:true,stopStOnAbort,promptRole:frozenPromptRole,connectionProfileId:useProfileBoundSingle?profileOverride:''});
                     raw=response.value;strategy=response.strategy;
                 }catch(e){quietError=e}
                 const requestLatencyMs=buildTiming.markAttemptResponse(attemptTiming,{strategy});
@@ -556,7 +559,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             }
             log(useParallelDelta?'Parallel delta build:':'Parallel full build:',JSON.stringify(built.meta));
             return built.value;
-        })():withProfileAndPreset(profileOverride,presetOverride,doGen);
+        })():(useProfileBoundSingle?doGen():withProfileAndPreset(profileOverride,presetOverride,doGen));
         result = await Promise.race([
             generationPromise,
             new Promise((_, reject) => {engineTimeoutId=setTimeout(()=>{
@@ -578,7 +581,7 @@ export async function generateTracker(mesIdx,partKey,opts){
         }
     }finally{
         if(engineTimeoutId)clearTimeout(engineTimeoutId);
-        if(activeRequestAbort===requestAbort){activeRequestAbort=null;activeProfileBoundParallel=false}
+        if(activeRequestAbort===requestAbort){activeRequestAbort=null;activeProfileBoundRequest=false}
         buildTiming.finishStage(transportTimingStage,transportTimingStatus,{aborted:requestAbort.signal.aborted});
     }
     // Only the CURRENT generation is allowed to touch state
@@ -749,6 +752,8 @@ export async function continuationReprompt(narrativeText, opts){
     const settings=buildProfileView(rootSettings,getActiveProfile(rootSettings));
     const profileOverride=opts?.profile||settings.connectionProfile;
     const presetOverride=opts?.preset||settings.chatPreset;
+    const useProfileBoundSingle=canUseConnectionProfile(SillyTavern.getContext(),profileOverride,presetOverride);
+    const frozenPromptRole=getActivePromptRole();
     log('=== CONTINUATION START === narrativeLen=',narrativeText.length,'nonce=',myNonce,'source=',lastGenSource||'auto:together:continuation','profile=',profileOverride||'(current)');
     // Build the continuation prompt — just the narrative + a focused JSON-only instruction.
     // This is an independent request, so it receives the same explicit contract.
@@ -767,6 +772,8 @@ export async function continuationReprompt(narrativeText, opts){
         }
         externalSignal.addEventListener('abort',()=>{try{continuationAbort.abort(externalSignal.reason||'aborted')}catch{}},{once:true});
     }
+    activeRequestAbort=continuationAbort;
+    activeProfileBoundRequest=useProfileBoundSingle;
     const sceneOpId=opts?.sceneBuildOperationId||opts?.operationId||null;
     let prevStateJson=null;
     if(lastSnap){
@@ -789,13 +796,13 @@ export async function continuationReprompt(narrativeText, opts){
             const requestPrompt=prompt;
             const responseLength=computeResponseLength({mode:continuationMode,previousSnapshot:lastSnap});
             let promptMode=settings.promptMode==='native'?'native':'json';
-            let response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt,responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true,stopStOnAbort});
+            let response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt,responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true,stopStOnAbort,promptRole:frozenPromptRole,connectionProfileId:useProfileBoundSingle?profileOverride:''});
             continuationStrategy=response.strategy;
             let provider=normalizeProviderResponse(response.value);rawStr=provider.text;finishReason=provider.finishReason;
             if((!rawStr||rawStr.trim()==='{}')&&promptMode==='native'){
                 if(myNonce!==genNonce){log('CONTINUATION: native retry cancelled');return null}
                 promptMode='json';
-                response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt+'\n\nReturn strict JSON, not prose.',responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true,stopStOnAbort});
+                response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt+'\n\nReturn strict JSON, not prose.',responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true,stopStOnAbort,promptRole:frozenPromptRole,connectionProfileId:useProfileBoundSingle?profileOverride:''});
                 continuationStrategy=response.strategy+'+json-retry';provider=normalizeProviderResponse(response.value);rawStr=provider.text;finishReason=provider.finishReason;
             }
             if(!rawStr||rawStr.trim()==='{}'){const empty=new Error('Provider returned an empty response');empty.code='NO_JSON_OBJECT';throw empty}
@@ -832,14 +839,17 @@ export async function continuationReprompt(narrativeText, opts){
     let continuationTimeoutId=null;
     try{
         result = await Promise.race([
-            withProfileAndPreset(profileOverride,presetOverride,doGen),
+            useProfileBoundSingle?doGen():withProfileAndPreset(profileOverride,presetOverride,doGen),
             new Promise((_,reject)=>{continuationTimeoutId=setTimeout(()=>{
                 const timeoutError=new Error('TIMEOUT: continuation reprompt exceeded '+(CONTINUATION_TIMEOUT_MS/1000)+'s');
                 continuationAbort.abort(timeoutError);reject(timeoutError);
             },CONTINUATION_TIMEOUT_MS)}),
         ]);
     }
-    catch(e){err('Continuation:',e)}finally{if(continuationTimeoutId)clearTimeout(continuationTimeoutId)}
+    catch(e){err('Continuation:',e)}finally{
+        if(continuationTimeoutId)clearTimeout(continuationTimeoutId);
+        if(activeRequestAbort===continuationAbort){activeRequestAbort=null;activeProfileBoundRequest=false}
+    }
     if(myNonce!==genNonce){
         log('CONTINUATION POST: stale nonce',myNonce,'(current',genNonce+') — discarded');
         return null;
