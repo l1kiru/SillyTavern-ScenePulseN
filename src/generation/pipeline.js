@@ -1,3 +1,4 @@
+import { estimateTokens } from '../token-count.js';
 // src/generation/pipeline.js — Shared extraction→normalize→save→updatePanel pipeline
 // Eliminates duplication between index.js GENERATION_ENDED, message.js onCharMsg, and engine.js
 
@@ -101,7 +102,7 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
     const responseCharacterNames = (extracted.characters || []).map(c => c.name);
     if (_useDelta && prevSnap) {
         setLastDeltaPayload(extracted);
-        const fullEstimate = Math.round(JSON.stringify(prevSnap).length / 4);
+        const fullEstimate = estimateTokens(JSON.stringify(prevSnap));
         if (fullEstimate > 0) {
             setLastDeltaSavings(Math.max(0, Math.round((1 - (completionTokens / fullEstimate)) * 100)));
         }

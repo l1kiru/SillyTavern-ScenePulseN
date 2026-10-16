@@ -1,3 +1,4 @@
+import { estimateTokens } from '../token-count.js';
 // Profile-bound full/delta fan-out. The module is transport/persistence neutral:
 // it receives frozen schema/context, performs bounded lane requests, and returns
 // one fully validated candidate. It never saves or paints state.
@@ -461,7 +462,7 @@ async function executeLane({
                     timing?.finishAttempt?.(attemptTiming, 'ok', {
                         laneId: spec.id,
                         outputChars: rawText.length,
-                        outputTokensEstimate: Math.round(rawText.length / 4),
+                        outputTokensEstimate: estimateTokens(rawText),
                         validationWarnings: 0,
                     });
                     return {
@@ -512,7 +513,7 @@ async function executeLane({
                     failureCode: lastCode,
                     validationErrors: lastErrors.slice(0, 6),
                     outputChars: rawText.length,
-                    outputTokensEstimate: Math.round(rawText.length / 4),
+                    outputTokensEstimate: estimateTokens(rawText),
                 });
                 continue;
             }
@@ -524,14 +525,14 @@ async function executeLane({
                     failureCode: lastCode,
                     validationErrors: semanticErrors.slice(0, 6),
                     outputChars: rawText.length,
-                    outputTokensEstimate: Math.round(rawText.length / 4),
+                    outputTokensEstimate: estimateTokens(rawText),
                 });
                 continue;
             }
             timing?.finishAttempt?.(attemptTiming, 'ok', {
                 laneId: spec.id,
                 outputChars: rawText.length,
-                outputTokensEstimate: Math.round(rawText.length / 4),
+                outputTokensEstimate: estimateTokens(rawText),
                 validationWarnings: validation.warnings.length,
             });
             return {
@@ -561,7 +562,7 @@ async function executeLane({
                 laneId: spec.id,
                 failureCode: lastCode,
                 outputChars: rawText.length,
-                outputTokensEstimate: Math.round(rawText.length / 4),
+                outputTokensEstimate: estimateTokens(rawText),
             });
             if (signal?.aborted) throw signal.reason || error;
             if (mode === 'native' && requestInfo?.kind === 'provider') mode = 'json';

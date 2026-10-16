@@ -12,9 +12,9 @@ const trackerBody = '{"time":"12:00"}';
 const mes = `${narrative}${SP_MARKER_START}${trackerBody}${SP_MARKER_END}`;
 const split = estimateReplyTokenSplit(mes);
 assert.equal(split.foundTracker, true);
-assert.equal(split.narrativeTokens, Math.round(narrative.length / 4));
-assert.equal(split.trackerTokens, Math.round((SP_MARKER_START + trackerBody + SP_MARKER_END).length / 4));
-assert.equal(split.totalTokens, Math.round(mes.length / 4));
+assert.equal(split.narrativeTokens, Math.ceil(narrative.length / 3.35));
+assert.equal(split.trackerTokens, Math.ceil((SP_MARKER_START + trackerBody + SP_MARKER_END).length / 3.35));
+assert.equal(split.totalTokens, Math.ceil(mes.length / 3.35));
 assert.ok(split.narrativeTokens > split.trackerTokens);
 assert.ok(Math.abs(split.narrativeTokens + split.trackerTokens - split.totalTokens) <= 1);
 
@@ -22,7 +22,7 @@ assert.ok(Math.abs(split.narrativeTokens + split.trackerTokens - split.totalToke
 const stripped = estimateReplyTokenSplit(narrative);
 assert.equal(stripped.foundTracker, false);
 assert.equal(stripped.trackerTokens, 0);
-assert.equal(stripped.narrativeTokens, Math.round(narrative.length / 4));
+assert.equal(stripped.narrativeTokens, Math.ceil(narrative.length / 3.35));
 
 // Tip: good pre-strip meta
 const goodTip = resolveReplyTokenTipParts({

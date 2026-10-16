@@ -1,3 +1,4 @@
+import { estimateTokens } from '../token-count.js';
 import { prepareSnapshotContext, CONTINUITY_CONTEXT_NOTE } from '../continuity.js';
 import { trackerContract } from './tracker-contract.js';
 // ── interceptor.js — Chat interceptor for inline/together and separate injection modes ──
@@ -492,6 +493,6 @@ export const scenePulseInterceptor=async function(chat,cs,abort,type){
             mes:`[ Scene Tracker ]\n${CONTINUITY_CONTEXT_NOTE}\n${snapJson}`,
             extra:{isSmallSys:s.embedRole==='system'}
         });
-        log('Interceptor [separate]: embedded snapshot as',s.embedRole,'role (~'+Math.round(snapJson.length/4)+' tokens)');
+        log('Interceptor [separate]: embedded snapshot as',s.embedRole,'role (~'+estimateTokens(snapJson)+' tokens)');
     }
 };

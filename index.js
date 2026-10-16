@@ -1,3 +1,4 @@
+import { estimateTokens } from './src/token-count.js';
 // ScenePulse — Modular Architecture
 // Thin entry point: imports, event wiring, globalThis export
 
@@ -454,7 +455,7 @@ eventSource.on(event_types.GENERATION_ENDED, async () => {
             if (extracted) {
                 log('GENERATION_ENDED: primary extraction SUCCESS for message', targetIdx);
                 setInlineExtractionDone(true); setPendingInlineIdx(-1);
-                const _compTokens = replySplit.totalTokens || Math.round(rawMes.length / 4);
+                const _compTokens = replySplit.totalTokens || estimateTokens(rawMes);
                 const _elapsed = inlineGenStartMs > 0 ? ((Date.now() - inlineGenStartMs) / 1000) : 0;
                 setInlineGenStartMs(0);
                 genMeta.promptTokens = 0;

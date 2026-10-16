@@ -1,3 +1,4 @@
+import { estimateTokens } from '../token-count.js';
 // ── extraction.js — Inline/Together Mode: Extract tracker JSON from AI response ──
 
 import { log, warn, err } from '../logger.js';
@@ -19,12 +20,12 @@ const _ALT_TRACKER_MARKERS=[
 ];
 
 /**
- * Heuristic reply split (chars/4) for Together: narrative before tracker markers vs tracker block.
+ * Heuristic reply split (UTF-8 bytes/3.35) for Together: narrative before tracker markers vs tracker block.
  * @returns {{ narrativeTokens: number, trackerTokens: number, totalTokens: number, foundTracker: boolean }}
  */
 export function estimateReplyTokenSplit(mesText){
     const text=String(mesText??'');
-    const est=n=>Math.max(0,Math.round(String(n??'').length/4));
+    const est=estimateTokens;
     if(!text)return{narrativeTokens:0,trackerTokens:0,totalTokens:0,foundTracker:false};
     for(const[startMark,endMark]of _ALT_TRACKER_MARKERS){
         const startIdx=text.indexOf(startMark);
