@@ -104,9 +104,11 @@ export function currentChatFingerprint(messageId, swipeId) {
 export function currentChatKey() {
     try {
         const ctx = SillyTavern.getContext();
+        // Group generation changes the active speaker within the same chat.
+        const inGroup = ctx.groupId != null && ctx.groupId !== '';
         return [
             ctx.groupId ?? '',
-            ctx.characterId ?? ctx.character_id ?? ctx.name2 ?? '',
+            inGroup ? '' : (ctx.characterId ?? ctx.character_id ?? ctx.name2 ?? ''),
             ctx.chatId ?? ctx.chat_id ?? ctx.chat?.[0]?.send_date ?? '',
         ].map(_part).join('|');
     } catch {
