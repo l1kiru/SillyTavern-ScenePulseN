@@ -98,7 +98,7 @@ For another user, use that user's extension directory. Restart SillyTavern after
 1. Open a chat and **Extensions → ScenePulse** settings. The interface may use the
    original ScenePulse name in some controls.
 2. Follow the setup wizard and choose a recovery connection profile if you want
-   automatic recovery when an inline tracker is missing. The current **Unreleased**
+   automatic recovery when an inline tracker is missing. The current **7.2.0**
    setup starts with a language selector; released builds also expose language in settings.
 3. Start with **Together**, the default, or choose **Separate** for a dedicated
    tracking request. Keep automatic generation enabled to update after replies.
@@ -137,8 +137,7 @@ Custom schemas and full prompt overrides must explicitly include the fields you 
 **Latest release: v7.1.16** — schema-derived JSON contracts, more reliable extraction,
 consistent section updates, and preservation of confirmed scene records.
 
-The working tree also contains **Unreleased** improvements. The version remains
-7.1.16; these additions are not a separate published release:
+**Current checkout: v7.2.0**, prepared but not yet published. It includes:
 
 - Language selection at the start of setup and improved mobile setup layout.
 - Host API diagnostics, tracker display integration, and direct profile requests
@@ -151,7 +150,7 @@ The working tree also contains **Unreleased** improvements. The version remains
 - Multilingual token estimates, preset matching, Doctor validation, historical
   source-trace stability, and thoughts following the selected timeline snapshot.
 
-[All changes](CHANGELOG.md#unreleased) · [Verification and remaining acceptance gaps](tests/README.md)
+[All changes](CHANGELOG.md#720) · [Verification and remaining acceptance gaps](tests/README.md)
 
 ## Make it yours
 
