@@ -2,6 +2,60 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [Unreleased]
+
+Prepared changes; version remains **7.1.16** and minimum SillyTavern version
+remains **1.18.0**. Chromium and targeted Firefox checks, real-provider mode
+checks and isolated persistent ST 1.18 Clean are recorded in `tests/README.md`.
+Focused acceptance gaps remain; this is not a completed release certification.
+
+- Added API availability diagnostics and a shared raw-generation fallback order.
+  On hosts exposing MessageFormatter, explicit tracker blocks are hidden before
+  regex rendering. SillyTavern 1.18 retains the legacy display path; ordinary
+  JSON/code and user, system and reasoning messages are excluded from the hook.
+- Ordinary Separate and continuation requests can use an explicit Connection
+  Manager profile without switching the global connection. Same as current,
+  separate preset overrides and unavailable profile APIs retain the legacy path.
+  Profile-bound cancellation does not stop independent main generation.
+- Historical Scene Source Trace captures no longer share mutable decision data
+  with lorebook sources, preserving old names after a rename. New captures use
+  the current source; existing history is not migrated.
+- Fixed preset suggestions selecting a model from an inactive API and incomplete
+  longest-alias matching. Updated selected DeepSeek/Claude advisory notes without
+  automatically changing samplers, reasoning, Native mode or saved profiles.
+- Unified approximate token counts using ST's UTF-8 byte heuristic, improving
+  estimates for multilingual text. Prompt-injection measurement retains the
+  available ST tokenizer; estimates for other connection profiles remain heuristic.
+- Added a per-chat persona prompt offering to restore the previous persona or
+  accept the new one. Stale confirmations cannot switch another chat's persona;
+  ambiguous or deleted legacy personas are not selected automatically.
+- Added SillyTavern's opt-in Clean action for ScenePulse settings and caches,
+  including custom prompt/schema profiles and diagnostics. The panel library and
+  chat snapshots are preserved. Crash-log uploads are serialized to prevent older
+  uploads from overwriting cleanup; server cleanup failures are reported.
+- Replaced the custom floating scene-build notification with ST's non-blocking
+  Action Loader and an operation-specific stop button. Detailed status, errors
+  and retry controls remain under the message.
+- Fixed voluntary scene-build cancellation being reported as exhausted retries.
+  Cancellation no longer creates a provider failure or error toast; genuine
+  provider failures retain their diagnostics and retry behavior.
+- Fixed Together cancellation starting an automatic recovery request after the
+  main reply finished. Recovery now respects the original operation, including
+  dismissed cancelled status; cancelling a continuation prevents fallback escalation.
+- Fixed group auto-build ownership changing with the active speaker. Separate
+  group replies are processed in order so a busy tracker does not drop the next
+  reply; queued work is discarded if its chat, swipe or source changes.
+- Doctor now validates model output with ScenePulse's schema validator, uses
+  independent probe files and reports cleanup failures. Probe cleanup also runs
+  after read cancellation. Corrected the Source Trace scan-loop label.
+- Fixed floating thoughts retaining the current scene while viewing an older
+  timeline snapshot. Thoughts now follow the selected snapshot, clear for an
+  empty scene and return to current thoughts with Jump to latest.
+- Added a dedicated language page at the start of ScenePulse Setup. Language
+  changes apply immediately and preserve unfinished recovery choices; the same
+  language list is shared with settings. Kept the setup window within the mobile
+  viewport.
+
 ### [7.1.16]
 
 - Canonicalized provider envelopes before validation and historical context projection,
