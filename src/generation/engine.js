@@ -328,6 +328,7 @@ export async function generateTracker(mesIdx,partKey,opts){
         let totalPromptTokens=0,totalCompletionTokens=0;
         buildTiming.finishStage(prepareTimingStage);
         for(let a=0;a<=settings.maxRetries;a++){
+            if(externalSignal?.aborted)return null;
             let raw;let rawStr='';let finishReason='';let strategy='';let attemptTiming=null;
             const responseLength=computeResponseLength({mode:requestMode,previousSnapshot:lastSnap,attempt:a,lastErrorCode});
             const attemptPrompt=a?`${prompt}\n\nCORRECTION AFTER ATTEMPT ${a}: ${correctiveInstruction(lastErrorCode,validationErrors)}`:prompt;
@@ -335,7 +336,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             totalPromptTokens+=attemptPromptTokens;
             // Nonce check at every opportunity — if cancelled, bail immediately
             if(myNonce!==genNonce){log('STALE nonce',myNonce,'(current',genNonce+') \u2014 discarding silently');return null}
-            try{if(a>0){log(`Retry ${a}/${settings.maxRetries}`);await new Promise(r=>setTimeout(r,1000*a));if(myNonce!==genNonce){log('Retry cancelled during backoff');return null}}
+            try{if(a>0){log(`Retry ${a}/${settings.maxRetries}`);await new Promise(r=>setTimeout(r,1000*a));if(myNonce!==genNonce||externalSignal?.aborted){log('Retry cancelled during backoff');return null}}
                 log('Attempt',a+1,': mode=',attemptPromptMode,'outputBudget=',responseLength,'nonce=',myNonce);
                 attemptTiming=buildTiming.startAttempt({attempt:a+1,promptMode:attemptPromptMode,responseBudget:responseLength,inputTokensEstimate:attemptPromptTokens});
                 let quietError=null;
@@ -347,6 +348,13 @@ export async function generateTracker(mesIdx,partKey,opts){
                 if(quietError){
                     if(myNonce!==genNonce){buildTiming.finishAttempt(attemptTiming,'discarded',{failureCode:'STALE'});log('STALE after request error, nonce',myNonce);return null}
                     const info=classifyRequestError(quietError);
+                    // Operation cancellation can carry a string (e.g. "user"),
+                    // not an AbortError. The owner signal is authoritative;
+                    // keep engine timeouts on the normal failure path.
+                    if(externalSignal?.aborted||info.kind==='cancelled'){
+                        buildTiming.finishAttempt(attemptTiming,'cancelled');
+                        return null;
+                    }
                     buildTiming.finishAttempt(attemptTiming,'request_failed',{failureCode:info.kind});
                     try{recordNetwork({label:'generate',method:'POST',url:'(SillyTavern generate)',status:null,latencyMs:requestLatencyMs,reqBytes:attemptPrompt.length,respBytes:0,errorKind:info.kind==='network'?'transport':'http',errorMessage:info.kind})}catch{}
                     warn('API error:',info.message);
@@ -466,6 +474,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 return parsed;
             }catch(e){lastErrorCode=e?.code||'MALFORMED_JSON';buildTiming.finishAttempt(attemptTiming,lastErrorCode==='TRUNCATED'?'truncated':'parse_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawStr.length,outputTokensEstimate:estimateTokens(rawStr)});err(`Parse fail (${a+1}):`,e?.message||String(e));terminalFailure=recordExtractionFailure(lastErrorCode,e?.message||String(e),rawStr,mesIdx,{stage:'parse',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
         }
+        if(externalSignal?.aborted)return null;
         warn('All',settings.maxRetries+1,'attempts exhausted, returning null');
         toastr.error(t('All retry attempts failed — open the Debug Inspector for details'),t('Generation failed'));
         return null;
@@ -590,6 +599,12 @@ export async function generateTracker(mesIdx,partKey,opts){
         rearmOnFail();
         finishBuildTiming('discarded',{reason:'stale_nonce'});
         return null; // Don't reset generating — the newer cancel/gen already did
+    }
+    if(externalSignal?.aborted){
+        setGenerating(false);setGenerationTargetMesIdx(null);spSetGenerating(false);setCancelRequested(false);cleanupGenUI();setBrandState('idle');
+        rearmOnFail();
+        finishBuildTiming('cancelled',{reason:'parent_aborted'});
+        return null;
     }
     if(sceneOpId&&!isOperationCurrent(sceneOpId)){
         log('POST-GEN: scene build not current',sceneOpId,'— result discarded');
@@ -820,6 +835,7 @@ export async function continuationReprompt(narrativeText, opts){
             continuationCompletionTokens=estimateTokens(rawStr);
             return parsed;
         }catch(e){
+            if(externalSignal?.aborted)return null;
             const requestInfo=rawStr?null:classifyRequestError(e);
             const code=requestInfo?'API_ERROR':(e?.code||'MALFORMED_JSON');
             const message=requestInfo?.message||e?.message||String(e);

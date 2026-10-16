@@ -20,6 +20,7 @@ import {
 } from '../state.js';
 import { clearPromptInjection } from '../generation/prompt-injection.js';
 import { continuationReprompt } from '../generation/engine.js';
+import { getSceneBuild, isOperationCurrent } from '../generation/scene-build-controller.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
 import { processTogetherExtraction, discardTogetherSceneBuild, abortShortTogetherReply, isShortTogetherReply } from '../generation/together-scene-build.js';
@@ -126,6 +127,10 @@ export async function onCharMsg(idx){
     // ── INLINE/TOGETHER MODE: Extract tracker from AI response ──
     if(s.injectionMethod==='inline'){
         const _inlineCtx=rebindInlineCtxForExpectedSwipe(inlineGenerationContext,idx);
+        // The loader cancels this operation, not the global ST generation.
+        // Keep recovery tied to its owner even after the cancelled stub is removed.
+        const recoveryStopped=()=>shouldSkipAutoSceneRecovery()
+            || !!(_inlineCtx?.sceneBuildOperationId&&!isOperationCurrent(_inlineCtx.sceneBuildOperationId));
         if(_inlineCtx&&(_inlineCtx.mesIdx!==idx||getActiveSwipeId(idx)!==_inlineCtx.swipeId)){
             warn('onCharMsg [inline]: target swipe changed; discarding tracker for',idx);
             discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
@@ -185,7 +190,7 @@ export async function onCharMsg(idx){
             const _failureKind=_markersPresent?'markers found, JSON unparseable':'no SP markers';
             log('onCharMsg [inline]: no tracker found in message',idx,'('+msgLen+' chars,',_failureKind+')');
             // If the AI wrote content but omitted the tracker, recover.
-            if(!isShortTogetherReply(msgText)&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!shouldSkipAutoSceneRecovery()){
+            if(!isShortTogetherReply(msgText)&&s.autoGenerate&&!generating&&s.fallbackEnabled!==false&&!recoveryStopped()){
                 const fbProfile=s.fallbackProfile||s.connectionProfile||'';
                 const fbPreset=s.fallbackPreset||s.chatPreset||'';
                 // v6.23.9: removed the `if(!fbProfile && !fbPreset) showRecoveryCard`
@@ -222,6 +227,7 @@ export async function onCharMsg(idx){
                                 profile:fbProfile,preset:fbPreset,mesIdx:idx,swipeId:_inlineCtx?.swipeId,
                                 baseSnapshot:_inlineCtx?.baseSnapshot??null,owner:_inlineCtx?.owner,
                                 sceneBuildOperationId:_inlineCtx?.sceneBuildOperationId,
+                                signal:getSceneBuild(_inlineCtx?.sceneBuildOperationId)?.abortController?.signal,
                                 stopStOnAbort:false,
                             });
                             if(cont){
@@ -252,7 +258,7 @@ export async function onCharMsg(idx){
                     // withProfileAndPreset, which the user reasonably read as "I
                     // cancelled but it kept going AND swapped my preset." Treat
                     // a manual cancel as a hard stop on the whole recovery chain.
-                    if(!result && shouldSkipAutoSceneRecovery()){
+                    if(!result && recoveryStopped()){
                         log('Together fallback: Tier 2 skipped — user cancelled during Tier 1');
                         cancelSceneSourceTrace();
                         result=null;
@@ -289,7 +295,7 @@ export async function onCharMsg(idx){
                     hideStopButton();stopElapsedTimer();
                     clearLoadingOverlay(document.getElementById('sp-panel-body'));clearThoughtLoading();
                 }
-            } else if(!isShortTogetherReply(msgText)&&shouldSkipAutoSceneRecovery()){
+            } else if(!isShortTogetherReply(msgText)&&recoveryStopped()){
                 log('Together mode: recovery skipped — user stopped generation');
                 discardTogetherSceneBuild(_inlineCtx,'reply-stopped');
                 stopStreamingHider();

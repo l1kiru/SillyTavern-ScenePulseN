@@ -106,4 +106,38 @@ cancelGeneration();
 assert.equal(await pending,null);
 assert.equal(stops,0,'continuation cancel must not stop independent main generation');
 
+// Action Loader aborts the operation signal with a string reason, without
+// calling cancelGeneration or incrementing the global generation nonce.
+const { getSettings } = await import('../src/settings.js');
+const { getLastExtractionFailure } = await import('../src/state.js');
+for (const transport of ['profile', 'current']) {
+    getSettings().connectionProfile = transport === 'profile' ? 'profile-1' : '';
+    let started;
+    const dispatched = new Promise(resolve => { started = resolve; });
+    const waiting = async () => { started(); return new Promise(() => {}); };
+    ctx.ConnectionManagerRequestService.sendRequest = waiting;
+    ctx.generateRawData = waiting;
+    const controller = new AbortController();
+    const before = JSON.stringify(ctx.chatMetadata.scenepulse.snapshots);
+    const failureBefore = getLastExtractionFailure();
+    errorToasts.length = 0;
+    const build = generateTracker(3, null, { signal: controller.signal, stopStOnAbort: false });
+    await dispatched;
+    controller.abort('user');
+    assert.equal(await build, null);
+    assert.deepEqual(errorToasts, [], `${transport}: voluntary stop must not report failure`);
+    assert.equal(getLastExtractionFailure(), failureBefore, `${transport}: stop must not create a provider failure`);
+    assert.equal(JSON.stringify(ctx.chatMetadata.scenepulse.snapshots), before);
+    // A later provider failure must still be visible, and a new build can recover.
+    const failure = async () => { throw new Error('Provider unavailable'); };
+    ctx.ConnectionManagerRequestService.sendRequest = failure;
+    ctx.generateRawData = failure;
+    assert.equal(await generateTracker(3), null);
+    assert.ok(errorToasts.some(args => args[0].includes('All retry attempts failed')));
+    ctx.ConnectionManagerRequestService.sendRequest = async () => ({ content: JSON.stringify(previous) });
+    ctx.generateRawData = async () => JSON.stringify(previous);
+    errorToasts.length = 0;
+    assert.equal((await generateTracker(3))?.location, previous.location);
+    assert.deepEqual(errorToasts, []);
+}
 console.log('engine-single-profile: passed');
