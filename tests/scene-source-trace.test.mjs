@@ -177,7 +177,7 @@ const withContent = normalizeWorldInfoEvent({
     keys: ['Mash'],
     content: 'x'.repeat(40),
 });
-assert.equal(withContent[0].tokens, 10); // 40/4
+assert.equal(withContent[0].tokens, 12); // ceil(40 UTF-8 bytes / 3.35)
 
 const finished = applyMatchedKeysToEntries(
     [{ world: 'W', uid: '1', title: 'T', keys: ['hero'], constant: false, tokens: 10 }],
@@ -468,7 +468,7 @@ const mountedConst = mountSceneSourceTrace(bodyConst, {
         _spMeta: {
             injectionMethod: 'inline',
             sceneSourceTrace: {
-                v: 2,
+                v: 3,
                 capturedAt: '2026-07-25T00:00:00.000Z',
                 lorebook: {
                     count: 1,
@@ -476,6 +476,7 @@ const mountedConst = mountSceneSourceTrace(bodyConst, {
                         world: 'Book',
                         uid: '0',
                         title: 'Always on',
+                        firstSeenLoop: 1,
                         matchedKeys: [],
                         matchKind: 'constant',
                     }],
@@ -488,6 +489,8 @@ const mountedConst = mountSceneSourceTrace(bodyConst, {
 assert.ok(mountedConst);
 assert.match(mountedConst.drawer.innerHTML, /data-matched-keys="\[\]"/);
 assert.match(mountedConst.drawer.innerHTML, /data-match-kind="constant"/);
+assert.match(mountedConst.drawer.innerHTML, /Scan loop 1<\/span>/);
+assert.ok(!mountedConst.drawer.innerHTML.includes('Scan loop {1}'));
 
 {
     const bodyIds = el('div');

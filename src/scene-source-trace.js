@@ -1,3 +1,4 @@
+import { estimateTokens } from './token-count.js';
 // Experimental Together-mode source trace.
 // Captures WI engine events + pre-gen scan context; inferred keys labeled as such.
 
@@ -135,7 +136,7 @@ function _entryLike(value) {
     const comment = _str(value.comment ?? entry.comment);
     const constant = !!(value.constant ?? entry.constant);
     const content = _str(value.content ?? entry.content);
-    const tokens = content ? Math.round(content.length / 4) : 0;
+    const tokens = content ? estimateTokens(content) : 0;
     if (!uid && !title && !keys.length && !comment && !constant) return null;
     return {
         world,
