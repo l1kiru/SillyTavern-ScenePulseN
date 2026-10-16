@@ -76,6 +76,36 @@ uses its saved profile preset; the legacy preset override belongs to ordinary re
 
 ## Module graph
 
+`st-capabilities.js` inspects the current host API without calling generation,
+registering hooks or caching the context. `getRawGenerationStrategy` is shared
+by the legacy request dispatcher and Debug Inspector so the reported raw API
+priority matches fallback selection. Explicit profile requests are reported in build timing. Version labels are informational only.
+The inventory distinguishes an available MessageFormatter from a successfully
+registered display hook (registration can fail). It is not a live compatibility check;
+Together uses host generation and parallel requests use Connection Manager.
+
+`generation/tracker-display.js` registers a synchronous `BEFORE_REGEX` hook at
+APP_READY, before stored-message recovery. Registration is once per formatter
+instance: ST 1.19 `addHook` returns void and supplies no unregister API. A
+successful registration removes only ScenePulse's legacy regex entries and
+disables its streaming clipping observer/poller. Absent or rejected APIs retain
+the legacy markdown-only regex and streaming hider used by ST 1.18.
+
+The hook strips explicit tracker marker pairs, their distinctive unfinished
+streaming prefixes, and echoed `[SCENE TRACKER` appendices. It leaves ordinary
+JSON/code fences alone, skips user/system/reasoning contexts, and never changes
+chat messages, swipes or metadata. Complete paired blocks preserve following
+narrative. Very short ambiguous prefixes (such as `<` or `{`) remain visible.
+Unmarked JSON is deliberately not hidden by this new display hook; extraction
+still has its existing recovery heuristics. Models/custom prompts should retain
+the explicit tracker markers. `tracker-markers.js` is shared by display,
+extraction and reply token accounting without changing extraction policy.
+
+Extraction continues to clean and save accepted raw messages and update their
+DOM. Its delayed recovery checks remain for nonconforming output and reasoning;
+the formatter does not replace that persistence/recovery lifecycle. Live visual
+and cross-extension behavior must be verified separately from local tests.
+
 ```
 state ─┐
         ├──► settings ──► profiles ──► generation ──► ui
@@ -145,9 +175,14 @@ Historical snapshots are not rewritten by projection.
 
 `generation/tracker-contract.js` derives a compact structural JSON contract from
 the frozen request schema. Ordinary JSON, Native, parallel lanes and inline
-tracker instructions carry it; Native also sends the provider schema. Separate
-prefers `generateRawData`, then `generateRaw`, with quiet generation only when
-neither raw API exists. A provider error does not trigger an extra transport call.
+tracker instructions carry it; Native also sends the provider schema. Ordinary Separate and continuation use `ConnectionManagerRequestService` when
+an explicit profile is selected, the service is available/enabled, and no separate
+preset override is configured. The request uses that profile's preset/instruct,
+expands macros, preserves prompt-role routing, and sends Native schema when selected.
+It does not change global selectors; cancellation only aborts its own signal.
+“Same as current”, a separate preset override, or an unavailable service retains
+`withProfileAndPreset` and `generateRawData` → `generateRaw` → quiet fallback.
+A failed profile request never silently retries through the current connection. A provider error does not trigger an extra transport call.
 Raw requests explicitly include the chosen recent messages, projected previous
 state and character description/personality/scenario/persona as background data.
 Extraction does not activate World Info or Author's Note (the quiet fallback still
@@ -157,6 +192,11 @@ Section refresh uses the same alias-aware entity merge as Delta, restricted to
 its frozen requested fields and base snapshot before normalization. Only updated
 sections clear omitted transient state; other sections retain their values.
 Character renames still reconcile roster, relationships and item ownership.
+
+Group operation keys use the group and chat IDs, excluding the transient active
+speaker. Separate automatic group handlers run sequentially; each queued event
+retains its original message/swipe/source owner and is checked again before work.
+Solo chat keys continue to include the selected character.
 Full re-extraction also preserves omitted durable records from an existing trusted
 snapshot of the same unchanged reply/swipe. Elapsed-time calculation continues to
 use the preceding message; explicit empty lists still clear records.
@@ -273,6 +313,40 @@ are mostly named for their feature, with one carryover misnomer:
   .stringify(...))` out of every site — it's slower, semantically
   weaker (no Date/Map handling), and shouldn't reappear.
 
+## Scene Source Trace and lorebook identity
+
+A trace records the world name and entry UID observed during its capture. Its
+`world::uid` keys link entries, scan loops, decisions and attachment sources inside
+that capture; they are not persistent lorebook IDs. After a rename, the next WI
+scan supplies the new name. Saved traces retain the old name, titles, matches and
+attachment sources. Opening the drawer reads those saved values, without resolving
+or rewriting them against the current lorebook list. Its key highlights point to
+the captured chat messages, not a live lorebook-editor link.
+
+The event adapter deep-copies optional WI decisions, including nested entry identity
+and match details. Later mutation of source event objects cannot change active or
+finished evidence. Hosts without decisions retain the existing event/inference path.
+No rename listener, alias registry or metadata migration is required. Reusing an old
+book name/UID does not link the new capture to an archived trace.
+
+Attachment retargeting belongs to SillyTavern. The inspected 1.19 core updates active
+chat/persona links on rename; 1.18 does not provide those same updates. Primary
+character-link changes use the core confirmation flow. ScenePulse records only the
+sources the host actually loads; it does not repair host attachments silently.
+
+## Model preset boundaries
+
+Bundled model presets are prompt/role suggestions, not a model capability registry.
+Applying a preset changes only prompt slots and their role. Sampler hints and context
+sizes are display-only. Active model detection respects `mainApi`, prefers ST's
+`getChatCompletionModel` for chat completion, and falls back only to the current
+source's settings/selector. Unknown or ambiguous identity produces no suggestion.
+
+OpenRouter discovery currently refreshes pricing/context only. ST API availability
+is distinct from endpoint support for Native schema or reasoning. Generation budgets
+remain workload-based; neither the preset matcher nor the stats matcher is used to
+infer provider limits or silently change Native/reasoning settings.
+
 ## Versioning protocol
 
 Every commit bumps version in BOTH `manifest.json` AND
@@ -293,3 +367,37 @@ If you're new to the codebase and want to make a change, read in this order:
 4. [src/settings.js](src/settings.js) — profile + persistence machinery
 5. [src/generation/interceptor.js](src/generation/interceptor.js) — the
    hot path everything else feeds into
+## ST 1.18 token estimates, persona choice, and cleanup
+
+Scene-build floating notifications use `getContext().loader.show` with
+`blocking: false` and an operation-specific stop callback. Only the latest active
+operation for the visible chat/swipe gets a floating handle. Reconciliation reuses
+it, and completion, cancellation, navigation or disposal hides only that handle.
+No global `loader.hide()`/`stopGeneration()` is used by the notification. Without
+the optional loader API, the per-message status remains available. Stages,
+errors and retry actions still live in the existing per-message status UI.
+
+`src/token-count.js` owns the synchronous model-independent estimate
+(`ceil(UTF-8 bytes / 3.35)`, matching ST 1.17+) and the asynchronous current-host
+tokenizer fallback used by prompt injection. Explicit Connection Manager profile
+estimates do not use the unrelated active connection's tokenizer. Reply splits,
+trace estimates, diagnostics, delta savings, and existing output-budget estimates
+use the shared heuristic. These remain estimates; configured limits and the
+existing response-budget bounds are unchanged.
+
+`src/persona-guard.js` remembers the accepted persona avatar ID and display name in
+`chatMetadata.scenepulse.persona`. The UI adapter checks on chat/persona changes
+after the core event handlers settle. A mismatch offers to restore the previous
+persona using ST's exported `setUserAvatar`, or accept the new one. No historical
+messages/snapshots are rewritten by ScenePulse. Legacy chats can infer the last
+user persona only when its message name maps to exactly one existing persona.
+Deleted personas are not offered. Confirmation results are tied to chat metadata
+and current avatar; a stale dialog cannot change a different chat/persona.
+
+The manifest `clean` hook resets global settings (including prompt/schema profiles),
+connection selections and explicitly listed caches. It preserves the reusable panel
+library and all chat metadata/snapshots. ST owns confirmation, saving settings and
+reload. Crash-log uploads are serialized so cleanup cannot be overwritten by an
+older upload; uploads have a bounded timeout and cleanup reports server failure.
+The server log is emptied, rather than deleting unrelated files. There is no
+automatic cleanup hook on ordinary uninstall.
