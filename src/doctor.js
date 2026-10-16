@@ -1,3 +1,4 @@
+import { estimateTokens } from './token-count.js';
 // src/doctor.js — Real-path diagnostic checks (v6.16.0, progress API v6.17.1)
 //
 // Panel C's "Checks" reshape: ship as a manual button (not a tab), 5
@@ -21,9 +22,7 @@
 import { log } from './logger.js';
 import { getActiveSchema, getActivePrompt } from './settings.js';
 import { cleanJson } from './generation/extraction.js';
-
-const FILE_NAME = 'scenepulse-doctor-probe.json';
-const SERVER_PATH = '/user/files/' + FILE_NAME;
+import { validateExtraction } from './generation/validation.js';
 
 /**
  * @typedef {Object} CheckResult
@@ -119,29 +118,37 @@ async function _checkStorage(signal) {
             const probe = { ts: Date.now(), nonce: Math.random().toString(36) };
             const payload = JSON.stringify(probe);
             const data = _b64encode(payload);
-            // WRITE — pass signal so a cancel mid-fetch aborts the request.
+            const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+            const fileName = `scenepulse-doctor-probe-${id}.json`;
+            const filePath = 'user/files/' + fileName;
+            // Let this small write settle before cleanup, even if cancelled.
+            // Aborting its response can hide a successful server-side write.
             const wRes = await fetch('/api/files/upload', {
                 method: 'POST',
                 headers: _getHeaders(),
-                body: JSON.stringify({ name: FILE_NAME, data }),
-                signal,
+                body: JSON.stringify({ name: fileName, data }),
             });
             if (!wRes.ok) throw new Error(`Write HTTP ${wRes.status}`);
-            // READ
-            const rRes = await fetch(SERVER_PATH, { cache: 'no-store', signal });
-            if (!rRes.ok) throw new Error(`Read HTTP ${rRes.status}`);
-            const back = await rRes.json();
-            if (!back || back.nonce !== probe.nonce) throw new Error('Round-trip nonce mismatch');
-            // DELETE — best-effort cleanup; not all ST builds expose the delete endpoint.
+            let readError;
             try {
-                await fetch('/api/files/delete', {
+                const rRes = await fetch('/' + filePath, { cache: 'no-store', signal });
+                if (!rRes.ok) throw new Error(`Read HTTP ${rRes.status}`);
+                const back = await rRes.json();
+                if (!back || back.nonce !== probe.nonce) throw new Error('Round-trip nonce mismatch');
+            } catch (e) { readError = e; }
+            // Cleanup must run even if the read failed or was cancelled.
+            try {
+                const dRes = await fetch('/api/files/delete', {
                     method: 'POST',
                     headers: _getHeaders(),
-                    body: JSON.stringify({ name: FILE_NAME }),
-                    signal,
+                    body: JSON.stringify({ path: filePath }),
                 });
-            } catch {}
-            return { summary: 'Wrote + read + verified probe file' };
+                if (!dRes.ok) throw new Error(`Delete HTTP ${dRes.status}`);
+            } catch (e) {
+                throw new Error([readError?.message, e?.message || String(e)].filter(Boolean).join('; '));
+            }
+            if (readError) throw readError;
+            return { summary: 'Wrote + read + verified + deleted probe file' };
         });
 }
 
@@ -180,14 +187,16 @@ async function _checkSchemaRoundtrip() {
             if (!schema || !sysPr) throw new Error('Active schema or system prompt is empty');
             const reply = await ctx.generateRaw({
                 systemPrompt: sysPr,
-                prompt: 'RECENT:\nThe sun is rising over the city.\n\nGenerate a minimal valid tracker JSON.',
+                prompt: 'RECENT:\nThe sun is rising over the city.\n\nGenerate a minimal valid tracker JSON.\nRequired JSON schema:\n' + JSON.stringify(schema.value),
             });
             if (!reply || typeof reply !== 'string') throw new Error('No reply');
             const parsed = cleanJson(reply);
             if (!parsed || typeof parsed !== 'object') throw new Error(`cleanJson returned ${parsed === null ? 'null' : typeof parsed}`);
             const keys = Object.keys(parsed);
             if (keys.length === 0) throw new Error('Parsed object has no keys');
-            return { summary: `Parsed ${keys.length} top-level keys`, detail: `keys: ${keys.slice(0, 8).join(', ')}` };
+            const validation = validateExtraction(parsed, { schema: schema.value });
+            if (!validation.valid) throw new Error('Schema validation failed: ' + validation.errors.slice(0, 5).join('; '));
+            return { summary: 'Passed ScenePulse schema validation', detail: `keys: ${Object.keys(parsed).slice(0, 8).join(', ')}` };
         });
 }
 
@@ -202,7 +211,7 @@ async function _checkContextBudget() {
         async () => {
             const sysPr = getActivePrompt() || '';
             const ctx = SillyTavern.getContext?.();
-            const estimatedPromptTokens = Math.round(sysPr.length / 4) + 500; // headroom for chat context
+            const estimatedPromptTokens = estimateTokens(sysPr) + 500; // headroom for chat context
             // Try to read context window from active connection settings; fall back to assumptions.
             const limit =
                 ctx?.chatCompletionSettings?.openai_max_context
@@ -214,7 +223,7 @@ async function _checkContextBudget() {
             const headroom = limit - estimatedPromptTokens;
             return {
                 summary: `~${estimatedPromptTokens} prompt tokens vs ${limit} limit (~${headroom} headroom)`,
-                detail: `Heuristic: chars/4. Real tokenizer may differ — see Tokenizer parity check.`,
+                detail: `Heuristic: UTF-8 bytes/3.35. Real tokenizer may differ — see Tokenizer parity check.`,
             };
         });
 }
@@ -231,7 +240,7 @@ async function _checkTokenizerParity() {
         async () => {
             const ctx = SillyTavern.getContext?.();
             const probe = 'The quick brown fox jumps over the lazy dog. Now is the time for all good people to come to the aid of their party.';
-            const localEstimate = Math.round(probe.length / 4);
+            const localEstimate = estimateTokens(probe);
             // Try ST's getTokenCount API if it exists; otherwise SKIP rather than fail.
             if (typeof ctx?.getTokenCountAsync !== 'function') {
                 const e = new Error('SillyTavern.getContext().getTokenCountAsync not available');
@@ -270,7 +279,7 @@ export const DOCTOR_STEPS = [
  * @param {(ev: {index:number, id:string, name:string, status:string, [k:string]:any}) => void} [opts.onStep]
  *        Fired with status 'running' before each check, then with the final result after.
  * @param {AbortSignal} [opts.signal]
- *        Cancel between checks. Storage check also passes signal to its fetch calls.
+ *        Cancel between checks. Storage reads are abortable; write/delete settle for cleanup.
  * @returns {Promise<CheckResult[]>}
  */
 export async function runDoctor(opts = {}) {
