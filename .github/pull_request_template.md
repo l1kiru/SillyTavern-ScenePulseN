@@ -1,22 +1,20 @@
-## Summary
+## What changes
 
-<!-- Brief description of what this PR does -->
+<!-- English or Russian welcome. Explain the problem and the resulting behavior. Link an issue if relevant. -->
 
-## Type of Change
+## Validation
 
-- [ ] Bug fix
-- [ ] New feature
-- [ ] Translation improvement
-- [ ] Refactoring
-- [ ] Documentation
+<!-- List commands and results. For live checks, include ST version, model/provider and affected modes.
+Documentation-only: check links, anchors and rendering. Mark inapplicable checks as N/A. -->
 
-## Testing
+| Check | Result / not applicable |
+| --- | --- |
+| Automated checks | |
+| Together / Separate, Full / Delta | |
+| Desktop / mobile | |
+| English / Russian documentation | |
 
-- [ ] Tested in Together mode
-- [ ] Tested in Separate mode
-- [ ] Tested on mobile
-- [ ] Tested with delta mode
+## Compatibility and data
 
-## Related Issues
-
-<!-- Closes #123 -->
+<!-- Mention relevant effects on saved snapshots, settings, custom schemas, profiles or translations.
+State remaining verification gaps. Omit this section if it does not apply. -->

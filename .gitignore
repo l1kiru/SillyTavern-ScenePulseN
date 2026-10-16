@@ -17,4 +17,8 @@ node_modules/
 # Logs
 *.log
 
-docs/
+docs/*
+!docs/USER_GUIDE.md
+!docs/assets/
+docs/assets/*
+!docs/assets/scenepulsen-banner.svg

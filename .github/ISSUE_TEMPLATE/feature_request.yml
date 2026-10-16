@@ -1,23 +1,31 @@
-name: Feature Request
-description: Suggest a new feature or improvement
+name: Feature request / Предложение
+description: Suggest a ScenePulseN improvement. English or Russian welcome.
 labels: ["enhancement"]
 body:
+  - type: markdown
+    attributes:
+      value: "Describe the outcome you need. Можно писать на русском или английском."
   - type: textarea
     id: problem
     attributes:
-      label: Problem or Use Case
-      description: What problem does this solve or what would this enable?
+      label: Use case / Задача
+      description: What are you trying to do, and what is missing today?
     validations:
       required: true
   - type: textarea
     id: solution
     attributes:
-      label: Proposed Solution
-      description: How do you envision this working?
+      label: Proposed behavior / Предлагаемое поведение
+      description: Describe the desired result with an example.
     validations:
       required: true
   - type: textarea
     id: alternatives
     attributes:
-      label: Alternatives Considered
-      description: Any other approaches you've thought about?
+      label: Alternatives / Альтернативы
+      description: Can a custom panel, profile, preset or existing setting help? What have you tried?
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context / Дополнительно
+      description: Mockups, examples or relevant links. Remove private content before attaching files.
