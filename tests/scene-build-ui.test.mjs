@@ -82,9 +82,24 @@ const chatMessages = [
     { is_user: true, mes: 'hi' },
     { is_user: false, mes: 'hello', swipe_id: 0 },
 ];
+const loaderHandles = [];
+let loaderAvailable = true;
+const loader = {
+    show(options) {
+        const handle = { options, isActive: true, hideCalls: 0,
+            async hide() { this.hideCalls++; this.isActive = false; },
+            async stop() { options.onStop(); this.isActive = false; },
+        };
+        loaderHandles.push(handle);
+        return handle;
+    },
+    hide() { throw new Error('Must never hide other extensions loaders'); },
+};
+const activeLoaders = () => loaderHandles.filter(h => h.isActive);
 globalThis.SillyTavern = {
     getContext: () => ({
         chat: chatMessages,
+        loader: loaderAvailable ? loader : undefined,
         groupId: null, characterId: 1, chatId: 'ui-test',
         chatMetadata: { scenepulse: { snapshots: {} } },
         extensionSettings: { scenepulse: {} },
@@ -111,7 +126,7 @@ const together = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'auto:
 document._mesStop = { offsetParent: {} }; // ST still streaming
 ctrl.updateSceneBuild(together.operationId, { status: 'generating' });
 assertTrue('together stub hidden while streaming', !document.getElementById(`sp-scene-build-${together.operationId}`));
-assertTrue('toast still mounts while generating', !!document.getElementById('sp-scene-build-toast'));
+assertTrue('toast still mounts while generating', activeLoaders().length === 1);
 document._mesStop = null; // stream finished, reply on screen
 ui.reconcileSceneBuildUi();
 assertTrue('together stub after stream ends (still generating)', !!document.getElementById(`sp-scene-build-${together.operationId}`));
@@ -124,14 +139,32 @@ document._toast = null;
 const op = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:ui', chatKey: currentChatKey() });
 ctrl.updateSceneBuild(op.operationId, { status: 'generating' });
 assertTrue('stub mounted', !!document.getElementById(`sp-scene-build-${op.operationId}`));
-assertTrue('toast mounted', !!document.getElementById('sp-scene-build-toast'));
+assertTrue('toast mounted', activeLoaders().length === 1);
 
 // Simulate ST wiping message chrome
 document._stubs = [];
 document._toast = null;
 ui.reconcileSceneBuildUi();
 assertTrue('stub restored after reconcile', !!document.getElementById(`sp-scene-build-${op.operationId}`));
-assertTrue('toast restored after reconcile', !!document.getElementById('sp-scene-build-toast'));
+assertTrue('native loader retained after DOM reconcile', activeLoaders().length === 1);
+assertTrue('native loader does not block chat', activeLoaders()[0]?.options.blocking === false);
+assertTrue('native loader has custom stop', typeof activeLoaders()[0]?.options.onStop === 'function');
+assertTrue('old custom toast absent', !document.getElementById('sp-scene-build-toast'));
+const oldHandle = activeLoaders()[0];
+ctxSwipe(1);
+ui.reconcileSceneBuildUi();
+assertTrue('swipe hides only own loader', !oldHandle.isActive && oldHandle.hideCalls === 1);
+oldHandle.options.onStop();
+assertTrue('stale stop cannot cancel hidden swipe', ctrl.getSceneBuild(op.operationId)?.status === 'generating');
+ctxSwipe(0);
+ui.reconcileSceneBuildUi();
+assertTrue('returning to active swipe remounts loader', activeLoaders().length === 1);
+const beforeRepeat = loaderHandles.length;
+ui.reconcileSceneBuildUi();
+assertTrue('reconcile does not duplicate loader', loaderHandles.length === beforeRepeat);
+await activeLoaders()[0]?.stop();
+assertTrue('native stop cancels owning build', ctrl.getSceneBuild(op.operationId)?.status === 'cancelled');
+assertTrue('native stop removes loader', activeLoaders().length === 0);
 
 ctrl.cancelSceneBuild(op.operationId, 'user');
 assertTrue('active cleared', ctrl.getActiveSceneBuilds().length === 0);
@@ -272,6 +305,13 @@ globalThis.clearTimeout = (id) => {
 globalThis.setTimeout = realSetTimeout;
 globalThis.clearTimeout = realClearTimeout;
 
+ctrl.disposeSceneBuilds();
+assertTrue('dispose removes native loaders', activeLoaders().length === 0);
+loaderAvailable = false;
+const noApi = ctrl.startSceneBuild({ messageId: 1, swipeId: 0, source: 'manual:no-api', chatKey: currentChatKey() });
+ui.reconcileSceneBuildUi();
+assertTrue('missing loader API preserves message status', !!document.getElementById(`sp-scene-build-${noApi.operationId}`));
+assertTrue('missing API creates no custom toast', !document.getElementById('sp-scene-build-toast'));
 ctrl.disposeSceneBuilds();
 ui.disposeSceneBuildUi();
 
