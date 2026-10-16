@@ -1,5 +1,6 @@
 import { estimateTokens } from './src/token-count.js';
 import { initPersonaGuard, disposePersonaGuard } from './src/ui/persona-guard-ui.js';
+import { cleanExtensionData } from './src/extension-cleanup.js';
 // ScenePulse — Modular Architecture
 // Thin entry point: imports, event wiring, globalThis export
 
@@ -7,7 +8,7 @@ import { initPersonaGuard, disposePersonaGuard } from './src/ui/persona-guard-ui
 import { VERSION } from './src/constants.js';
 import { initializeTrackerDisplay } from './src/generation/tracker-display.js';
 import { log, warn, err, setErrorListener } from './src/logger.js';
-import { installCrashLog } from './src/crash-log.js';
+import { installCrashLog, clearForCleanup } from './src/crash-log.js';
 
 // ── Core Logic ──
 import {
@@ -33,7 +34,7 @@ import {
 } from './src/settings.js';
 import { normalizeTracker, clearNormCache } from './src/normalize.js';
 import { resetColorMap } from './src/color.js';
-import { initI18n } from './src/i18n.js';
+import { initI18n, t } from './src/i18n.js';
 
 // ── Generation ──
 import { extractInlineTrackerWithReplySplit } from './src/generation/extraction.js';
@@ -97,6 +98,26 @@ import { registerMacros } from './src/macros.js';
 
 // ── Register interceptor on globalThis (required by manifest.json "generate_interceptor") ──
 globalThis.scenePulseInterceptor = scenePulseInterceptor;
+
+// Invoked only after ST's explicit Clean confirmation (or opt-in on uninstall).
+export async function cleanScenePulseData() {
+    disposePersonaGuard();
+    cancelGeneration();
+    disposeSceneBuilds();
+    clearStallWatchdog();
+    clearPromptInjection(getActivePromptInjectionRun()?.runId || null);
+    cancelSceneSourceTrace();
+    try {
+        await cleanExtensionData({
+            context: SillyTavern.getContext(), local: localStorage, session: sessionStorage,
+            clearDiagnostics: clearForCleanup,
+        });
+        invalidateSettingsCache();
+    } catch (error) {
+        toastr.error(t('ScenePulse cleanup could not finish. Check the connection and try again.'));
+        throw error;
+    }
+}
 
 // ── Wire SillyTavern Events ──
 const { eventSource, event_types } = SillyTavern.getContext();

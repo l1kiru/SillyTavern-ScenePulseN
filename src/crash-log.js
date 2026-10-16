@@ -35,6 +35,7 @@ const SEVERITIES = ['error', 'warning', 'info'];
 // In-memory ring buffer. Shared with the viewer.
 let _entries = [];
 let _flushTimer = null;
+let _flushPromise = null;
 let _dirty = false;
 let _initialized = false;
 let _captureEnabled = true;
@@ -260,6 +261,14 @@ export function clearAll() {
     return _flushNow();
 }
 
+/** Quiesce capture and clear both mirrors before ST's clean-hook reload. */
+export async function clearForCleanup() {
+    _captureEnabled = false;
+    if (_flushTimer) { clearTimeout(_flushTimer); _flushTimer = null; }
+    await clearAll();
+    if (_dirty) throw new Error('Could not clear the server crash log');
+}
+
 export function setCaptureEnabled(enabled) { _captureEnabled = !!enabled; }
 export function isCaptureEnabled() { return _captureEnabled; }
 
@@ -408,7 +417,15 @@ function _scheduleSave() {
     _flushTimer = setTimeout(() => { _flushTimer = null; _flushNow(); }, FLUSH_DEBOUNCE_MS);
 }
 
-async function _flushNow() {
+function _flushNow() {
+    // A clear must be written after an older upload, never race against it.
+    if (_flushPromise) return _flushPromise.then(() => _flushNow());
+    if (!_dirty) return Promise.resolve();
+    _flushPromise = _uploadLog().finally(() => { _flushPromise = null; });
+    return _flushPromise;
+}
+
+async function _uploadLog() {
     if (!_dirty) return;
     _dirty = false;
     const payload = JSON.stringify({ v: VERSION, entries: _entries });
@@ -421,6 +438,7 @@ async function _flushNow() {
         const data = _b64encode(payload);
         const res = await fetch('/api/files/upload', {
             method: 'POST', headers,
+            signal: AbortSignal.timeout(1500),
             body: JSON.stringify({ name: FILE_NAME, data }),
         });
         if (!res.ok) {

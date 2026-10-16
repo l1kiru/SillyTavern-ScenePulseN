@@ -11,5 +11,8 @@
   "minimum_client_version": "1.18.0",
   "homePage": "https://github.com/l1kiru/SillyTavern-ScenePulseN",
   "auto_update": true,
-  "generate_interceptor": "scenePulseInterceptor"
+  "generate_interceptor": "scenePulseInterceptor",
+  "hooks": {
+    "clean": "cleanScenePulseData"
+  }
 }
