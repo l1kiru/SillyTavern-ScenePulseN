@@ -383,7 +383,8 @@ function _updatePanelInner(d,_force=false){
     if(!_isTimelineScrub)log('updatePanel: chars=',d?.characters?.length||0,'rels=',d?.relationships?.length||0,
         'quests=',((d?.mainQuests?.length||0)+(d?.sideQuests?.length||0)),
         'scene=',d?.sceneTopic?'\u2713':'\u2717','time=',d?.time||'?');
-    if(!_isTimelineScrub)updateThoughts(d);
+    // Thoughts follow the displayed snapshot, including historical timeline nodes.
+    updateThoughts(d);
     const body=document.getElementById('sp-panel-body');
     if(!body)return;
     // Update contextual subtitle with live scene info
