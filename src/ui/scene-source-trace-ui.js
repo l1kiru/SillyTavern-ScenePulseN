@@ -250,7 +250,7 @@ export function mountSceneSourceTrace(body, { settings, snapshot, footer = null 
                 const kind = esc(item.matchKind || 'none');
                 const summary = `<span class="sp-source-trace-entry-title">${esc(item.title)}</span><span class="sp-source-trace-entry-key">${esc(item.keyLine)}</span>`;
                 const loopLine = item.firstSeenLoop != null
-                    ? `<div class="sp-source-trace-meta"><span>${esc(t('Scan loop {{n}} · {{state}}', { n: item.firstSeenLoop, state: '' }).replace(/\s·\s$/, '') || `Loop ${item.firstSeenLoop}`)}</span><strong>${esc(String(item.firstSeenLoop))}</strong></div>`
+                    ? `<div class="sp-source-trace-meta"><span>${esc(t('Scan loop {n} · {state}', { n: item.firstSeenLoop, state: '' }).replace(/\s·\s$/, '') || `Loop ${item.firstSeenLoop}`)}</span><strong>${esc(String(item.firstSeenLoop))}</strong></div>`
                     : '';
                 if (item.uid) {
                     const tokenLabel = item.tokens == null ? '—' : `~${item.tokens}`;

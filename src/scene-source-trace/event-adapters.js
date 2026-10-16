@@ -43,7 +43,9 @@ export function snapshotScanDone(args) {
         acceptedEntryKeys: accepted.slice(),
         timedEffectsByKey: timed,
         phase: args?.phase || 'scan',
-        decisions: Array.isArray(args?.decisions) ? args.decisions.slice() : [],
+        // Decisions are captured evidence, not live references to editable WI data.
+        // Keep nested entry identity and match details stable after edits/renames.
+        decisions: Array.isArray(args?.decisions) ? structuredClone(args.decisions) : [],
     };
 }
 
