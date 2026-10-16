@@ -17,27 +17,9 @@
 
 import { BUILT_IN_PRESETS } from './built-in.js';
 
-/**
- * Resolve the model id reported by SillyTavern's active connection.
- *
- * v6.21.0: rewritten because v6.20.0 only probed `openai_model` / `model` /
- * `onlineStatus`, missing the source-specific *_model fields that ST uses
- * for every chat-completion backend (NanoGPT, DeepSeek, Claude, Google,
- * OpenRouter, Mistral, Cohere, Groq, xAI, Custom, etc.). Verified against
- * SillyTavern openai.js getChatCompletionModel().
- *
- * Resolution order:
- *  1. chat_completion_source → ${source}_model (the canonical lookup,
- *     mirrors ST's own getChatCompletionModel())
- *  2. Scan every *_model key on chatCompletionSettings for the first
- *     non-empty value (catches sources we don't have a static map for,
- *     e.g. brand-new backends added after this code was written)
- *  3. textCompletionSettings.online_status_model / model
- *  4. DOM fallback — the currently-:selected option in any #model_*_select
- *     dropdown (last-resort but reliable when settings haven't been saved
- *     since the user changed the dropdown)
- *  5. ctx.model / ctx.onlineStatus (legacy + textgen fallback)
- */
+// Prefer ST's public resolver for the active Chat Completion source (1.18+).
+// Legacy contexts use only source-specific settings, never another provider's
+// saved model or a hidden dropdown. Ambiguous identity means no suggestion.
 const _CC_SOURCE_TO_MODEL_KEY = {
     claude: 'claude_model',
     openai: 'openai_model',
@@ -77,42 +59,35 @@ export function getActiveModelId() {
         const ctx = SillyTavern.getContext?.();
         if (!ctx) return '';
         const cc = ctx.chatCompletionSettings || {};
-
-        // 1. Source-specific lookup (mirrors ST's getChatCompletionModel).
-        const source = cc.chat_completion_source;
-        if (source && _CC_SOURCE_TO_MODEL_KEY[source]) {
-            const v = cc[_CC_SOURCE_TO_MODEL_KEY[source]];
-            if (typeof v === 'string' && v.trim()) return v.trim();
-        }
-
-        // 2. Scan every *_model key on chatCompletionSettings. Catches sources
-        //    added after this file was written.
-        for (const [k, v] of Object.entries(cc)) {
-            if (k.endsWith('_model') && typeof v === 'string' && v.trim()) {
-                return v.trim();
-            }
-        }
-
-        // 3. textgen settings — local KoboldCpp / textgen webui / ollama etc.
         const tg = ctx.textCompletionSettings || {};
-        const fromTg = _firstNonEmpty(tg.online_status_model, tg.model);
-        if (fromTg) return fromTg;
-
-        // 4. DOM fallback — read the visible model dropdown directly. SillyTavern
-        //    selects always have id="model_<source>_select". Useful when the
-        //    user changed the dropdown but settings haven't been persisted yet.
-        if (typeof document !== 'undefined') {
-            const sels = document.querySelectorAll(
-                'select[id^="model_"][id$="_select"], #custom_model_id, #openrouter_model'
-            );
-            for (const sel of sels) {
-                const v = sel?.value || sel?.options?.[sel.selectedIndex]?.value;
-                if (typeof v === 'string' && v.trim()) return v.trim();
-            }
+        if (ctx.mainApi && ctx.mainApi !== 'openai') {
+            return ctx.mainApi === 'textgenerationwebui'
+                ? _firstNonEmpty(tg.online_status_model, tg.model, ctx.model)
+                : _firstNonEmpty(ctx.model);
         }
-
-        // 5. Legacy / textgen catch-all
-        return _firstNonEmpty(ctx.model, ctx.onlineStatus);
+        if (typeof ctx.getChatCompletionModel === 'function') {
+            try {
+                const model = _firstNonEmpty(ctx.getChatCompletionModel());
+                if (model) return model;
+            } catch { /* Older/custom hosts can still expose source settings. */ }
+        }
+        const source = cc.chat_completion_source;
+        if (source) {
+            const key = _CC_SOURCE_TO_MODEL_KEY[source] || `${source}_model`;
+            const model = _firstNonEmpty(cc[key]);
+            if (model) return model;
+            const domSource = key.replace(/_model$/, '');
+            const selected = globalThis.document?.getElementById?.(`model_${domSource}_select`);
+            return _firstNonEmpty(selected?.value);
+        }
+        // Compatibility with minimal old contexts: accept only unambiguous data.
+        if (ctx.mainApi === 'openai') return '';
+        const textModel = _firstNonEmpty(tg.online_status_model, tg.model, ctx.model);
+        if (textModel) return textModel;
+        const models = [...new Set(Object.entries(cc)
+            .filter(([k, v]) => k.endsWith('_model') && typeof v === 'string' && v.trim())
+            .map(([, v]) => v.trim()))];
+        return models.length === 1 ? models[0] : '';
     } catch {}
     return '';
 }
@@ -136,7 +111,6 @@ export function findMatchingPreset(modelId) {
             if (lc.includes(p) && p.length > bestLen) {
                 best = preset;
                 bestLen = p.length;
-                break; // any match for this preset is enough — keep scanning others
             }
         }
     }
