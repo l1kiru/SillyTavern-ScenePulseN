@@ -3,7 +3,7 @@
 [English overview](../README.md) · [Обзор на русском](../README.ru.md)
 
 Detailed feature reference and configuration for the current checkout, preserving
-feature descriptions and continuity rules from the former README. The current code is **7.2.0**, not yet published; see the [changelog](../CHANGELOG.md#720)
+feature descriptions and continuity rules from the former README. The current version is **7.2.0**; see the [changelog](../CHANGELOG.md#720)
 and [verification record](../tests/README.md). Screenshots illustrate existing UI;
 appearance may differ with your theme and build.
 
