@@ -1,4 +1,5 @@
 import { estimateTokens } from './src/token-count.js';
+import { initPersonaGuard, disposePersonaGuard } from './src/ui/persona-guard-ui.js';
 // ScenePulse — Modular Architecture
 // Thin entry point: imports, event wiring, globalThis export
 
@@ -129,6 +130,7 @@ eventSource.on(event_types.APP_READY, async () => { try {
     try { await initI18n(); log('APP_READY: i18n ok'); } catch { /* degrade to English */ }
     createPanel(); log('APP_READY: panel ok');
     try { initSceneBuildUi(); log('APP_READY: scene-build UI ok'); } catch (e) { warn('SceneBuild UI:', e); }
+    void initPersonaGuard().catch(e => warn('Persona guard:', e));
     createSettings(); log('APP_READY: settings ok');
     // Register slash commands & macros
     try { registerSlashCommands(); log('APP_READY: slash commands ok'); } catch (e) { warn('Slash commands:', e); }
