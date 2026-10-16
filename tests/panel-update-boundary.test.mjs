@@ -35,7 +35,26 @@ updatePanel({ charactersPresent: ['Alice'], characters: [{ name: 'Alice', innerT
 assert.ok(host.created > createdBeforeCharacter, 'a visible character renders a thought card');
 assert.ok(!debugLog.some(line => line.includes('panel update failed')));
 
-now = 1700;
+// Timeline navigation must render thoughts from the selected snapshot, including
+// Jump to latest and historical scenes with no present characters.
+const thoughtBody = document.getElementById('sp-tp-body');
+let renderedThought = '';
+thoughtBody.appendChild = card => { renderedThought += card.innerHTML; };
+state.set_isTimelineScrub(true);
+now = 1600;
+updatePanel({ charactersPresent: ['Alice'], characters: [{ name: 'Alice', innerThought: 'Historical thought.' }] });
+assert.ok(renderedThought.includes('Historical thought.'), 'scrubbing updates the actual thought card');
+renderedThought = '';
+now = 1800;
+updatePanel({ charactersPresent: ['Alice'], characters: [{ name: 'Alice', innerThought: 'Current thought.' }] });
+assert.ok(renderedThought.includes('Current thought.'), 'Jump to latest restores current thoughts');
+now = 2000;
+updatePanel({ charactersPresent: [], characters: [] });
+assert.equal(thoughtBody.innerHTML, '', 'empty historical scene clears previous thoughts');
+assert.equal(document.getElementById('sp-thought-panel').classList.contains('sp-tp-visible'), false);
+state.set_isTimelineScrub(false);
+
+now = 2300;
 const lookup = document.getElementById;
 document.getElementById = id => { if (id === 'sp-thought-panel') throw new Error('Broken panel'); return lookup(id); };
 const result = await processExtraction(1, { elapsed: '1 minute', characters: [] }, 'test', {
