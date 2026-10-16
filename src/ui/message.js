@@ -113,7 +113,26 @@ export function addMesButton(el){
     btns.appendChild(btn);
 }
 
-export async function onCharMsg(idx){
+let groupAutoBuildTail = Promise.resolve();
+
+export function onCharMsg(idx){
+    const ctx=SillyTavern.getContext();
+    const settings=getSettings();
+    if(ctx.groupId!=null&&ctx.groupId!==''&&settings.injectionMethod==='separate'&&settings.autoGenerate){
+        const owner=captureOperationOwner(idx,getActiveSwipeId(idx));
+        // A group can render its next speaker while the previous tracker is
+        // still in flight. Serialize handlers instead of dropping that reply.
+        const pending=groupAutoBuildTail.then(()=>{
+            if(!validateOperationOwner(owner,{requireSource:true}).valid||shouldSkipAutoSceneRecovery())return;
+            return handleCharMsg(idx);
+        });
+        groupAutoBuildTail=pending.catch(e=>warn('Group auto-build:',e));
+        return pending;
+    }
+    return handleCharMsg(idx);
+}
+
+async function handleCharMsg(idx){
     const s=getSettings();if(!s.enabled)return;
     if(!anyPanelsActive()){return}  // Nothing to extract/generate for
     const{chat}=SillyTavern.getContext();if(!chat[idx]||chat[idx].is_user)return;
