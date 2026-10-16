@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="360" viewBox="0 0 1280 360" role="img" aria-labelledby="title desc">
+  <title id="title">ScenePulseN</title>
+  <desc id="desc">A scene has a pulse. Keep its story in view. Graphite banner with a teal pulse and a circular scene radar.</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#111923"/><stop offset="1" stop-color="#0b1018"/></linearGradient>
+    <radialGradient id="halo"><stop stop-color="#51dcc1" stop-opacity=".12"/><stop offset="1" stop-color="#51dcc1" stop-opacity="0"/></radialGradient>
+    <linearGradient id="pulse"><stop stop-color="#61e5cb" stop-opacity="0"/><stop offset=".3" stop-color="#61e5cb"/><stop offset=".8" stop-color="#61e5cb"/><stop offset="1" stop-color="#61e5cb" stop-opacity="0"/></linearGradient>
+  </defs>
+  <rect width="1280" height="360" rx="20" fill="url(#bg)"/>
+  <rect x=".5" y=".5" width="1279" height="359" rx="20" fill="none" stroke="#263640"/>
+  <circle cx="1050" cy="176" r="220" fill="url(#halo)"/>
+  <g fill="none" stroke="#64dcc5">
+    <circle cx="1050" cy="176" r="118" opacity=".12"/>
+    <circle cx="1050" cy="176" r="83" opacity=".2"/>
+    <circle cx="1050" cy="176" r="46" opacity=".3"/>
+    <path d="M1050 44v264M918 176h264" opacity=".12"/>
+    <path d="M800 176h142l17-19 22 39 30-83 36 116 25-53h160" stroke="url(#pulse)" stroke-width="3" stroke-linejoin="round"/>
+  </g>
+  <g fill="#61e5cb"><circle cx="1050" cy="93" r="4"/><circle cx="1133" cy="176" r="4"/><circle cx="1017" cy="209" r="3"/></g>
+  <g font-family="Segoe UI, Arial, sans-serif">
+    <text x="66" y="70" fill="#80a59e" font-size="14" letter-spacing="3">SCENE TRACKING FOR SILLYTAVERN</text>
+    <text x="62" y="155" fill="#edf5f5" font-size="68" font-weight="700" letter-spacing="-2">Scene<tspan fill="#61e5cb">Pulse</tspan><tspan fill="#edf5f5">N</tspan></text>
+    <text x="66" y="207" fill="#b4c5cc" font-size="23">A scene has a pulse. Keep its story in view.</text>
+    <path d="M66 247h650" stroke="#263640"/>
+    <text x="66" y="287" fill="#89a4ae" font-size="14" letter-spacing="2">CHARACTERS</text>
+    <text x="235" y="287" fill="#61e5cb" font-size="14">/</text>
+    <text x="266" y="287" fill="#89a4ae" font-size="14" letter-spacing="2">RELATIONSHIPS</text>
+    <text x="461" y="287" fill="#61e5cb" font-size="14">/</text>
+    <text x="492" y="287" fill="#89a4ae" font-size="14" letter-spacing="2">CONTINUITY</text>
+  </g>
+</svg>

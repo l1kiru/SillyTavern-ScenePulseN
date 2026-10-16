@@ -1,54 +1,68 @@
-name: Bug Report
-description: Report a bug or unexpected behavior
+name: Bug report / Ошибка
+description: Report a reproducible ScenePulseN problem. English or Russian welcome.
 labels: ["bug"]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping improve ScenePulseN. You can write in English or Russian.
+        Search existing issues first. Remove API keys and private chat content from attachments.
+        For vulnerabilities, follow [SECURITY.md](https://github.com/l1kiru/SillyTavern-ScenePulseN/blob/main/SECURITY.md).
   - type: input
     id: version
     attributes:
-      label: ScenePulse Version
-      placeholder: "e.g., 6.6.0"
+      label: ScenePulseN version and branch / Версия и ветка
+      description: Include the commit shown in settings when testing unreleased changes.
+      placeholder: "7.1.16, branch, commit"
     validations:
       required: true
   - type: input
     id: st-version
     attributes:
-      label: SillyTavern Version
-      placeholder: "e.g., 1.17.0"
+      label: SillyTavern version / Версия SillyTavern
+      placeholder: "1.18.0 or newer; include branch if relevant"
     validations:
       required: true
   - type: dropdown
     id: mode
     attributes:
-      label: Injection Mode
+      label: Tracking mode / Режим
       options:
         - Together
         - Separate
+        - Both / Оба
+        - Not related to generation / Не связано с генерацией
     validations:
       required: true
   - type: input
     id: model
     attributes:
-      label: AI Model & Provider
-      placeholder: "e.g., GLM-5.1 via OpenRouter"
+      label: Model and provider / Модель и провайдер
+      description: Include the tracker model if it differs from the narrative model. Write N/A for non-generation issues.
     validations:
       required: true
   - type: input
     id: browser
     attributes:
-      label: Browser
-      placeholder: "e.g., Chrome 124, Firefox 126"
+      label: Browser, OS and device / Браузер, ОС и устройство
+      placeholder: "Browser version; Windows / Linux / macOS / Android / iOS; desktop or mobile"
     validations:
       required: true
   - type: textarea
+    id: configuration
+    attributes:
+      label: Relevant settings / Важные настройки
+      description: Parallel on/off, connection profile, preset override, Full/Delta, solo/group chat, custom schema or panels. Do not include secrets.
+  - type: textarea
     id: description
     attributes:
-      label: What happened?
+      label: What happened? / Что произошло?
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
-      label: Steps to Reproduce
+      label: Steps to reproduce / Как воспроизвести
       value: |
         1.
         2.
@@ -58,11 +72,11 @@ body:
   - type: textarea
     id: expected
     attributes:
-      label: Expected Behavior
+      label: Expected behavior / Ожидаемое поведение
     validations:
       required: true
   - type: textarea
     id: logs
     attributes:
-      label: Console Logs / Screenshots
-      description: Paste SP debug log or browser console output, or attach screenshots.
+      label: Diagnostics and screenshots / Диагностика и скриншоты
+      description: Settings → Advanced → Debug Inspector. Attach relevant logs or screenshots after removing private content and API keys.
