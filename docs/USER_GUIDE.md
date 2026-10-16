@@ -3,8 +3,7 @@
 [English overview](../README.md) · [Обзор на русском](../README.ru.md)
 
 Detailed feature reference and configuration for the current checkout, preserving
-feature descriptions and continuity rules from the former README. Changes prepared
-after **7.1.16** are marked **Unreleased**; see the [changelog](../CHANGELOG.md#unreleased)
+feature descriptions and continuity rules from the former README. The current code is **7.2.0**, not yet published; see the [changelog](../CHANGELOG.md#720)
 and [verification record](../tests/README.md). Screenshots illustrate existing UI;
 appearance may differ with your theme and build.
 
@@ -351,7 +350,7 @@ Restart SillyTavern after cloning.
 
 ### First-Time Setup
 On first load, ScenePulse shows a **Setup Wizard** to configure:
-- **Language (Unreleased)** — select the interface language before recovery setup; changes apply immediately
+- **Language (7.2.0)** — select the interface language before recovery setup; changes apply immediately
 - **Fallback profile** — a dedicated connection profile for when the AI omits tracker data
 - **Fallback preset** — optimized sampler settings for JSON output
 - **Auto-recovery** — whether to automatically retry when the tracker is missing
@@ -367,7 +366,7 @@ ScenePulse operates in **Together mode** by default:
 3. The AI writes its normal narrative response, then appends a JSON block wrapped in `<!--SP_TRACKER_START-->` / `<!--SP_TRACKER_END-->` markers
 4. ScenePulse extracts the JSON, strips it from the visible message, and updates the dashboard
 5. The footer shows a verified **SP Context** input footprint for that Together run (historical snapshots keep their own value)
-6. **Unreleased:** where available, MessageFormatter hides explicit tracker blocks before regex rendering. On the legacy path, a **regex filter** (`markdownOnly: true`) strips tracker JSON from the DOM during markdown rendering — helping hide tracker payloads during streaming; see the visibility limitation below
+6. **7.2.0:** where available, MessageFormatter hides explicit tracker blocks before regex rendering. On the legacy path, a **regex filter** (`markdownOnly: true`) strips tracker JSON from the DOM during markdown rendering — helping hide tracker payloads during streaming; see the visibility limitation below
 7. A **streaming hider** (MutationObserver + polling) provides a CSS fallback layer on the legacy display path
 8. Malformed JSON is automatically repaired by the vendored [`jsonrepair`](../src/vendor/) library (handles trailing commas, unquoted keys, unescaped quotes inside strings, single-quoted values, Python literals, comments, markdown fences, and ~20 other common LLM JSON errors via a tokenizer-based parser)
 9. Post-extraction **schema validation** warns about missing fields or invalid enum values
@@ -385,7 +384,7 @@ sends the provider's JSON schema option. Provider compliance and response time s
 vary, so Native does not guarantee a valid result on the first attempt.
 This dedicated extraction runs after each message and is useful for models that struggle with inline instructions.
 
-**Unreleased — direct profile requests.** Ordinary Separate requests and Together continuation also use a saved Connection
+**7.2.0 — direct profile requests.** Ordinary Separate requests and Together continuation also use a saved Connection
 Manager profile directly when its API is available and no separate preset override
 is selected. This leaves the main connection unchanged. “Same as current” and explicit
 preset overrides retain the existing scoped switching path, including on 1.18.
@@ -419,7 +418,7 @@ When embedding multiple snapshots in the generation prompt, ScenePulse selects t
 
 ## Compatibility
 
-### Prepared integration updates (Unreleased)
+### Integration updates (7.2.0)
 
 These changes are present in the working tree but are not a new release.
 
