@@ -379,17 +379,7 @@ export function bindUI(){const s=getSettings();
     });
     $('#sp-font-scale').on('input',function(){const v=+this.value;s.fontScale=v;$('#sp-font-scale-val').text(v.toFixed(1)+'x');_applyFontScaleFromUI(v);saveSettings()});
     $('#sp-font-scale-reset').on('click',function(){s.fontScale=1;$('#sp-font-scale').val(1);$('#sp-font-scale-val').text('1.0x');_applyFontScaleFromUI(1);saveSettings()});
-    $('#sp-language').on('change',async function(){s.language=this.value;saveSettings();resetI18nCache();await initI18n();log('Language:',this.value||'auto-detect');
-        // Re-render panel with new language
-        const snap=getLatestSnapshot();
-        if(snap){const norm=normalizeTracker(snap);updatePanel(norm,true);updateThoughts(norm)}
-        // Update toolbar tooltips
-        const _tips={'sp-tb-regen':t('Regenerate all'),'sp-tb-panels':t('Panel Manager'),'sp-tb-toggle':t('Expand/Collapse sections'),'sp-tb-compact':t('Condense view'),'sp-tb-features':t('Feature toggles'),'sp-tb-edit':t('Toggle edit mode'),'sp-tb-empty':t('Show empty fields'),'sp-tb-minimize':t('Hide panel')};
-        for(const[id,tip]of Object.entries(_tips)){const el=document.getElementById(id);if(el)el.title=tip}
-        // Re-create settings panel with new language
-        const old=document.getElementById('scenepulse-settings');if(old)old.remove();
-        createSettings();
-    });
+    $('#sp-language').on('change',function(){return applyUILanguage(this.value)});
     // Theme selector
     $('#sp-theme').val(s.theme||'default');
     $('#sp-theme').on('change',function(){
@@ -795,4 +785,18 @@ function bindProfileUI(s){
             m.openProfilesManager(()=>{renderProfileUI();loadUI();});
         } catch(e) { warn('Profile manager:', e?.message); }
     });
+}
+
+// Shared language application for settings and first-run setup.
+export async function applyUILanguage(language) {
+    getSettings().language=language;saveSettings();resetI18nCache();await initI18n();log('Language:',language||'auto-detect');
+    // Re-render panel with new language
+    const snap=getLatestSnapshot();
+    if(snap){const norm=normalizeTracker(snap);updatePanel(norm,true);updateThoughts(norm)}
+    // Update toolbar tooltips
+    const _tips={'sp-tb-regen':t('Regenerate all'),'sp-tb-panels':t('Panel Manager'),'sp-tb-toggle':t('Expand/Collapse sections'),'sp-tb-compact':t('Condense view'),'sp-tb-features':t('Feature toggles'),'sp-tb-edit':t('Toggle edit mode'),'sp-tb-empty':t('Show empty fields'),'sp-tb-minimize':t('Hide panel')};
+    for(const[id,tip]of Object.entries(_tips)){const el=document.getElementById(id);if(el)el.title=tip}
+    // Re-create settings panel with new language
+    const old=document.getElementById('scenepulse-settings');if(old)old.remove();
+    createSettings();
 }
