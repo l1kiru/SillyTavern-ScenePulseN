@@ -1,3 +1,4 @@
+import { estimateTokens } from '../token-count.js';
 // src/ui/message.js — Message Integration (per-message buttons, onCharMsg, renderExisting)
 import { log, warn, err } from '../logger.js';
 import { t } from '../i18n.js';
@@ -159,7 +160,7 @@ export async function onCharMsg(idx){
             return;
         }
         if(extracted){
-            const _compTokens=replySplit.totalTokens||Math.round(rawMes.length/4);
+            const _compTokens=replySplit.totalTokens||estimateTokens(rawMes);
             const _elapsed=inlineGenStartMs>0?((Date.now()-inlineGenStartMs)/1000):0;
             setGenMeta({...genMeta, promptTokens:0, completionTokens:_compTokens, elapsed:_elapsed});
             setInlineGenStartMs(0);

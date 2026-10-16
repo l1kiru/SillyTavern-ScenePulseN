@@ -1,3 +1,4 @@
+import { estimateTokens } from '../token-count.js';
 // One bounded request path for separate tracker generation.
 
 import { applyPromptRole } from '../prompts/role.js';
@@ -21,7 +22,7 @@ export function buildRecentContext(chat,count,endIdx=Infinity){
 
 export function computeResponseLength({mode='full',previousSnapshot=null,attempt=0,lastErrorCode=''}={}){
     const minimum=MIN_OUTPUT[mode]||MIN_OUTPUT.full;
-    const previousTokens=previousSnapshot?Math.ceil(JSON.stringify(previousSnapshot).length/4):0;
+    const previousTokens=previousSnapshot?estimateTokens(JSON.stringify(previousSnapshot)):0;
     let budget=Math.max(minimum,Math.ceil(previousTokens*1.35+512));
     if(lastErrorCode==='TRUNCATED')budget=Math.ceil(budget*Math.pow(1.5,Math.max(1,attempt)));
     return Math.min(MAX_OUTPUT,budget);

@@ -1,3 +1,4 @@
+import { estimateTokens } from '../token-count.js';
 import { prepareSnapshotContext, CONTINUITY_CONTEXT_NOTE } from '../continuity.js';
 // ── engine.js — Generation engine: preset management, profile switching, tracker generation ──
 
@@ -327,7 +328,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             let raw;let rawStr='';let finishReason='';let strategy='';let attemptTiming=null;
             const responseLength=computeResponseLength({mode:requestMode,previousSnapshot:lastSnap,attempt:a,lastErrorCode});
             const attemptPrompt=a?`${prompt}\n\nCORRECTION AFTER ATTEMPT ${a}: ${correctiveInstruction(lastErrorCode,validationErrors)}`:prompt;
-            const attemptPromptTokens=Math.round((sysPr.length+attemptPrompt.length)/4);
+            const attemptPromptTokens=estimateTokens(sysPr+attemptPrompt);
             totalPromptTokens+=attemptPromptTokens;
             // Nonce check at every opportunity — if cancelled, bail immediately
             if(myNonce!==genNonce){log('STALE nonce',myNonce,'(current',genNonce+') \u2014 discarding silently');return null}
@@ -368,7 +369,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 const responseTruncated=['length','max_tokens','max_output_tokens','token_limit'].includes(finishLow);
                 if(responseTruncated)lastErrorCode='TRUNCATED';
                 const rawLen=rawStr.length;
-                totalCompletionTokens+=Math.round(rawLen/4);
+                totalCompletionTokens+=estimateTokens(rawStr);
                 setLastRawResponse(rawStr); // store for debug copy
                 // v6.15.6: also capture the pair for the inspector's pair browser.
                 // v6.16.0: synthesize a network log entry linked to the pair via id.
@@ -394,7 +395,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                         if(errObj.error){
                             const errMsg=typeof errObj.error==='string'?errObj.error:(errObj.error.message||JSON.stringify(errObj.error));
                             err('API returned error object:',errMsg);
-                            buildTiming.finishAttempt(attemptTiming,'request_failed',{failureCode:'PROVIDER_ERROR',finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4)});
+                            buildTiming.finishAttempt(attemptTiming,'request_failed',{failureCode:'PROVIDER_ERROR',finishReason,outputChars:rawLen,outputTokensEstimate:estimateTokens(rawStr)});
                             terminalFailure=recordExtractionFailure('API_ERROR',errMsg,rawStr,mesIdx,{stage:'provider',finishReason,owner:operationOwner});
                             toastr.error(t('API Error: {error}',{error:errMsg.substring(0,100)}),t('Generation stopped'));
                             return null;
@@ -421,7 +422,7 @@ export async function generateTracker(mesIdx,partKey,opts){
                 const combinedWarnings=[...validation.warnings,...audienceValidation.warnings];
                 if(combinedErrors.length){
                     lastErrorCode='SEMANTIC_INVALID';validationErrors=combinedErrors;
-                    buildTiming.finishAttempt(attemptTiming,'schema_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationErrors:combinedErrors.slice(0,6)});
+                    buildTiming.finishAttempt(attemptTiming,'schema_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawLen,outputTokensEstimate:estimateTokens(rawStr),validationErrors:combinedErrors.slice(0,6)});
                     terminalFailure=recordExtractionFailure(lastErrorCode,'Tracker JSON failed schema validation',rawStr,mesIdx,{stage:'validate',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength,validationErrors});
                     try{markLastPairParseFailed(combinedErrors.join('; '))}catch{}
                     continue;
@@ -437,17 +438,17 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // — we should NOT merge it, just use it as-is.
                 if(partKey){
                     const merged=mergeDelta(lastSnap||{},parsed,{sectionFields:requestFields});
-                    buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationWarnings:validation.warnings.length});
+                    buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:estimateTokens(rawStr),validationWarnings:validation.warnings.length});
                     return merged;
                 }
                 if(useDelta && lastSnap){
                     log('Delta mode: merging',Object.keys(parsed).length,'delta keys with previous');
                     setLastDeltaPayload(parsed);
                     // Estimate delta savings: compare output tokens to typical full output
-                    const fullEstimate=Math.round(JSON.stringify(lastSnap).length/4);
+                    const fullEstimate=estimateTokens(JSON.stringify(lastSnap));
                     if(fullEstimate>0){const savings=Math.max(0,Math.round((1-(meta.completionTokens/fullEstimate))*100));setLastDeltaSavings(savings)}
                     const merged=mergeDelta(lastSnap, parsed);
-                    buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationWarnings:validation.warnings.length});
+                    buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:estimateTokens(rawStr),validationWarnings:validation.warnings.length});
                     return merged;
                 }
                 setLastDeltaPayload(null);
@@ -458,9 +459,9 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // in the current scene, but we must keep accumulated data for
                 // characters who left (for wiki, returning-character support).
                 preserveOffSceneEntities(parsed,continuitySnapshot);
-                buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:Math.round(rawLen/4),validationWarnings:validation.warnings.length});
+                buildTiming.finishAttempt(attemptTiming,'ok',{finishReason,outputChars:rawLen,outputTokensEstimate:estimateTokens(rawStr),validationWarnings:validation.warnings.length});
                 return parsed;
-            }catch(e){lastErrorCode=e?.code||'MALFORMED_JSON';buildTiming.finishAttempt(attemptTiming,lastErrorCode==='TRUNCATED'?'truncated':'parse_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawStr.length,outputTokensEstimate:Math.round(rawStr.length/4)});err(`Parse fail (${a+1}):`,e?.message||String(e));terminalFailure=recordExtractionFailure(lastErrorCode,e?.message||String(e),rawStr,mesIdx,{stage:'parse',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
+            }catch(e){lastErrorCode=e?.code||'MALFORMED_JSON';buildTiming.finishAttempt(attemptTiming,lastErrorCode==='TRUNCATED'?'truncated':'parse_failed',{failureCode:lastErrorCode,finishReason,outputChars:rawStr.length,outputTokensEstimate:estimateTokens(rawStr)});err(`Parse fail (${a+1}):`,e?.message||String(e));terminalFailure=recordExtractionFailure(lastErrorCode,e?.message||String(e),rawStr,mesIdx,{stage:'parse',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});try { markLastPairParseFailed(e?.message || String(e)); } catch {}}
         }
         warn('All',settings.maxRetries+1,'attempts exhausted, returning null');
         toastr.error(t('All retry attempts failed — open the Debug Inspector for details'),t('Generation failed'));
@@ -546,7 +547,7 @@ export async function generateTracker(mesIdx,partKey,opts){
             setLastRawResponse(JSON.stringify(useParallelDelta?built.delta:built.value));
             if(useParallelDelta){
                 setLastDeltaPayload(built.delta);
-                const fullEstimate=Math.round(JSON.stringify(baseSnapshot||{}).length/4);
+                const fullEstimate=estimateTokens(JSON.stringify(baseSnapshot||{}));
                 setLastDeltaSavings(fullEstimate>0?Math.max(0,Math.round((1-(meta.completionTokens/fullEstimate))*100)):0);
             }else{
                 setLastDeltaPayload(null);
@@ -778,7 +779,7 @@ export async function continuationReprompt(narrativeText, opts){
         ?`\n\nDELTA MODE: Include ONLY fields that changed since the previous state. Always include ${deltaAlways}. Include a full character entry for every present NPC and recompute innerThought and immediateNeed from this narrative. Use [] when nobody is present or witnessed the scene. Omit other unchanged fields.`
         :'';
     const prompt=extractionReferenceContext(SillyTavern.getContext())+buildContinuationRecoveryPrompt({narrativeText,deltaInstruction,prevStateJson});
-    log('Continuation prompt length:',prompt.length,'chars (~',Math.round(prompt.length/4),'tokens)');
+    log('Continuation prompt length:',prompt.length,'chars (~',estimateTokens(prompt),'tokens)');
     let continuationPromptTokens=0,continuationCompletionTokens=0,continuationStrategy='';
     const doGen=async()=>{
         const stContext=SillyTavern.getContext();
@@ -808,8 +809,8 @@ export async function continuationReprompt(narrativeText, opts){
             if(!Object.hasOwn(continuationSchema.value.properties||{},'plotBranches'))delete parsed.plotBranches;
             const validation=validateExtraction(parsed,{schema:continuationSchema.value});
             if(!validation.valid){const invalid=new Error(validation.errors.join('; '));invalid.code='SEMANTIC_INVALID';invalid.validationErrors=validation.errors;throw invalid}
-            continuationPromptTokens=Math.round((sysPr.length+requestPrompt.length)/4);
-            continuationCompletionTokens=Math.round(rawStr.length/4);
+            continuationPromptTokens=estimateTokens(sysPr+requestPrompt);
+            continuationCompletionTokens=estimateTokens(rawStr);
             return parsed;
         }catch(e){
             const requestInfo=rawStr?null:classifyRequestError(e);

@@ -1,3 +1,4 @@
+import { countTextTokens } from '../token-count.js';
 // src/generation/prompt-injection.js — Together PromptInjectionPlan
 //
 // Run-scoped extension-prompt delivery + request-scoped integrity verification.
@@ -365,15 +366,7 @@ export function beginRequest(apiKind = null, plan = getActivePromptInjectionRun(
 }
 
 export async function countTokens(text) {
-    const s = String(text ?? '');
-    const ctx = _getCtx();
-    try {
-        if (typeof ctx.getTokenCountAsync === 'function') {
-            const n = await ctx.getTokenCountAsync(s);
-            if (Number.isFinite(n) && n >= 0) return { tokens: Math.round(n), source: 'st-tokenizer' };
-        }
-    } catch {}
-    return { tokens: Math.round(s.length / 4), source: 'heuristic' };
+    return countTextTokens(text, _getCtx());
 }
 
 export async function measurePromptInjection(plan = getActivePromptInjectionRun(), { provisional = false } = {}) {
