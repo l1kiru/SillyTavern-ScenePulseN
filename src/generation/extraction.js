@@ -7,17 +7,10 @@ import { jsonrepair } from '../vendor/jsonrepair.mjs';
 import { setLastExtractionFailure } from '../state.js';
 import { currentChatFingerprint, currentChatKey, captureOperationOwner } from '../message-fingerprint.js';
 
-export const SP_MARKER_START='<!--SP_TRACKER_START-->';
-export const SP_MARKER_END='<!--SP_TRACKER_END-->';
+import { SP_MARKER_START, SP_MARKER_END, TRACKER_MARKER_PAIRS } from './tracker-markers.js';
+export { SP_MARKER_START, SP_MARKER_END } from './tracker-markers.js';
 export const KNOWN_KEYS=['time','date','elapsed','location','weather','temperature','soundEnvironment','sceneTopic','sceneMood','sceneInteraction','sceneTension','sceneSummary','witnesses','charactersPresent','characters','relationships','northStar','plotBranches','mainQuests','sideQuests','storyThreads','narrativeHooks','trackedItems','worldFacts'];
 const KNOWN_WRAPPER_KEYS=['environment','scene','sceneDetails','sceneInfo','sceneAnalysis','questJournal','quests'];
-const _ALT_TRACKER_MARKERS=[
-    [SP_MARKER_START,SP_MARKER_END],
-    ['{{//SP_TRACKER_START}}','{{//SP_TRACKER_END}}'],
-    ['{{SP_TRACKER_START}}','{{SP_TRACKER_END}}'],
-    ['[SP_TRACKER_START]','[SP_TRACKER_END]'],
-    ['**SP_TRACKER_START**','**SP_TRACKER_END**'],
-];
 
 /**
  * Heuristic reply split (UTF-8 bytes/3.35) for Together: narrative before tracker markers vs tracker block.
@@ -27,7 +20,7 @@ export function estimateReplyTokenSplit(mesText){
     const text=String(mesText??'');
     const est=estimateTokens;
     if(!text)return{narrativeTokens:0,trackerTokens:0,totalTokens:0,foundTracker:false};
-    for(const[startMark,endMark]of _ALT_TRACKER_MARKERS){
+    for(const[startMark,endMark]of TRACKER_MARKER_PAIRS){
         const startIdx=text.indexOf(startMark);
         if(startIdx<0)continue;
         const endIdx=text.indexOf(endMark,startIdx+startMark.length);
@@ -285,7 +278,7 @@ export function extractInlineTracker(mesIdx){
         // Check for mangled marker variants: {{//SP_TRACKER_START}}, {{SP_TRACKER_START}}, etc.
         let _mStartLen=SP_MARKER_START.length;
         if(startIdx===-1){
-            const altMarkers=[['{{//SP_TRACKER_START}}','{{//SP_TRACKER_END}}'],['{{SP_TRACKER_START}}','{{SP_TRACKER_END}}'],['[SP_TRACKER_START]','[SP_TRACKER_END]'],['**SP_TRACKER_START**','**SP_TRACKER_END**']];
+            const altMarkers=TRACKER_MARKER_PAIRS.slice(1);
             for(const[s,e]of altMarkers){const si=combined.indexOf(s);const ei=combined.indexOf(e);if(si!==-1&&ei>si){startIdx=si;endIdx=ei;_mStartLen=s.length;log('extractInlineTracker: found mangled marker variant:',s);break}}
         }
         let jsonStr=null;let extractMethod='none';let foundInReasoning=false;

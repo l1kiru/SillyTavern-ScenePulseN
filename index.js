@@ -4,6 +4,7 @@ import { estimateTokens } from './src/token-count.js';
 
 // ── Foundation ──
 import { VERSION } from './src/constants.js';
+import { initializeTrackerDisplay } from './src/generation/tracker-display.js';
 import { log, warn, err, setErrorListener } from './src/logger.js';
 import { installCrashLog } from './src/crash-log.js';
 
@@ -111,6 +112,12 @@ let _pendingActiveSwipeDeletion=null;
 
 eventSource.on(event_types.APP_READY, async () => { try {
     log('APP_READY: start');
+    // Install before renderExisting can format/recover stored messages.
+    try {
+        const display = initializeTrackerDisplay(SillyTavern.getContext());
+        log('Tracker display:', display.path);
+        if (display.error) warn('MessageFormatter registration failed; using legacy display:', display.error);
+    } catch (e) { warn('Could not initialize tracker display:', e); }
     // v6.12.5 (issue #13): install crash-log capture EARLY so any
     // failure during the rest of APP_READY is recorded.
     try { await installCrashLog({ spVersion: VERSION, setErrorListener }); log('APP_READY: crash log ok'); }
@@ -169,32 +176,6 @@ eventSource.on(event_types.APP_READY, async () => { try {
             import('./src/themes.js').then(m => m.applyTheme(_ts.theme)).catch(() => {});
         }
     } catch {}
-    // Register regex script to hide tracker JSON from DOM display.
-    // markdownOnly:true = only runs during markdown rendering (display), NOT on raw msg.mes.
-    // This is the same approach used by RPG Companion and Dooms Enhancement Suite.
-    try {
-        const _ctx = SillyTavern.getContext();
-        if (_ctx.extensionSettings) {
-            if (!_ctx.extensionSettings.regex) _ctx.extensionSettings.regex = [];
-            // Remove old broken version (v5.9.0 had markdownOnly:false which stripped msg.mes)
-            const _oldIdx = _ctx.extensionSettings.regex.findIndex(r => r.scriptName === 'ScenePulse Tracker Hider');
-            if (_oldIdx !== -1) _ctx.extensionSettings.regex.splice(_oldIdx, 1);
-            // Register with markdownOnly:true — cleans display but preserves msg.mes for extraction
-            _ctx.extensionSettings.regex.push({
-                scriptName: 'ScenePulse Tracker Hider',
-                findRegex: '<!--SP_TRACKER_START-->[\\s\\S]*?(<!--SP_TRACKER_END-->|$)|\\{\\{//SP_TRACKER_START\\}\\}[\\s\\S]*?(\\{\\{//SP_TRACKER_END\\}\\}|$)|\\[SCENE TRACKER[^\\]]*\\][\\s\\S]*$|\\{\\s*"time"\\s*:\\s*"\\d{1,2}:\\d{2}[\\s\\S]*$',
-                replaceString: '',
-                trimStrings: [],
-                placement: [2],
-                disabled: false,
-                markdownOnly: true,
-                promptOnly: false,
-                runOnEdit: true,
-                substituteRegex: 0,
-            });
-            log('Registered ST regex filter (markdownOnly) for tracker hiding');
-        }
-    } catch (e) { warn('Could not register regex filter:', e); }
     // Check for updates (non-blocking)
     setTimeout(async () => {
         try {

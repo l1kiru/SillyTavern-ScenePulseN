@@ -5,6 +5,9 @@ import { applyPromptRole } from '../prompts/role.js';
 import { suspendPromptInjection, restorePromptInjection } from './prompt-injection.js';
 import { getActivePromptInjectionRun } from '../state.js';
 import { trackerContract } from './tracker-contract.js';
+import { getRawGenerationStrategy } from '../st-capabilities.js';
+import { requestWithConnectionProfile } from './profile-request.js';
+import { freezePromptMacros, expandSchemaDescriptions } from './frozen-prompt.js';
 
 const MIN_OUTPUT={full:16384,delta:8192,section:8192};
 const MAX_OUTPUT=16384;
@@ -46,7 +49,7 @@ export function correctiveInstruction(code,errors=[]){
     return'Return exactly one valid ScenePulse tracker JSON object and no other text.';
 }
 
-export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true,stopStOnAbort=true,promptRole}){
+export async function requestTracker({stContext,systemPrompt,prompt,responseLength,jsonSchema,promptMode='json',signal,skipWIAN=true,stopStOnAbort=true,promptRole,connectionProfileId=''}){
     const contract=trackerContract(jsonSchema);
     const routed=applyPromptRole({systemPrompt,prompt:contract?`${prompt}\n\n${contract}`:prompt},promptRole);
     let stopped=false;
@@ -57,7 +60,7 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
         : null;
     const onAbort=()=>{
         if(stopped)return;stopped=true;
-        if(stopStOnAbort!==false){
+        if(!connectionProfileId&&stopStOnAbort!==false){
             try{if(typeof stContext.stopGeneration==='function')stContext.stopGeneration()}catch{}
         }
         try{abortReject?.(abortError())}catch{}
@@ -67,7 +70,15 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
     if(signal?.aborted)onAbort();
     else signal?.addEventListener?.('abort',onAbort,{once:true});
     const run=async()=>{
-        if(typeof stContext.generateRawData==='function'){
+        if(connectionProfileId){
+            const expand=freezePromptMacros(stContext,[routed.systemPrompt,routed.prompt,jsonSchema]);
+            const messages=[];
+            if(routed.systemPrompt)messages.push({role:'system',content:expand(routed.systemPrompt)});
+            messages.push({role:'user',content:expand(routed.prompt)});
+            return await requestWithConnectionProfile({stContext,profileId:connectionProfileId,messages,maxTokens:responseLength,jsonSchema:jsonSchema?expandSchemaDescriptions(jsonSchema,expand):null,promptMode,signal});
+        }
+        const strategy=getRawGenerationStrategy(stContext);
+        if(strategy==='raw-data'){
             const value=await stContext.generateRawData({
                 prompt:routed.prompt,systemPrompt:routed.systemPrompt,responseLength,
                 jsonSchema:promptMode==='native'?jsonSchema:null,
@@ -75,7 +86,7 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
             throwIfAborted();
             return{value,strategy:'raw-data'};
         }
-        if(typeof stContext.generateRaw==='function'){
+        if(strategy==='raw'){
             const value=await stContext.generateRaw({
                 prompt:routed.prompt,systemPrompt:routed.systemPrompt,responseLength,
                 jsonSchema:promptMode==='native'?jsonSchema:null,
@@ -83,7 +94,7 @@ export async function requestTracker({stContext,systemPrompt,prompt,responseLeng
             throwIfAborted();
             return{value,strategy:'raw'};
         }
-        if(typeof stContext.generateQuietPrompt==='function'){
+        if(strategy==='quiet'){
             const hadInjection=!!getActivePromptInjectionRun();
             if(hadInjection)suspendPromptInjection();
             try{

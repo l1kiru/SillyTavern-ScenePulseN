@@ -77,5 +77,22 @@ eq('failed profile switch skips callback',ran,false);
 eq('failed profile switch still restores',setCalls,['bad-profile','old-profile']);
 eq('failed profile switch restores selector value',profileEl.value,'old-profile');
 
+// Different sources sharing a preset still require an awaited profile switch.
+let actualSource='A';
+ctx.setConnectionProfile=async value=>{
+ await new Promise(resolve=>setTimeout(resolve,5));
+ profileEl.value=value;actualSource=value==='tracker-profile'?'B':'A';
+};
+for(const outcome of ['ok','error','cancel']){
+ profileEl.value='old-profile';actualSource='A';
+ try{await withProfileAndPreset('tracker-profile','',async()=>{
+  eq(outcome+' callback uses loaded provider',actualSource,'B');
+  if(outcome==='error')throw new Error('Provider failure');
+  if(outcome==='cancel')throw new DOMException('Cancelled','AbortError');
+ })}catch{}
+ eq(outcome+' restores actual provider',actualSource,'A');
+ eq(outcome+' restores profile selector',profileEl.value,'old-profile');
+}
+
 console.log(`\n${fail===0?'PASS':'FAIL'} ${pass}/${pass+fail}`);
 process.exit(fail?1:0);

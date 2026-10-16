@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import { requestTracker } from '../src/generation/request.js';
+import { canUseConnectionProfile } from '../src/generation/profile-request.js';
+const calls=[];
+let raw=0, stops=0;
+const ctx={extensionSettings:{},generateRawData:async()=>{raw++;return 'legacy'},stopGeneration(){stops++},ConnectionManagerRequestService:{
+ getSupportedProfiles:()=>[{id:'B',name:'Tracker'}],
+ async sendRequest(...args){calls.push(args);return {content:'{"location":"B"}'}}
+}};
+const args={stContext:ctx,systemPrompt:'Rules',prompt:'Scene',responseLength:256,promptRole:'system',connectionProfileId:'B'};
+assert.equal(canUseConnectionProfile(ctx,'B',''),true);
+assert.equal(canUseConnectionProfile(ctx,'',''),false);
+assert.equal(canUseConnectionProfile(ctx,'B','separate-preset'),false);
+assert.equal(canUseConnectionProfile({},'B',''),false);
+assert.equal(canUseConnectionProfile({...ctx,extensionSettings:{disabledExtensions:['connection-manager']}},'B',''),false);
+const schema={name:'tracker',value:{type:'object',properties:{location:{type:'string'}}}};
+const result=await requestTracker({...args,jsonSchema:schema,promptMode:'native'});
+assert.equal(result.strategy,'connection-profile');
+assert.equal(raw,0);
+assert.equal(calls[0][0],'B');
+assert.deepEqual(calls[0][1].map(m=>m.role),['system','user']);
+assert.equal(calls[0][1][0].content,'Rules');
+assert.ok(calls[0][1][1].content.includes('Scene'));
+assert.deepEqual(calls[0][4],{json_schema:schema});
+assert.equal(calls[0][3].includePreset,true);
+assert.equal(calls[0][3].includeInstruct,true);
+await requestTracker({...args,promptRole:'user'});
+assert.deepEqual(calls[1][1].map(m=>m.role),['user']);
+assert.ok(calls[1][1][0].content.includes('Rules'));
+assert.equal((await requestTracker({...args,connectionProfileId:''})).strategy,'raw-data');
+assert.equal(raw,1);
+ctx.name1='User Name';ctx.name2='Character Name';
+await requestTracker({...args,systemPrompt:'Rules for {{char}}',prompt:'Scene of {{user}}'});
+assert.equal(calls[2][1][0].content,'Rules for Character Name');
+assert.ok(calls[2][1][1].content.includes('Scene of User Name'));
+const abort=new AbortController();
+ctx.ConnectionManagerRequestService.sendRequest=()=>new Promise(()=>{});
+const pending=requestTracker({...args,signal:abort.signal});
+abort.abort(new DOMException('Cancelled','AbortError'));
+await assert.rejects(pending,{name:'AbortError'});
+assert.equal(stops,0,'profile cancellation must never stop the main ST generation');
+ctx.ConnectionManagerRequestService.sendRequest=async()=>{throw new Error('provider unavailable')};
+await assert.rejects(requestTracker(args),/provider unavailable/);
+assert.equal(raw,1,'provider failure must not fall back to a different provider');
+console.log('single-profile-transport: passed');

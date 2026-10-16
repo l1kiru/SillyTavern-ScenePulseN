@@ -4,6 +4,7 @@
 // when other extensions or other extensions trigger profile switches that reload the chat.
 
 import { log } from '../logger.js';
+import { isTrackerFormatterActive } from './tracker-display.js';
 import {
     _streamHiderInterval, _streamHiderStart, _streamHiderStyleEl, _streamHiderObserver,
     set_streamHiderInterval, set_streamHiderStart, set_streamHiderStyleEl, set_streamHiderObserver
@@ -39,6 +40,7 @@ export function findTrackerPayloadStart(value){
 }
 
 export function noteStreamingText(text){
+    if(!_lockFromStreamEvent)return;
     const start=findTrackerPayloadStart(text);
     if(start===-1||!_lockFromStreamEvent)return;
     const value=String(text||'');
@@ -48,6 +50,10 @@ export function noteStreamingText(text){
 }
 
 export function startStreamingHider(){
+    if (isTrackerFormatterActive()) {
+        stopStreamingHider({abort:true});
+        return;
+    }
     stopStreamingHider();
     // stopStreamingHider removes styles after a short extraction grace period.
     // A new generation must not inherit that old rule during the grace period.
