@@ -291,7 +291,7 @@ export function extractInlineTracker(mesIdx){
             const altMarkers=TRACKER_MARKER_PAIRS.slice(1);
             for(const[s,e]of altMarkers){const si=combined.indexOf(s);const ei=combined.indexOf(e);if(si!==-1&&ei>si){startIdx=si;endIdx=ei;_mStartLen=s.length;log('extractInlineTracker: found mangled marker variant:',s);break}}
         }
-        let jsonStr=null;let extractMethod='none';let foundInReasoning=false;
+        let jsonStr=null;let extractMethod='none';let foundInReasoning=false;let rawJsonStart=-1;
         if(startIdx!==-1&&endIdx>startIdx){
             jsonStr=combined.substring(startIdx+_mStartLen,endIdx).trim();
             extractMethod='SP_MARKERS';
@@ -311,12 +311,8 @@ export function extractInlineTracker(mesIdx){
                         if(depth===0){openIdx=i;break}
                     }
                     if(openIdx!==-1&&(lastBrace-openIdx)>200){
-                        const unclosedIdx=_unclosedOpenBefore(raw,openIdx);
-                        if(unclosedIdx!==-1){
-                            recordExtractionFailure('TRUNCATED','Tracker JSON was cut off before completion',raw.substring(unclosedIdx),mesIdx);
-                            return null;
-                        }
                         jsonStr=raw.substring(openIdx,lastBrace+1);
+                        rawJsonStart=openIdx;
                         extractMethod='RAW_JSON_SCAN';
                     }
                 }
@@ -335,10 +331,18 @@ export function extractInlineTracker(mesIdx){
                         }
                         if(endIdx>100){
                             jsonStr=remaining.substring(0,endIdx+1);
+                            rawJsonStart=jsonStart;
                             extractMethod='RAW_TIME_KEY_SCAN';
                         }
                     }
                 }
+            }
+        }
+        if(rawJsonStart>=0){
+            const unclosedIdx=_unclosedOpenBefore(raw,rawJsonStart);
+            if(unclosedIdx!==-1){
+                recordExtractionFailure('TRUNCATED','Tracker JSON was cut off before completion',raw.substring(unclosedIdx),mesIdx);
+                return null;
             }
         }
         if(!jsonStr){

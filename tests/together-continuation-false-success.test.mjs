@@ -24,10 +24,11 @@ globalThis.localStorage = { getItem: () => null, setItem() {} };
 globalThis.toastr = { error() {}, warning() {}, info() {}, success() {} };
 const element = () => ({ style: {}, dataset: {}, classList: { add() {}, remove() {}, contains: () => false },
     querySelector: () => null, querySelectorAll: () => [], getAttribute: () => '1', setAttribute() {}, removeAttribute() {},
-    appendChild() {}, addEventListener() {} });
+    appendChild() {}, insertBefore() {}, addEventListener() {} });
+const hiddenThoughtElement = {...element(),innerHTML:''};
 globalThis.document = { createElement: element, body: element(), addEventListener() {},
     querySelector: selector => selector.startsWith('.mes[mesid=') ? element() : null,
-    querySelectorAll: () => [], getElementById: () => null };
+    querySelectorAll: () => [], getElementById: id => ['sp-thought-panel','sp-tp-body'].includes(id) ? hiddenThoughtElement : null };
 globalThis.window = { addEventListener() {}, innerWidth: 1280, innerHeight: 720 };
 globalThis.getComputedStyle = () => ({ display: 'none', visibility: 'hidden' });
 
@@ -94,6 +95,7 @@ try {
     assert.equal(getSnapshotFor(3)._spMeta.deltaTurnsSinceFull,0,'saved scene is full');
 
     // Cancelling while saving a rejected continuation must still block Tier 2.
+    await new Promise(resolve=>setTimeout(resolve,160)); // Exercise UI updates outside their debounce window.
     requests=0;
     const cancelled=beginFrozen();
     together._setTogetherProcessExtractionForTests(async () => {

@@ -26,6 +26,13 @@ assert.equal(extractInlineTracker(1),null,'tracker-like nested object must not b
 assert.equal(getLastExtractionFailure()?.code,'TRUNCATED');
 assert.equal(ctx.chat[1].mes,truncatedWithTrackerLikeChild);
 
+const smallNested = {...nested,sceneSummary:'x'.repeat(65)};
+const truncatedWithSmallChild = 'Story text.\n{"activityPlans":['+JSON.stringify(smallNested)+'],"sceneSummary":"cut';
+ctx.chat[1].mes = truncatedWithSmallChild;
+assert.equal(extractInlineTracker(1),null,'time-key fallback must not extract a small nested tracker');
+assert.equal(getLastExtractionFailure()?.code,'TRUNCATED');
+assert.equal(ctx.chat[1].mes,truncatedWithSmallChild);
+
 for (const prefix of ['*{смеётся}* She nods.\n','{"aside":"a literal { brace"} She nods.\n']) {
     const good = prefix+JSON.stringify(nested);
     ctx.chat[1].mes = good;
