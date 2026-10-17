@@ -172,6 +172,16 @@ function _findBalancedEnd(s,from){
     return -1;
 }
 
+function _unclosedOpenBefore(s,limit){
+    for(let i=0;i<limit;i++){
+        if(s[i]!=='{')continue;
+        const end=_findBalancedEnd(s,i);
+        if(end===-1)return i;
+        i=end; // Skip closed objects, including braces inside their strings.
+    }
+    return -1;
+}
+
 function _candidateStrings(raw){
     const source=String(raw??'').trim();
     const starts=[];let inString=false,escape=false;
@@ -301,6 +311,11 @@ export function extractInlineTracker(mesIdx){
                         if(depth===0){openIdx=i;break}
                     }
                     if(openIdx!==-1&&(lastBrace-openIdx)>200){
+                        const unclosedIdx=_unclosedOpenBefore(raw,openIdx);
+                        if(unclosedIdx!==-1){
+                            recordExtractionFailure('TRUNCATED','Tracker JSON was cut off before completion',raw.substring(unclosedIdx),mesIdx);
+                            return null;
+                        }
                         jsonStr=raw.substring(openIdx,lastBrace+1);
                         extractMethod='RAW_JSON_SCAN';
                     }
