@@ -2,6 +2,29 @@
 
 All notable changes to ScenePulse are documented in this file.
 
+### [7.2.1]
+
+Version **7.2.1** — 17 October 2026. Minimum SillyTavern version
+remains **1.18.0**.
+
+- Fixed Together recovery losing scene snapshots after reopening or switching
+  chats. Continuation now uses the original frozen full/delta mode and schema;
+  a missing delta base requests and validates full state instead.
+- Fixed rejected continuation trackers being reported as saved. Recovery now
+  proceeds to separate generation when the pipeline rejects the tracker, while
+  preserving cancellation, chat/swipe ownership and supersession guards.
+- Prevented markerless extraction from accepting closed nested objects inside
+  a truncated JSON root through either raw recovery path. Rejected data leaves
+  the visible message unchanged. Ordinary prose braces are ignored by the root
+  guard, including a lone `{` before an otherwise complete tracker.
+- Classified empty responses stopped by `length`, `max_tokens`,
+  `max_output_tokens` or `token_limit` as truncation so retries can increase the
+  output budget within its existing cap. Empty `stop` responses retain the
+  no-JSON classification.
+- Removed newly returned root fields outside the request schema before the
+  extraction pipeline merges or saves them. Declared custom fields, service
+  metadata and nested character data retain their existing handling.
+
 ### [7.2.0]
 
 Version **7.2.0** — 16 October 2026. Minimum SillyTavern version

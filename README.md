@@ -98,7 +98,7 @@ For another user, use that user's extension directory. Restart SillyTavern after
 1. Open a chat and **Extensions → ScenePulse** settings. The interface may use the
    original ScenePulse name in some controls.
 2. Follow the setup wizard and choose a recovery connection profile if you want
-   automatic recovery when an inline tracker is missing. The current **7.2.0**
+   automatic recovery when an inline tracker is missing. The current **7.2.1**
    setup starts with a language selector; language is also available in settings.
 3. Start with **Together**, the default, or choose **Separate** for a dedicated
    tracking request. Keep automatic generation enabled to update after replies.
@@ -134,21 +134,20 @@ Custom schemas and full prompt overrides must explicitly include the fields you 
 
 ## Current version
 
-**Current version: v7.2.0** — SillyTavern 1.18/1.19 compatibility, setup improvements
-and scene-tracking fixes. It includes:
+**Current version: v7.2.1** — Together recovery and tracker parsing fixes. It includes:
 
-- Language selection at the start of setup and improved mobile setup layout.
-- Host API diagnostics, tracker display integration, and direct profile requests
-  where the required SillyTavern APIs are available.
-- Per-chat persona change confirmation and an explicit extension **Clean** action.
-  Clean resets settings, custom prompt/schema profiles and caches, while preserving
-  the panel library and chat snapshots.
-- Native scene-build progress and cancellation, ordered group auto-builds, and
-  fixes for Together recovery after cancellation.
-- Multilingual token estimates, preset matching, Doctor validation, historical
-  source-trace stability, and thoughts following the selected timeline snapshot.
+- Continuation keeps the original full/delta mode and schema after reopening a
+  chat, switching chats or refreshing state. A missing delta base requests full state.
+- Rejected continuation trackers trigger separate recovery; user cancellation
+  still stops the recovery chain.
+- Markerless extraction rejects nested objects from truncated JSON and preserves
+  the message text. Ordinary prose braces no longer hide a complete tracker.
+- Empty responses stopped at the output token limit are classified as truncation,
+  allowing retry budgets to grow up to the existing limit.
+- Newly returned root fields outside the request schema are removed before saving,
+  while declared custom fields, service metadata and character data are preserved.
 
-[All changes](CHANGELOG.md#720) · [Verification and remaining acceptance gaps](tests/README.md)
+[All changes](CHANGELOG.md#721) · [Verification and remaining acceptance gaps](tests/README.md)
 
 ## Make it yours
 
