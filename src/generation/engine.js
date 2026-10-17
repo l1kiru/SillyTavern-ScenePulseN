@@ -53,6 +53,7 @@ import { t } from '../i18n.js';
 
 let activeRequestAbort=null;
 let activeProfileBoundRequest=false;
+const TRUNCATION_FINISH=['length','max_tokens','max_output_tokens','token_limit'];
 
 async function _changeAndWait(ctx,element,value,eventName,label){
     if(!element)return false;
@@ -370,14 +371,13 @@ export async function generateTracker(mesIdx,partKey,opts){
                 // Check nonce AFTER API returns — this is the critical discard point
                 if(myNonce!==genNonce){buildTiming.finishAttempt(attemptTiming,'discarded',{failureCode:'STALE'});log('STALE after API return, nonce',myNonce,'(current',genNonce+') \u2014 discarding response');return null}
                 const provider=normalizeProviderResponse(raw);rawStr=provider.text;finishReason=provider.finishReason;
+                const responseTruncated=TRUNCATION_FINISH.includes(finishReason.toLowerCase());
                 if(!rawStr||rawStr.trim()==='{}'){
-                    lastErrorCode='NO_JSON_OBJECT';
+                    lastErrorCode=responseTruncated?'TRUNCATED':'NO_JSON_OBJECT';
                     if(attemptPromptMode==='native'){attemptPromptMode='json';warn('Native structured output was empty; retrying in JSON-only mode')}
                     buildTiming.finishAttempt(attemptTiming,'empty_response',{failureCode:lastErrorCode,finishReason});
-                    terminalFailure=recordExtractionFailure(lastErrorCode,'Provider returned an empty response',rawStr,mesIdx,{stage:'provider',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});continue
+                    terminalFailure=recordExtractionFailure(lastErrorCode,responseTruncated?'Provider stopped at its output token limit before producing content':'Provider returned an empty response',rawStr,mesIdx,{stage:'provider',finishReason,owner:operationOwner,attempt:a+1,strategy,responseLength});continue
                 }
-                const finishLow=finishReason.toLowerCase();
-                const responseTruncated=['length','max_tokens','max_output_tokens','token_limit'].includes(finishLow);
                 if(responseTruncated)lastErrorCode='TRUNCATED';
                 const rawLen=rawStr.length;
                 totalCompletionTokens+=estimateTokens(rawStr);
@@ -823,8 +823,8 @@ export async function continuationReprompt(narrativeText, opts){
                 response=await requestTracker({stContext,systemPrompt:sysPr,prompt:requestPrompt+'\n\nReturn strict JSON, not prose.',responseLength,jsonSchema:continuationSchema,promptMode,signal:continuationAbort.signal,skipWIAN:true,stopStOnAbort,promptRole:frozenPromptRole,connectionProfileId:useProfileBoundSingle?profileOverride:''});
                 continuationStrategy=response.strategy+'+json-retry';provider=normalizeProviderResponse(response.value);rawStr=provider.text;finishReason=provider.finishReason;
             }
+            if(TRUNCATION_FINISH.includes(finishReason.toLowerCase())){const cut=new Error(!rawStr||rawStr.trim()==='{}'?'Provider stopped at its output token limit before producing content':'Provider stopped at its output token limit');cut.code='TRUNCATED';throw cut}
             if(!rawStr||rawStr.trim()==='{}'){const empty=new Error('Provider returned an empty response');empty.code='NO_JSON_OBJECT';throw empty}
-            if(['length','max_tokens','max_output_tokens','token_limit'].includes(finishReason.toLowerCase())){const cut=new Error('Provider stopped at its output token limit');cut.code='TRUNCATED';throw cut}
             if(myNonce!==genNonce){log('CONTINUATION: stale after API return — discarding');return null}
             const ownerCheck=validateOperationOwner(operationOwner,{requireSource:!!operationOwner.sourceFingerprint});
             if(!ownerCheck.valid){warn('Continuation: owner changed, discarding:',ownerCheck.code);return null}
@@ -839,7 +839,7 @@ export async function continuationReprompt(narrativeText, opts){
             return parsed;
         }catch(e){
             if(externalSignal?.aborted)return null;
-            const requestInfo=rawStr?null:classifyRequestError(e);
+            const requestInfo=rawStr||e?.code==='TRUNCATED'||e?.code==='NO_JSON_OBJECT'?null:classifyRequestError(e);
             const code=requestInfo?'API_ERROR':(e?.code||'MALFORMED_JSON');
             const message=requestInfo?.message||e?.message||String(e);
             err('Continuation failed:',message);
