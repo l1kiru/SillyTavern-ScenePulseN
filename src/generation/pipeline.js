@@ -99,6 +99,9 @@ export async function processExtraction(mesIdx, extracted, source, opts = {}) {
         recordExtractionFailure('SEMANTIC_INVALID','Tracker JSON failed schema validation',JSON.stringify(extracted),mesIdx,{stage:'validate',owner:opts.owner,validationErrors:_validation.errors});
         return null;
     }
+    const droppedKeys=Object.keys(extracted).filter(k=>!k.startsWith('_')&&!Object.hasOwn(requestSchema.properties||{},k));
+    for(const k of droppedKeys)delete extracted[k];
+    if(droppedKeys.length)log('Pipeline: dropped fields outside request schema:',droppedKeys.join(', '));
     const responseCharacterNames = (extracted.characters || []).map(c => c.name);
     if (_useDelta && prevSnap) {
         setLastDeltaPayload(extracted);
