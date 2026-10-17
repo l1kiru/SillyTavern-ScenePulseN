@@ -20,7 +20,7 @@ import {
 } from '../state.js';
 import { clearPromptInjection } from '../generation/prompt-injection.js';
 import { continuationReprompt } from '../generation/engine.js';
-import { getSceneBuild, isOperationCurrent } from '../generation/scene-build-controller.js';
+import { getSceneBuild, getSceneBuildForTarget, isOperationCurrent } from '../generation/scene-build-controller.js';
 import { stopStreamingHider } from '../generation/streaming.js';
 import { processExtraction } from '../generation/pipeline.js';
 import { processTogetherExtraction, discardTogetherSceneBuild, abortShortTogetherReply, isShortTogetherReply } from '../generation/together-scene-build.js';
@@ -33,7 +33,7 @@ import { updatePanel } from './update-panel.js';
 import { updateThoughts } from './thoughts.js';
 import { createPanel, hidePanel } from './panel.js';
 import { renderTimeline } from './timeline.js';
-import { captureOperationOwner, validateOperationOwner } from '../message-fingerprint.js';
+import { captureOperationOwner, currentChatKey, validateOperationOwner } from '../message-fingerprint.js';
 import { renderEmptyState } from './empty-state.js';
 import { runManualSceneBuild, reconcileSceneBuildUi } from './scene-build-ui.js';
 import { runSceneBuild } from '../generation/scene-build-runner.js';
@@ -146,10 +146,20 @@ async function handleCharMsg(idx){
     // ── INLINE/TOGETHER MODE: Extract tracker from AI response ──
     if(s.injectionMethod==='inline'){
         const _inlineCtx=rebindInlineCtxForExpectedSwipe(inlineGenerationContext,idx);
+        let continuationPipelineRejected=false;
         // The loader cancels this operation, not the global ST generation.
         // Keep recovery tied to its owner even after the cancelled stub is removed.
-        const recoveryStopped=()=>shouldSkipAutoSceneRecovery()
-            || !!(_inlineCtx?.sceneBuildOperationId&&!isOperationCurrent(_inlineCtx.sceneBuildOperationId));
+        const recoveryStopped=()=>{
+            if(shouldSkipAutoSceneRecovery())return true;
+            const opId=_inlineCtx?.sceneBuildOperationId;
+            if(!opId||isOperationCurrent(opId))return false;
+            const op=getSceneBuild(opId);
+            // A rejected tracker ends this operation; Tier 2 starts a new one.
+            return !(continuationPipelineRejected&&op?.status==='error'&&op.cancellationReason==='pipeline'
+                &&op.chatKey===currentChatKey()&&op.swipeId===getActiveSwipeId(idx)
+                &&!getSceneBuildForTarget(idx,op.swipeId,op.chatKey)
+                &&(!_inlineCtx.owner||validateOperationOwner(_inlineCtx.owner,{requireSource:!!_inlineCtx.owner.sourceFingerprint}).valid));
+        };
         if(_inlineCtx&&(_inlineCtx.mesIdx!==idx||getActiveSwipeId(idx)!==_inlineCtx.swipeId)){
             warn('onCharMsg [inline]: target swipe changed; discarding tracker for',idx);
             discardTogetherSceneBuild(_inlineCtx,'swipe-changed');
@@ -248,18 +258,27 @@ async function handleCharMsg(idx){
                                 sceneBuildOperationId:_inlineCtx?.sceneBuildOperationId,
                                 signal:getSceneBuild(_inlineCtx?.sceneBuildOperationId)?.abortController?.signal,
                                 stopStOnAbort:false,
+                                ...(Object.hasOwn(_inlineCtx||{},'frozenDeltaMode')?{frozenDeltaMode:_inlineCtx.frozenDeltaMode}:{}),
+                                ...(Object.hasOwn(_inlineCtx||{},'frozenRequestSchema')?{frozenRequestSchema:_inlineCtx.frozenRequestSchema}:{}),
                             });
                             if(cont){
                                 const meta=cont._spContinuationMeta||{};
                                 delete cont._spContinuationMeta;
-                                await processTogetherExtraction(idx, cont, 'auto:together:continuation', _inlineCtx, {
+                                const saved=await processTogetherExtraction(idx, cont, 'auto:together:continuation', _inlineCtx, {
                                     promptTokens:meta.promptTokens||0,
                                     completionTokens:meta.completionTokens||0,
                                     elapsed:meta.elapsed||0,
                                     stopHider:false, unlockGen:false,
+                                    ...(meta.mode?{frozenDeltaMode:meta.mode==='delta'}:{}),
+                                    ...(meta.requestSchema?{frozenRequestSchema:meta.requestSchema}:{}),
                                 });
-                                result=cont;
-                                log('Together continuation: succeeded in',(meta.elapsed||0).toFixed(1)+'s — skipped full separate generation');
+                                if(saved){
+                                    result=cont;
+                                    log('Together continuation: succeeded in',(meta.elapsed||0).toFixed(1)+'s — skipped full separate generation');
+                                }else{
+                                    continuationPipelineRejected=true;
+                                    warn('Together continuation: pipeline rejected tracker, escalating to full separate generation');
+                                }
                             } else {
                                 log('Together continuation: failed, escalating to full separate generation');
                             }
