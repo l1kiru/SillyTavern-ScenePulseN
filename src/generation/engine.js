@@ -773,10 +773,14 @@ export async function continuationReprompt(narrativeText, opts){
     // Build the continuation prompt — just the narrative + a focused JSON-only instruction.
     // This is an independent request, so it receives the same explicit contract.
     const lastSnap=Object.hasOwn(opts||{},'baseSnapshot')?opts.baseSnapshot:(opts?.mesIdx!=null?getPrevSnapshot(opts.mesIdx):getLatestSnapshot());
-    const isDelta=!hasStaleSnapshotBefore(opts?.mesIdx??SillyTavern.getContext().chat?.length)&&shouldUseDelta(lastSnap)&&!!lastSnap;
+    const hasFrozenMode=Object.hasOwn(opts||{},'frozenDeltaMode');
+    const isDelta=hasFrozenMode?!!opts.frozenDeltaMode&&!!lastSnap:!hasStaleSnapshotBefore(opts?.mesIdx??SillyTavern.getContext().chat?.length)&&shouldUseDelta(lastSnap)&&!!lastSnap;
     const sysPr=getActivePrompt({hasPrevState:!!lastSnap,isDelta});
     const continuationMode=isDelta?'delta':'full';
-    const continuationSchema=buildRequestSchema(getActiveSchema(),{mode:continuationMode});
+    const frozenSchema=opts?.frozenRequestSchema;
+    const continuationSchema=frozenSchema&&hasFrozenMode&&isDelta===!!opts.frozenDeltaMode
+        ?structuredClone(frozenSchema.value?frozenSchema:{value:frozenSchema})
+        :buildRequestSchema(getActiveSchema(),{mode:continuationMode});
     const continuationAbort=new AbortController();
     const externalSignal=opts?.signal;
     const stopStOnAbort=opts?.stopStOnAbort!==false;
@@ -794,8 +798,7 @@ export async function continuationReprompt(narrativeText, opts){
     if(lastSnap){
         prevStateJson=prepareSnapshotContext(lastSnap,continuationSchema);
     }
-    // v6.9.1: use the shared shouldUseDelta() helper to respect the
-    // periodic refresh counter and the forceFullNextTurn flag.
+    // Recovery keeps the original request contract; delta requires its base.
     const deltaAlways=settings.panels?.storyIdeas===false?'time, date, elapsed, charactersPresent, and witnesses':'time, date, elapsed, plotBranches, charactersPresent, and witnesses';
     const deltaInstruction=isDelta
         ?`\n\nDELTA MODE: Include ONLY fields that changed since the previous state. Always include ${deltaAlways}. Include a full character entry for every present NPC and recompute innerThought and immediateNeed from this narrative. Use [] when nobody is present or witnessed the scene. Omit other unchanged fields.`
@@ -880,7 +883,7 @@ export async function continuationReprompt(narrativeText, opts){
     if(result){
         log('=== CONTINUATION SUCCESS === elapsed=',elapsed.toFixed(1)+'s','keys=',Object.keys(result).length);
         // Stash meta for the caller to forward into processExtraction
-        result._spContinuationMeta={promptTokens:continuationPromptTokens,completionTokens:continuationCompletionTokens,elapsed,strategy:continuationStrategy};
+        result._spContinuationMeta={promptTokens:continuationPromptTokens,completionTokens:continuationCompletionTokens,elapsed,strategy:continuationStrategy,mode:continuationMode,requestSchema:continuationSchema};
     }else{
         log('=== CONTINUATION FAILED === elapsed=',elapsed.toFixed(1)+'s — caller should fall back to full separate generation');
     }
