@@ -175,6 +175,9 @@ function _findBalancedEnd(s,from){
 function _unclosedOpenBefore(s,limit){
     for(let i=0;i<limit;i++){
         if(s[i]!=='{')continue;
+        let next=i+1;
+        while(next<s.length&&/\s/.test(s[next]))next++;
+        if(s[next]!=='"'&&s[next]!=='}')continue;
         const end=_findBalancedEnd(s,i);
         if(end===-1)return i;
         i=end; // Skip closed objects, including braces inside their strings.
