@@ -5,8 +5,7 @@ All notable changes to ScenePulse are documented in this file.
 ### [7.2.0]
 
 Version **7.2.0** — 16 October 2026. Minimum SillyTavern version
-remains **1.18.0**. Chromium and targeted Firefox checks, real-provider mode
-checks and isolated persistent ST 1.18 Clean are recorded in `tests/README.md`.
+remains **1.18.0**. Test instructions are available in `tests/README.md`.
 Focused acceptance gaps remain; this is not a completed release certification.
 
 - Added API availability diagnostics and a shared raw-generation fallback order.
